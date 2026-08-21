@@ -1,0 +1,158 @@
+{
+  "app_name": "ChannelManagerPro",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A highly functional, crisp, and trustworthy property management tool where content and reservation status take center stage against a clean Apple-native canvas.",
+  "color": {
+    "surface": "#FFFFFF",
+    "onSurface": "#1C1C1E",
+    "surfaceSecondary": "#F2F2F7",
+    "onSurfaceSecondary": "#3A3A3C",
+    "surfaceTertiary": "#E5E5EA",
+    "onSurfaceTertiary": "#8E8E93",
+    "surfaceInverse": "#1C1C1E",
+    "onSurfaceInverse": "#FFFFFF",
+    "brand": "#1C1C1E",
+    "brandPrimary": "#1C1C1E",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#3A3A3C",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#E5E5EA",
+    "onBrandTertiary": "#1C1C1E",
+    "success": "#34C759",
+    "onSuccess": "#FFFFFF",
+    "warning": "#FF9500",
+    "onWarning": "#FFFFFF",
+    "error": "#FF3B30",
+    "onError": "#FFFFFF",
+    "info": "#32ADE6",
+    "onInfo": "#FFFFFF",
+    "border": "#E5E5EA",
+    "borderStrong": "#C7C7CC",
+    "divider": "#E5E5EA"
+  },
+  "typography": {
+    "displayFontFamily": "Geist",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Handle spacing correctly dont have extra spaces where its not required, handle padding and margin corectly and subtle for buttons and components",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Bottom tab bar background",
+      "Sticky headers when scrolling",
+      "Floating Action Buttons (e.g., AI assistant shortcut)"
+    ],
+    "dont's": [
+      "Every single card",
+      "Form inputs",
+      "Status badges/pills"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Sign In",
+      "purpose": "Google sign-in gateway with a clean, welcoming hero property background.",
+      "states": {
+        "loading": "Centered spinner",
+        "empty": "N/A",
+        "error": "Standard error toast/alert"
+      },
+      "layout": "Full-bleed background image with a gradient scrim (top to bottom fade). Content pushed to the bottom third: App title, one-liner subtitle, and a prominent 'Continuer avec Google' primary CTA. Ensure safe-area clearance at the bottom."
+    },
+    {
+      "name": "Dashboard",
+      "purpose": "High-level overview of today's operational tasks, earnings, and upcoming arrivals.",
+      "states": {
+        "loading": "Skeleton text and greyed-out metric boxes.",
+        "empty": "Illustration with 'Aucune activité pour le moment'.",
+        "error": "Error loading metrics with retry CTA."
+      },
+      "layout": "Scrollable view. Top: Greeting & Quick stats grid (2 columns using space-between, showing occupancy & revenue). Middle: Horizontal scroll of 'Arrivées du jour' (Today's check-ins) using card layouts with status pills. Bottom: AI Assistant quick-access banner (Brand tinted background, suggesting a pricing review)."
+    },
+    {
+      "name": "Calendar",
+      "purpose": "Core reservation management where status colors shine.",
+      "states": {
+        "loading": "Skeleton grid.",
+        "empty": "Empty desk illustration with 'Aucune réservation sélectionnée'.",
+        "error": "Failed to sync calendar with retry CTA."
+      },
+      "layout": "Top: Horizontal week or month picker. Below: Scrollable list of reservations for the selected period. Each reservation is a card with generous padding (md/lg). The status MUST be a prominent colored pill (Demande = warning, Confirmée = success, Arrivée = info, Départ = surfaceTertiary, Annulée = error). Include guest name, property, and dates."
+    },
+    {
+      "name": "Properties",
+      "purpose": "Manage individual listings and their specific seasonal pricing.",
+      "states": {
+        "loading": "List of skeleton cards.",
+        "empty": "No properties found. Add your first listing.",
+        "error": "Failed to load properties."
+      },
+      "layout": "Vertical list of large hero cards. Each card has a property image, gradient scrim, and white text for the property name. Below the image: quick metadata (current price, occupancy). Action button: 'Gérer les prix' (Manage pricing) linking to AI suggestions."
+    },
+    {
+      "name": "AI Assistant",
+      "purpose": "Draft guest replies and receive seasonal pricing suggestions.",
+      "states": {
+        "loading": "Typing indicator or skeleton blocks.",
+        "empty": "Prompt suggestions like 'Draft welcome message' or 'Analyze July pricing'.",
+        "error": "Failed to connect to AI with retry CTA."
+      },
+      "layout": "Split functionality. Top tab or segmented control: 'Messages' vs 'Prix'. Messages view: Chat-like interface where host inputs guest query and AI generates a drafted reply in a surfaceSecondary bubble with 'Copy' button. Pricing view: A card showing recommended rate changes based on seasonality with an 'Appliquer' (Apply) CTA."
+    }
+  ],
+  "images": {
+    "hero_property": {
+      "url": "https://images.unsplash.com/photo-1628744448839-a475cc0e90c3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2Mzl8MHwxfHNlYXJjaHwyfHxtb2Rlcm4lMjBjb3p5JTIwdmFjYXRpb24lMjByZW50YWwlMjBob3VzZSUyMGV4dGVyaW9yfGVufDB8fHx8MTc4NzI5MDMzM3ww&ixlib=rb-4.1.0&q=85",
+      "alt": "Modern cozy vacation rental house exterior with bright daytime sky"
+    },
+    "empty_desk": {
+      "url": "https://images.unsplash.com/photo-1666185761824-a355321d1b24?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2ODl8MHwxfHNlYXJjaHwxfHxtaW5pbWFsaXN0JTIwZW1wdHklMjBkZXNrJTIwd2l0aCUyMHBsYW50fGVufDB8fHx8MTc4NzI5MDMzM3ww&ixlib=rb-4.1.0&q=85",
+      "alt": "Minimalist empty desk acting as a soft empty state background"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Follow the '1 iOS-Native Clean' personality exactly. High legibility, crisp sans-serif (Geist), generous whitespace, and minimal decorative borders.",
+    "CRITICAL: The user requested color-coded reservation stages. Implement this semantic mapping exactly on reservation pills/badges: Demande (Enquiry) = warning (#FF9500), Confirmée = success (#34C759), Arrivée (Check-in) = info (#32ADE6), Départ (Check-out) = surfaceTertiary text onSurfaceTertiary, Annulée = error (#FF3B30).",
+    "Use @expo/vector-icons AntDesign 'google' for the Google sign-in button since we don't use a full image logo.",
+    "For cards with background images (like Properties or Onboarding Hero), you MUST apply the gradient-to-dark scrim pattern (transparent to >=70% surfaceInverse) to ensure text readability.",
+    "Use Glassmorphism (expo-blur) for the bottom tab bar and sticky headers to provide that premium iOS feel, ensuring content gracefully scrolls underneath.",
+    "For the AI Assistant screen, prioritize a functional, native-feeling layout over 'sci-fi AI' aesthetics. Use standard system colors (brandPrimary or surfaceSecondary) rather than neon purples or blues for AI elements."
+  ]
+}

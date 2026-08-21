@@ -1,0 +1,46 @@
+{
+  "summary": "Backend fully validated (27/27 pytest tests pass): auth guard on all 14 protected endpoints (401 without token), /api/auth/me/logout, full Properties CRUD with nested seasons[]+ical_links[], Reservations CRUD with status/property_id filters and PATCH /status validation (400 on bogus, 404 on missing), Dashboard shape + arrivals/departures/revenue computation, and both AI endpoints (Claude Sonnet 4.6 via EMERGENT_LLM_KEY) returning real replies/suggestions. Data isolation verified. Frontend: login screen renders correctly with 'Continuer avec Google' button (testID present). Authenticated tabs partially verified — after seeding a session_token into IndexedDB (AsyncStorage web), the Dashboard rendered with real data (occupancy 0%, revenue 0€, 1 logement, tab bar Accueil/Réservations/Logements/Assistant). Subsequent nav attempts hit a race between /auth/me 401 handler (wipes storage) and injection; hit 3-attempt loop-prevention limit for deeper UI nav flow. Real Google OAuth cannot be automated. Console shows non-blocking React Native Web deprecation warnings: 'shadow*' style props and 'props.pointerEvents'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "Global styles (shadow props)", "issue": "React Native Web logs 'shadow* style props are deprecated. Use boxShadow.' — migrate shadowColor/shadowOffset/shadowOpacity/shadowRadius to the unified boxShadow style. Search StyleSheet.create usages across /app/frontend/src/components/ and /app/frontend/app/."},
+      {"component": "pointerEvents prop", "issue": "React Native Web logs 'props.pointerEvents is deprecated. Use style.pointerEvents' — move any pointerEvents={...} prop into style. Likely in ui.tsx or overlay components."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add testID attributes to tab bar items and top-level screens (e.g. tab-index, tab-calendar, tab-properties, tab-assistant, dashboard-screen, reservations-screen, properties-screen, assistant-screen) so browser automation can navigate reliably without relying on French text labels.",
+    "Migrate deprecated RN-Web styles: replace shadow* keys with boxShadow, and move pointerEvents from props into style.",
+    "Manual verification recommended for authenticated flows (property-form, reservation-form, property/[id] seasons+iCal management, AI Messages/Tarifs tabs) — backend endpoints are all green so remaining risk is UI wiring only.",
+    "Consider making the 401 handler in /app/frontend/src/api.ts skip storage.secureRemove on the very first /auth/me boot call — currently a stale token being present at cold start immediately wipes any freshly injected token during automated testing (not a user-facing bug, but blocks E2E)."
+  ],
+  "critical_code_review_comments": [
+    "server.py handles _id exclusion correctly (find_one/find use projection {\"_id\": 0}).",
+    "get_current_user handles naive vs aware datetime for expires_at — good.",
+    "DELETE property also cascades to reservations of that property — nice.",
+    "PATCH /reservations/{id}/status accepts raw dict body; validation is inline (400 on invalid). Consider a Pydantic model for stricter validation.",
+    "No pagination on GET /properties (limit 500) or /reservations (limit 1000) — acceptable for MVP but flag if scale grows.",
+    "AI endpoints have no timeout wrapping around LlmChat.send_message; a hanging LLM would tie up a request thread. Consider asyncio.wait_for with a bounded timeout.",
+    "CORS is wildcard allow_origins=['*'] with allow_credentials=True — spec-wise browsers ignore credentials on '*', but preview env only, OK for MVP."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py (new)",
+    "/app/backend/tests/test_backend.py (new)"
+  ],
+  "success_rate": {"backend": "100% (27/27)", "frontend": "~40% (login + dashboard render verified; deeper nav blocked by OAuth automation constraints)"},
+  "seed_data_creation": "Backend tests seed fake user+session directly in Mongo (TEST_ prefix) and clean up in teardown. UI seed users (user_UITEST_*) were also cleaned up after tests.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All backend endpoints green via /app/backend/tests/test_backend.py — reuse conftest.py's test_user fixture which bypasses Google OAuth by inserting a session_token directly into Mongo. For UI: injecting the token into IndexedDB (db 'AsyncStorage', store 'keyvaluepairs', key 'session_token', value JSON.stringify(token)) works but races with the 401-clears-storage handler in api.ts on initial load; a reliable bypass would require either patching AuthContext with a __DEV__ override or intercepting the /auth/me request via page.route to return the seeded user directly.",
+  "rca_of_issue": "N/A — no bugs found. Frontend Google OAuth cannot be completed in automation, so authenticated tab-by-tab UI flows were validated only at the API level."
+}
