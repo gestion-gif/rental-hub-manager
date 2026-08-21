@@ -15,6 +15,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { api } from "@/src/api";
 import { Field, PrimaryButton } from "@/src/components/ui";
+import DateField from "@/src/components/DateField";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const FALLBACK =
@@ -243,65 +244,34 @@ export default function PropertyDetail() {
             <Field label="Nom de la saison" testID="season-name" value={sName} onChangeText={setSName} placeholder="Haute saison" />
             <View style={styles.row}>
               <View style={{ flex: 1 }}>
-                <Field label="Début" testID="season-start" value={sStart} onChangeText={setSStart} placeholder="AAAA-MM-JJ" />
+                <DateField label="Début" testID="season-start" value={sStart} onChange={setSStart} />
               </View>
               <View style={{ flex: 1 }}>
-                <Field label="Fin" testID="season-end" value={sEnd} onChangeText={setSEnd} placeholder="AAAA-MM-JJ" />
+                <DateField label="Fin" testID="season-end" value={sEnd} onChange={setSEnd} minDate={sStart || undefined} />
               </View>
             </View>
             <Field label="Prix (€/nuit)" testID="season-price" value={sPrice} onChangeText={setSPrice} keyboardType="decimal-pad" placeholder="180" />
             <PrimaryButton testID="add-season" label="Ajouter la saison" onPress={addSeason} variant="secondary" />
           </View>
 
-          {/* iCal sync */}
-          <Text style={styles.sectionTitle}>Synchronisation (iCal)</Text>
-          <Text style={styles.sectionHint}>
-            Collez le lien iCal exporté depuis Airbnb, Booking.com ou Vrbo pour synchroniser les disponibilités.
-          </Text>
-          {(prop.ical_links || []).map((l: any, i: number) => (
-            <View key={i} style={styles.listItem} testID={`ical-${i}`}>
-              <Ionicons name="link-outline" size={18} color={colors.info} />
-              <View style={{ flex: 1, marginLeft: spacing.sm }}>
-                <Text style={styles.itemTitle}>{l.platform}</Text>
-                <Text style={styles.itemSub} numberOfLines={1}>{l.url}</Text>
-              </View>
-              <Pressable testID={`remove-ical-${i}`} onPress={() => removeIcal(i)} style={styles.trash}>
-                <Ionicons name="trash-outline" size={18} color={colors.error} />
-              </Pressable>
+          {/* Channel Manager entry (iCal + OTA moved here) */}
+          <Text style={styles.sectionTitle}>Connexions OTA</Text>
+          <Pressable
+            testID="open-channel-manager"
+            onPress={() => router.push(`/channel-manager?property=${id}`)}
+            style={styles.cmRow}
+          >
+            <View style={styles.cmIcon}>
+              <Ionicons name="git-network-outline" size={20} color={colors.brandPrimary} />
             </View>
-          ))}
-          <View style={styles.addBox}>
-            <Text style={styles.label}>Plateforme</Text>
-            <View style={styles.platformRow}>
-              {ICAL_PLATFORMS.map((p) => (
-                <Pressable
-                  key={p}
-                  testID={`ical-platform-${p}`}
-                  onPress={() => setIcalPlatform(p)}
-                  style={[styles.pill, icalPlatform === p && styles.pillActive]}
-                >
-                  <Text style={[styles.pillText, icalPlatform === p && styles.pillTextActive]}>{p}</Text>
-                </Pressable>
-              ))}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.itemTitle}>Channel Manager</Text>
+              <Text style={styles.itemSub}>
+                {(prop.ical_links || []).length} connexion(s) · Airbnb, Booking, Abritel, Google, iCal
+              </Text>
             </View>
-            <Field label="Lien iCal" testID="ical-url" value={icalUrl} onChangeText={setIcalUrl} placeholder="https://...ics" autoCapitalize="none" />
-            <PrimaryButton testID="add-ical" label="Ajouter le lien" onPress={addIcal} variant="secondary" />
-          </View>
-
-          {(prop.ical_links || []).length > 0 && (
-            <View style={styles.syncBox}>
-              <PrimaryButton
-                testID="sync-ical"
-                label="Synchroniser maintenant"
-                onPress={syncIcal}
-                loading={syncing}
-                icon={<Ionicons name="sync" size={16} color={colors.onBrandPrimary} />}
-              />
-              {!!syncMsg && (
-                <Text style={styles.syncMsg} testID="sync-result">{syncMsg}</Text>
-              )}
-            </View>
-          )}
+            <Ionicons name="chevron-forward" size={20} color={colors.onSurfaceTertiary} />
+          </Pressable>
 
           <PrimaryButton
             testID="ai-pricing-link"
@@ -435,5 +405,18 @@ const styles = StyleSheet.create({
     color: colors.onSurfaceSecondary,
     marginTop: spacing.md,
     textAlign: "center",
+  },
+  cmRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+  },
+  cmIcon: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: colors.surface,
+    alignItems: "center", justifyContent: "center",
   },
 });

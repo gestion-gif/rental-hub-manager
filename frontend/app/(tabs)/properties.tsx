@@ -46,6 +46,10 @@ export default function Properties() {
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
         <Text style={styles.title}>Logements</Text>
+        <Pressable testID="channel-manager-btn" onPress={() => router.push("/channel-manager")} style={styles.cmBtn}>
+          <Ionicons name="git-network-outline" size={16} color={colors.onSurface} />
+          <Text style={styles.cmBtnText}>Channel Manager</Text>
+        </Pressable>
       </View>
       {loading ? (
         <ActivityIndicator style={{ marginTop: 60 }} color={colors.brandPrimary} />
@@ -132,8 +136,21 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   title: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface },
+  cmBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: colors.surfaceSecondary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+  },
+  cmBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
   card: {
     borderRadius: radius.lg,
     backgroundColor: colors.surface,

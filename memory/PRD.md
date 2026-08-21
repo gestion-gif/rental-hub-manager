@@ -54,3 +54,15 @@
 - Synchronisation iCal automatique
 - Sélecteur de dates natif
 - Vue calendrier grille mensuelle
+
+## Ajout Channel Manager Lodgify + Boîte de réception (2026-08)
+- Intégration Lodgify Public API v2 (header X-ApiKey), architecture provider-neutre (LodgifyAdapter) prête pour un futur passage à Channex.
+- `channel_settings` (par utilisateur) : provider, api_key, properties_count, last_sync.
+- Endpoints backend :
+  - POST /api/channel/connect (valide + stocke la clé), GET /api/channel/status, POST /api/channel/disconnect
+  - GET /api/channel/remote-properties, POST /api/channel/import-properties (idempotent par lodgify_id)
+  - POST /api/channel/sync (bookings Lodgify -> reservations, dedup lodgify_id, statut mappé, ménage auto, conversations depuis thread_uid)
+  - GET /api/inbox, GET /api/inbox/{thread_uid} (messages voyageurs live via Lodgify, HTML nettoyé)
+- Property.lodgify_id ajouté ; update_property préserve le mapping si le champ est omis.
+- Frontend : refonte channel-manager (connexion Lodgify, import logements, sync réservations), écrans Boîte de réception (liste + fil de discussion) avec réponse assistée par IA (copier).
+- Testé : 87/87 tests backend verts (iteration_8), validé avec la vraie clé Lodgify (24 logements, 359 réservations importées).

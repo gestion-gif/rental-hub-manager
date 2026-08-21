@@ -67,6 +67,9 @@ export default function RootLayout() {
                   options={{ presentation: "modal" }}
                 />
                 <Stack.Screen name="property/[id]" />
+                <Stack.Screen name="channel-manager" />
+                <Stack.Screen name="inbox" />
+                <Stack.Screen name="inbox/[thread]" />
               </Stack>
             </PreferencesProvider>
           </AuthProvider>

@@ -83,13 +83,18 @@ export default function Dashboard() {
             <Text style={styles.hello}>Bonjour,</Text>
             <Text style={styles.name}>{firstName} 👋</Text>
           </View>
-          <Pressable testID="signout-button" onPress={signOut} style={styles.avatar}>
-            {user?.picture ? (
-              <Image source={{ uri: user.picture }} style={styles.avatarImg} />
-            ) : (
-              <Ionicons name="person" size={20} color={colors.onSurfaceSecondary} />
-            )}
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable testID="dash-inbox" onPress={() => router.push("/inbox")} style={styles.iconBtn}>
+              <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />
+            </Pressable>
+            <Pressable testID="signout-button" onPress={signOut} style={styles.avatar}>
+              {user?.picture ? (
+                <Image source={{ uri: user.picture }} style={styles.avatarImg} />
+              ) : (
+                <Ionicons name="person" size={20} color={colors.onSurfaceSecondary} />
+              )}
+            </Pressable>
+          </View>
         </View>
 
         {loading ? (
@@ -298,6 +303,15 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   avatarImg: { width: 42, height: 42 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  iconBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.surfaceSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   statsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",

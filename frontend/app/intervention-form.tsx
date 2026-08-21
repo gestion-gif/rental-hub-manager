@@ -7,6 +7,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { api } from "@/src/api";
 import { Field, PrimaryButton } from "@/src/components/ui";
+import DateField from "@/src/components/DateField";
 import { INTERVENTION_TYPES } from "@/src/interventionTypes";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
@@ -26,6 +27,7 @@ export default function InterventionForm() {
     date: dateParam || "",
     description: "",
     intervenant: "",
+    not_done_reason: "",
   });
 
   useEffect(() => {
@@ -43,6 +45,7 @@ export default function InterventionForm() {
               date: iv.date,
               description: iv.description || "",
               intervenant: iv.intervenant || "",
+              not_done_reason: iv.not_done_reason || "",
             });
           }
         } else if (pr.length && !propParam) {
@@ -56,12 +59,13 @@ export default function InterventionForm() {
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const valid = form.property_id && form.date;
 
-  async function save() {
+  async function save(markDone = false) {
     if (!valid || saving) return;
     setSaving(true);
+    const payload = { ...form, done: markDone };
     try {
-      if (editing) await api.put(`/interventions/${id}`, form);
-      else await api.post("/interventions", form);
+      if (editing) await api.put(`/interventions/${id}`, payload);
+      else await api.post("/interventions", payload);
       router.back();
     } catch {
       setSaving(false);
@@ -138,17 +142,28 @@ export default function InterventionForm() {
           </ScrollView>
 
           <View style={{ height: spacing.lg }} />
-          <Field label="Date" testID="intervention-date" value={form.date} onChangeText={(v) => set("date", v)} placeholder="AAAA-MM-JJ" />
+          <DateField label="Date" testID="intervention-date" value={form.date} onChange={(v) => set("date", v)} />
           <Field label="Intervenant" testID="intervention-intervenant" value={form.intervenant} onChangeText={(v) => set("intervenant", v)} placeholder="Nom de l'intervenant / société" />
           <Field label="Description" testID="intervention-description" value={form.description} onChangeText={(v) => set("description", v)} placeholder="Détail de l'intervention..." multiline style={styles.textarea} />
+          <Field label="Motif si non exécutée (optionnel)" testID="intervention-reason" value={form.not_done_reason} onChangeText={(v) => set("not_done_reason", v)} placeholder="Ex: accès impossible, reporté..." multiline style={styles.textarea} />
 
           <PrimaryButton
             testID="save-intervention"
-            label={editing ? "Enregistrer" : "Ajouter au calendrier"}
-            onPress={save}
+            label={editing ? "Enregistrer / Reporter" : "Ajouter au calendrier"}
+            onPress={() => save(false)}
             loading={saving}
             disabled={!valid}
           />
+          {editing && (
+            <PrimaryButton
+              testID="validate-intervention"
+              label="Valider (retirer du calendrier)"
+              onPress={() => save(true)}
+              variant="secondary"
+              style={{ marginTop: spacing.md }}
+              icon={<Ionicons name="checkmark-circle" size={18} color={colors.onSurface} />}
+            />
+          )}
           {editing && (
             <PrimaryButton
               testID="delete-intervention"

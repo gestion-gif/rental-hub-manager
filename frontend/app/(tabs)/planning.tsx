@@ -50,7 +50,7 @@ export default function Planning() {
       ]);
       setProps(pr);
       setReservations(res.filter((r: any) => r.status !== "annulee"));
-      setInterventions(ivs);
+      setInterventions(ivs.filter((iv: any) => !iv.done));
     } catch {}
   }, []);
 
@@ -86,7 +86,7 @@ export default function Planning() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
         <View style={styles.headerTop}>
-          <Text style={styles.title}>Planning</Text>
+          <Text style={styles.title}>Calendrier</Text>
           <Pressable
             testID="open-color-settings"
             onPress={() => router.push("/settings/status-colors")}

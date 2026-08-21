@@ -15,6 +15,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { api } from "@/src/api";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import { Field, PrimaryButton } from "@/src/components/ui";
+import DateField from "@/src/components/DateField";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const PLATFORMS = ["Direct", "Airbnb", "Booking.com", "Vrbo"];
@@ -159,10 +160,10 @@ export default function ReservationForm() {
 
           <View style={styles.row}>
             <View style={{ flex: 1 }}>
-              <Field label="Arrivée" testID="check-in" value={form.check_in} onChangeText={(v) => set("check_in", v)} placeholder="AAAA-MM-JJ" />
+              <DateField label="Arrivée" testID="check-in" value={form.check_in} onChange={(v) => set("check_in", v)} />
             </View>
             <View style={{ flex: 1 }}>
-              <Field label="Départ" testID="check-out" value={form.check_out} onChangeText={(v) => set("check_out", v)} placeholder="AAAA-MM-JJ" />
+              <DateField label="Départ" testID="check-out" value={form.check_out} onChange={(v) => set("check_out", v)} minDate={form.check_in || undefined} />
             </View>
           </View>
           <View style={styles.row}>

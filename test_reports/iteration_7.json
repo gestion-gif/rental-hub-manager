@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 7 — Backend coverage for auto-cleaning + intervention validation fields. New test file /app/backend/tests/test_auto_cleaning.py (9 tests, all green) validates: (1) InterventionIn extra fields done/not_done_reason/auto persist through POST and GET; PUT can mark done=true + not_done_reason; POST still 401 without auth. (2) Dashboard.interventions excludes done=true (even for future dates) but includes done=false future items. (3) POST /reservations {status='confirmee'} auto-creates a single menage intervention with auto=True on the check_out date; a 2nd reservation with the same property+check_out is idempotent (still exactly 1). (4) status='annulee' does NOT trigger auto-cleaning. (5) PUT /reservations changing check_out creates a menage on the new date. (6) POST /properties/{id}/sync with a local .ics feed (in-process HTTPServer) creates an auto=True menage on the imported event's DTEND (2026-04-15). Full regression: 67/67 pytest green (was 58/58 at iteration 6). No changes to production code. Frontend not part of this run per E1's brief.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auto_cleaning.py",
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/test_ical_sync.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No blocking backend issues. Optional frontend self-test by the main agent (behind Google OAuth): (a) creating a reservation in the UI should immediately show a violet 'menage' dot in the calendar on the check-out date and a corresponding item in dashboard Interventions; (b) editing that reservation's departure date should move/duplicate-safe the auto-cleaning to the new date; (c) marking an intervention done should remove it from dashboard 'interventions'."
+  ],
+  "critical_code_review_comments": [
+    "ensure_cleaning() (server.py:253-278) correctly short-circuits when checkout_date is falsy or status=='annulee', and uses a filter on {user_id, property_id, date, kind:'menage', auto:True} for idempotency — matches spec.",
+    "create_reservation and update_reservation both call ensure_cleaning() after the DB write (server.py:289, 302). iCal sync loop also calls it inside the per-event loop with status='confirmee' (server.py:479).",
+    "InterventionIn model correctly exposes done:bool=False, not_done_reason:str='', auto:bool=False (server.py:99-101). POST/PUT persist via payload.dict() so no field wipe on PUT.",
+    "Dashboard interventions filter (server.py:612) uses `if iv.get('done'): continue` — done=True items are excluded from the upcoming list as required.",
+    "Minor observation (not blocking): update_reservation only *creates* a new auto-cleaning on the new check_out; it does NOT remove the previous auto-cleaning if the date changes. Multiple check_out changes will leave orphan auto menage entries at previous dates. Not covered by the current spec — flag for product decision if desired.",
+    "Minor: iCal-sync also does not remove auto-cleaning entries for VEVENTs that disappear from the feed (only reservations with source='ical' are pruned). Same product-decision flag as above."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auto_cleaning.py (new, 9 tests: interventions new fields, dashboard done-exclusion, auto-cleaning on create/idempotency/annulee/update, iCal sync auto-cleaning)"
+  ],
+  "success_rate": {"backend": "100% (67/67)", "frontend": "not tested (backend-only run per E1)"},
+  "seed_data_creation": "Reused conftest test_user. Each test creates TEST_-prefixed properties/reservations/interventions and cleans them up (including generated auto=true menage entries) in finally blocks. iCal test uses an in-process HTTPServer bound to 127.0.0.1 with a crafted .ics body.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend has 67 tests: test_backend.py (44), test_ical_sync.py (14), test_auto_cleaning.py (9). ensure_cleaning() dedupe key is {user_id, property_id, date, kind:'menage', auto:True} so manually-created menage entries won't collide with auto ones. Two open product questions flagged as minor code-review items: (1) auto-cleaning is not removed when a reservation's check_out is changed via PUT (previous date's auto menage stays); (2) auto-cleaning is not removed when iCal events disappear from the feed. Neither is contradicted by the current spec.",
+  "rca_of_issue": "N/A — feature-testing iteration; all new behaviour passes on first run."
+}

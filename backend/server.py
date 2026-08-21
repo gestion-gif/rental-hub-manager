@@ -4,6 +4,8 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import re
+import html as htmllib
+import asyncio
 import logging
 import uuid
 import calendar as pycalendar
@@ -75,6 +77,7 @@ class PropertyIn(BaseModel):
     amenities: List[str] = []
     seasons: List[Season] = []
     ical_links: List[IcalLink] = []
+    lodgify_id: Optional[str] = None
 
 
 class ReservationIn(BaseModel):
@@ -96,6 +99,9 @@ class InterventionIn(BaseModel):
     date: str  # YYYY-MM-DD
     description: str = ""
     intervenant: str = ""
+    done: bool = False
+    not_done_reason: str = ""
+    auto: bool = False
 
 
 class GuestReplyRequest(BaseModel):
@@ -216,9 +222,13 @@ async def get_property(property_id: str, user=Depends(get_current_user)):
 
 @api_router.put("/properties/{property_id}")
 async def update_property(property_id: str, payload: PropertyIn, user=Depends(get_current_user)):
+    data = payload.dict()
+    # Never wipe an existing channel mapping when the form omits it
+    if data.get("lodgify_id") is None:
+        data.pop("lodgify_id", None)
     res = await db.properties.update_one(
         {"id": property_id, "user_id": user["user_id"]},
-        {"$set": payload.dict()},
+        {"$set": data},
     )
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Property not found")
@@ -247,6 +257,34 @@ async def list_reservations(status: Optional[str] = None, property_id: Optional[
     return items
 
 
+async def ensure_cleaning(user_id: str, property_id: str, checkout_date: Optional[str], status: Optional[str]):
+    """Auto-create a ménage intervention on the guest departure day (idempotent)."""
+    if not checkout_date or status == "annulee":
+        return
+    exists = await db.interventions.find_one({
+        "user_id": user_id,
+        "property_id": property_id,
+        "date": checkout_date,
+        "kind": "menage",
+        "auto": True,
+    })
+    if exists:
+        return
+    await db.interventions.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "property_id": property_id,
+        "kind": "menage",
+        "date": checkout_date,
+        "description": "Ménage après départ",
+        "intervenant": "",
+        "done": False,
+        "not_done_reason": "",
+        "auto": True,
+        "created_at": now_utc().isoformat(),
+    })
+
+
 @api_router.post("/reservations")
 async def create_reservation(payload: ReservationIn, user=Depends(get_current_user)):
     doc = payload.dict()
@@ -255,6 +293,7 @@ async def create_reservation(payload: ReservationIn, user=Depends(get_current_us
     doc["created_at"] = now_utc().isoformat()
     await db.reservations.insert_one(doc)
     doc.pop("_id", None)
+    await ensure_cleaning(user["user_id"], doc["property_id"], doc.get("check_out"), doc.get("status"))
     return doc
 
 
@@ -267,6 +306,7 @@ async def update_reservation(reservation_id: str, payload: ReservationIn, user=D
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Reservation not found")
     item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    await ensure_cleaning(user["user_id"], item["property_id"], item.get("check_out"), item.get("status"))
     return item
 
 
@@ -443,6 +483,7 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
                 for ev in valid_events:
                     uid = ev.get("uid") or f"{platform}-{ev['start']}-{ev['end']}"
                     feed_uids.append(uid)
+                    await ensure_cleaning(user["user_id"], property_id, ev.get("end"), "confirmee")
                     summary = (ev.get("summary") or "").strip()
                     description = (ev.get("description") or "").strip()
                     if summary and summary.lower() not in _BLOCK_SUMMARIES:
@@ -575,6 +616,8 @@ async def dashboard(user=Depends(get_current_user)):
     # Upcoming interventions (today and future), enriched with property name
     upcoming_interventions = []
     for iv in interventions:
+        if iv.get("done"):
+            continue
         d = parse(iv.get("date"))
         if d and d >= today:
             upcoming_interventions.append({
@@ -713,6 +756,366 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         upsert=True,
     )
     return {"statuses": statuses, "status_colors": {s["key"]: s["color"] for s in statuses}}
+
+
+# ---------------------------------------------------------------------------
+# Channel Manager — Lodgify integration (provider-neutral, swappable to Channex)
+# ---------------------------------------------------------------------------
+SOURCE_LABELS = {
+    "AirbnbIntegration": "Airbnb",
+    "Airbnb": "Airbnb",
+    "BookingComIntegration": "Booking.com",
+    "BookingCom": "Booking.com",
+    "HomeAwayIntegration": "Vrbo",
+    "HomeAway": "Vrbo",
+    "Vrbo": "Vrbo",
+    "Manual": "Direct",
+    "OwnerWebsite": "Site web",
+    "Website": "Site web",
+    "Direct": "Direct",
+}
+
+LODGIFY_STATUS_MAP = {
+    "Booked": "confirmee",
+    "Open": "demande",
+    "Tentative": "demande",
+    "Declined": "annulee",
+    "Expired": "annulee",
+    "Canceled": "annulee",
+    "Cancelled": "annulee",
+}
+
+
+def source_label(src: Optional[str]) -> str:
+    if not src:
+        return "Direct"
+    if src in SOURCE_LABELS:
+        return SOURCE_LABELS[src]
+    return src.replace("Integration", "").strip() or "Direct"
+
+
+def strip_html(text: str) -> str:
+    if not text:
+        return ""
+    t = text.replace("<br/>", "\n").replace("<br>", "\n").replace("<br />", "\n")
+    t = re.sub(r"<[^>]+>", "", t)
+    t = htmllib.unescape(t)
+    return t.strip()
+
+
+class LodgifyAdapter:
+    """Thin async client for the Lodgify Public API v2. Auth via X-ApiKey header."""
+
+    BASE = "https://api.lodgify.com/v2"
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    def _headers(self):
+        return {"X-ApiKey": self.api_key, "Accept": "application/json"}
+
+    async def _get(self, http: httpx.AsyncClient, path: str, params: dict = None):
+        for attempt in range(3):
+            r = await http.get(f"{self.BASE}{path}", params=params or {}, headers=self._headers())
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if r.status_code == 401 or r.status_code == 403:
+                raise HTTPException(status_code=400, detail="Clé API Lodgify invalide")
+            if r.status_code >= 400:
+                raise HTTPException(status_code=502, detail=f"Lodgify {r.status_code}")
+            return r.json()
+        raise HTTPException(status_code=502, detail="Lodgify indisponible")
+
+    async def validate(self, http):
+        body = await self._get(http, "/properties", {"page": 1, "size": 1, "includeCount": "true"})
+        return body.get("count", len(body.get("items", [])))
+
+    async def list_properties(self, http):
+        page, out = 1, []
+        while True:
+            body = await self._get(http, "/properties", {"page": page, "size": 50, "includeCount": "true"})
+            items = body.get("items", [])
+            out.extend(items)
+            if len(items) < 50:
+                return out
+            page += 1
+
+    async def list_bookings(self, http, stay="All"):
+        page, out = 1, []
+        while True:
+            body = await self._get(http, "/reservations/bookings",
+                                   {"page": page, "size": 50, "stayFilter": stay, "includeCount": "true"})
+            items = body.get("items", [])
+            out.extend(items)
+            if len(items) < 50 or page >= 20:
+                return out
+            page += 1
+
+    async def get_thread(self, http, uid):
+        return await self._get(http, f"/messaging/{uid}")
+
+
+async def get_channel_adapter(user_id: str):
+    doc = await db.channel_settings.find_one({"user_id": user_id}, {"_id": 0})
+    if not doc or not doc.get("api_key"):
+        return None, None
+    return LodgifyAdapter(doc["api_key"]), doc
+
+
+def map_lodgify_property(lp: dict) -> dict:
+    img = lp.get("image_url") or ""
+    if img.startswith("//"):
+        img = "https:" + img
+    return {
+        "name": lp.get("name") or lp.get("internal_name") or f"Logement {lp.get('id')}",
+        "location": lp.get("city") or lp.get("country") or "",
+        "image_url": img,
+        "base_price": 0,
+        "capacity": 2,
+        "bedrooms": 1,
+        "owner": "",
+        "surface": 0,
+        "address": lp.get("address") or "",
+        "postal_code": lp.get("zip") or "",
+        "city": lp.get("city") or "",
+        "address_complement": "",
+        "description": strip_html(lp.get("description") or "")[:1000],
+        "rooms": [],
+        "amenities": [],
+        "seasons": [],
+        "ical_links": [],
+        "lodgify_id": str(lp.get("id")),
+    }
+
+
+class ChannelConnectIn(BaseModel):
+    api_key: str
+    provider: str = "lodgify"
+
+
+@api_router.post("/channel/connect")
+async def channel_connect(payload: ChannelConnectIn, user=Depends(get_current_user)):
+    key = payload.api_key.strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Clé API requise")
+    adapter = LodgifyAdapter(key)
+    async with httpx.AsyncClient(timeout=30) as http:
+        count = await adapter.validate(http)
+    await db.channel_settings.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "user_id": user["user_id"],
+            "provider": payload.provider,
+            "api_key": key,
+            "properties_count": count,
+            "connected_at": now_utc().isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"ok": True, "provider": payload.provider, "properties_count": count}
+
+
+@api_router.get("/channel/status")
+async def channel_status(user=Depends(get_current_user)):
+    doc = await db.channel_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not doc:
+        return {"connected": False}
+    mapped = await db.properties.count_documents(
+        {"user_id": user["user_id"], "lodgify_id": {"$nin": [None, ""]}})
+    return {
+        "connected": True,
+        "provider": doc.get("provider", "lodgify"),
+        "properties_count": doc.get("properties_count", 0),
+        "mapped_count": mapped,
+        "connected_at": doc.get("connected_at"),
+        "last_sync": doc.get("last_sync"),
+    }
+
+
+@api_router.post("/channel/disconnect")
+async def channel_disconnect(user=Depends(get_current_user)):
+    await db.channel_settings.delete_one({"user_id": user["user_id"]})
+    return {"ok": True}
+
+
+@api_router.get("/channel/remote-properties")
+async def channel_remote_properties(user=Depends(get_current_user)):
+    adapter, _ = await get_channel_adapter(user["user_id"])
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channel manager non connecté")
+    async with httpx.AsyncClient(timeout=40) as http:
+        lps = await adapter.list_properties(http)
+    existing = {p.get("lodgify_id") for p in await db.properties.find(
+        {"user_id": user["user_id"]}, {"lodgify_id": 1}).to_list(2000)}
+    return [{
+        "id": str(lp.get("id")),
+        "name": lp.get("name") or lp.get("internal_name") or f"Logement {lp.get('id')}",
+        "city": lp.get("city") or "",
+        "imported": str(lp.get("id")) in existing,
+    } for lp in lps]
+
+
+@api_router.post("/channel/import-properties")
+async def channel_import_properties(user=Depends(get_current_user)):
+    adapter, _ = await get_channel_adapter(user["user_id"])
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channel manager non connecté")
+    async with httpx.AsyncClient(timeout=40) as http:
+        lps = await adapter.list_properties(http)
+    imported = 0
+    for lp in lps:
+        lid = str(lp.get("id"))
+        exists = await db.properties.find_one({"user_id": user["user_id"], "lodgify_id": lid})
+        if exists:
+            continue
+        doc = map_lodgify_property(lp)
+        doc["id"] = str(uuid.uuid4())
+        doc["user_id"] = user["user_id"]
+        doc["created_at"] = now_utc().isoformat()
+        await db.properties.insert_one(doc)
+        imported += 1
+    return {"imported": imported, "total": len(lps)}
+
+
+@api_router.post("/channel/sync")
+async def channel_sync(user=Depends(get_current_user)):
+    uid = user["user_id"]
+    adapter, _ = await get_channel_adapter(uid)
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channel manager non connecté")
+    props = await db.properties.find(
+        {"user_id": uid, "lodgify_id": {"$nin": [None, ""]}}, {"_id": 0}).to_list(2000)
+    prop_by_lodgify = {p["lodgify_id"]: p for p in props}
+    if not prop_by_lodgify:
+        raise HTTPException(status_code=400, detail="Aucun logement lié. Importez d'abord vos logements Lodgify.")
+
+    async with httpx.AsyncClient(timeout=90) as http:
+        bookings = await adapter.list_bookings(http, "All")
+
+    imported = updated = unmapped = conversations = 0
+    for b in bookings:
+        lp_id = str(b.get("property_id"))
+        prop = prop_by_lodgify.get(lp_id)
+        if not prop:
+            unmapped += 1
+            continue
+        src = source_label(b.get("source"))
+        status = LODGIFY_STATUS_MAP.get(b.get("status"), "demande")
+        if b.get("canceled_at") or b.get("is_deleted"):
+            status = "annulee"
+        guest_obj = b.get("guest") or {}
+        gname = (guest_obj.get("name") or "").strip()
+        if not gname or gname.upper().startswith("N/A"):
+            gname = f"Voyageur {src}"
+        gemail = (guest_obj.get("email") or "").strip()
+        if gemail.upper().startswith("N/A"):
+            gemail = ""
+        guests = 0
+        for room in (b.get("rooms") or []):
+            gb = room.get("guest_breakdown") or {}
+            guests += int(gb.get("adults", 0) or 0) + int(gb.get("children", 0) or 0)
+        guests = guests or 1
+        check_in = b.get("arrival")
+        check_out = b.get("departure")
+        lodgify_key = str(b.get("id"))
+        thread_uid = b.get("thread_uid")
+        notes = strip_html(b.get("notes") or "")
+        payload = {
+            "user_id": uid,
+            "property_id": prop["id"],
+            "guest_name": gname,
+            "guest_email": gemail,
+            "platform": src,
+            "check_in": check_in,
+            "check_out": check_out,
+            "guests": guests,
+            "total_price": float(b.get("total_amount") or 0),
+            "status": status,
+            "notes": notes,
+            "source": "lodgify",
+            "lodgify_id": lodgify_key,
+            "thread_uid": thread_uid,
+        }
+        q = {"user_id": uid, "lodgify_id": lodgify_key}
+        existing = await db.reservations.find_one(q)
+        if existing:
+            await db.reservations.update_one(q, {"$set": payload})
+            updated += 1
+        else:
+            payload["id"] = str(uuid.uuid4())
+            payload["created_at"] = now_utc().isoformat()
+            await db.reservations.insert_one(payload)
+            imported += 1
+        if status != "annulee":
+            await ensure_cleaning(uid, prop["id"], check_out, status)
+        if thread_uid:
+            await db.conversations.update_one(
+                {"user_id": uid, "thread_uid": thread_uid},
+                {"$set": {
+                    "user_id": uid,
+                    "thread_uid": thread_uid,
+                    "guest_name": gname,
+                    "property_id": prop["id"],
+                    "property_name": prop.get("name", "Logement"),
+                    "source": src,
+                    "arrival": check_in,
+                    "departure": check_out,
+                    "status": status,
+                    "last_activity": check_in or "",
+                },
+                 "$setOnInsert": {"unread": False}},
+                upsert=True,
+            )
+            conversations += 1
+
+    await db.channel_settings.update_one(
+        {"user_id": uid}, {"$set": {"last_sync": now_utc().isoformat()}})
+    return {
+        "imported": imported, "updated": updated, "unmapped": unmapped,
+        "conversations": conversations, "total": len(bookings),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Inbox (Boîte de réception) — OTA guest messages via Lodgify threads
+# ---------------------------------------------------------------------------
+@api_router.get("/inbox")
+async def inbox(user=Depends(get_current_user)):
+    convs = await db.conversations.find(
+        {"user_id": user["user_id"]}, {"_id": 0}).sort("last_activity", -1).to_list(500)
+    return convs
+
+
+@api_router.get("/inbox/{thread_uid}")
+async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
+    adapter, _ = await get_channel_adapter(user["user_id"])
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channel manager non connecté")
+    conv = await db.conversations.find_one(
+        {"user_id": user["user_id"], "thread_uid": thread_uid}, {"_id": 0})
+    async with httpx.AsyncClient(timeout=30) as http:
+        thread = await adapter.get_thread(http, thread_uid)
+    msgs = []
+    for m in (thread.get("messages") or []):
+        msgs.append({
+            "id": m.get("message_id") or str(m.get("id")),
+            "text": strip_html(m.get("message", "")),
+            "type": m.get("type"),
+            "date": m.get("date_created"),
+            "mine": m.get("type") == "Owner",
+        })
+    msgs.sort(key=lambda x: x["date"] or "")
+    await db.conversations.update_one(
+        {"user_id": user["user_id"], "thread_uid": thread_uid},
+        {"$set": {"unread": False}})
+    return {
+        "thread_uid": thread_uid,
+        "guest_name": thread.get("guest_name") or (conv or {}).get("guest_name"),
+        "property_name": (conv or {}).get("property_name"),
+        "source": (conv or {}).get("source"),
+        "messages": msgs,
+    }
 
 
 # ---------------------------------------------------------------------------

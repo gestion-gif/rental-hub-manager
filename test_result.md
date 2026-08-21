@@ -101,3 +101,86 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+user_problem_statement: "StayPilot - Channel manager location saisonnière. Nouvelle fonctionnalité: intégration Lodgify (sync réservations + import logements) et boîte de réception (messages voyageurs OTA)."
+
+backend:
+  - task: "Lodgify channel connect/status/disconnect"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "POST /api/channel/connect valide la clé via list_properties et la stocke dans channel_settings. GET /api/channel/status renvoie connected/provider/properties_count/mapped_count. POST /api/channel/disconnect supprime. Testé via curl avec vraie clé: connect ok (24 props), status ok."
+
+  - task: "Lodgify import properties"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "POST /api/channel/import-properties crée des logements app depuis Lodgify (idempotent par lodgify_id). GET /api/channel/remote-properties liste avec flag imported. Testé curl: 24 importés."
+
+  - task: "Lodgify sync reservations"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "POST /api/channel/sync mappe bookings Lodgify -> reservations (dedup lodgify_id), crée conversations depuis thread_uid, ensure_cleaning sur départ. Status mapping Booked->confirmee etc. Testé curl: 359 importées, 359 conversations, 22 unmapped."
+
+  - task: "Inbox (boite de reception)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "GET /api/inbox liste conversations. GET /api/inbox/{thread_uid} fetch thread live via Lodgify, normalise messages (mine=Owner), strip HTML, marque lu. Testé curl: thread renvoie messages."
+
+frontend:
+  - task: "Channel Manager UI + Inbox screens"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/channel-manager.tsx, frontend/app/inbox.tsx, frontend/app/inbox/[thread].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Refonte channel-manager (connexion Lodgify, import, sync), écrans inbox + thread avec réponse IA. Non testable en auto (Google OAuth). À valider par l'utilisateur."
+
+metadata:
+  created_by: "main_agent"
+  version: "2.0"
+  test_sequence: 8
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Lodgify channel connect/status/disconnect"
+    - "Lodgify import properties"
+    - "Lodgify sync reservations"
+    - "Inbox (boite de reception)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    -agent: "main"
+    -message: "Nouveaux endpoints Lodgify + inbox ajoutés et validés via curl avec vraie clé API. Merci de tester les endpoints backend channel/* et inbox/*. Auth: créer une session en insérant dans user_sessions un doc {session_token, user_id, expires_at futur} + un user dans users, puis header Authorization: Bearer <token>. Clé Lodgify de test à utiliser dans /channel/connect: I6T0EMSnL+oqohaXmF3/SPjgQkisvNWD+nvretEaGWtRvOuedVYZ8vhE0XMd/7Np. NE PAS tester le frontend (Google OAuth non automatisable)."
