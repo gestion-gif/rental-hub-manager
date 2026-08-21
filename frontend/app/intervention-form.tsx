@@ -27,9 +27,10 @@ export default function InterventionForm() {
     kind: "menage",
     date: dateParam || "",
     description: "",
-    intervenant: "",
     not_done_reason: "",
   });
+  const [intervenants, setIntervenants] = useState<string[]>([]);
+  const [customName, setCustomName] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -46,9 +47,13 @@ export default function InterventionForm() {
               kind: iv.kind || "menage",
               date: iv.date,
               description: iv.description || "",
-              intervenant: iv.intervenant || "",
               not_done_reason: iv.not_done_reason || "",
             });
+            setIntervenants(
+              (iv.intervenants && iv.intervenants.length)
+                ? iv.intervenants
+                : (iv.intervenant ? [iv.intervenant] : [])
+            );
           }
         } else if (pr.length && !propParam) {
           setForm((f) => ({ ...f, property_id: pr[0].id }));
@@ -64,7 +69,7 @@ export default function InterventionForm() {
   async function save(markDone = false) {
     if (!valid || saving) return;
     setSaving(true);
-    const payload = { ...form, done: markDone };
+    const payload = { ...form, intervenants, done: markDone };
     try {
       if (editing) await api.put(`/interventions/${id}`, payload);
       else await api.post("/interventions", payload);
@@ -147,25 +152,50 @@ export default function InterventionForm() {
           <DateField label="Date" testID="intervention-date" value={form.date} onChange={(v) => set("date", v)} />
           {staff.length > 0 && (
             <>
-              <Text style={styles.label}>Intervenant</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chipRow, { marginBottom: spacing.md }]}>
+              <Text style={styles.label}>Intervenants</Text>
+              <View style={styles.staffWrap}>
                 {staff.map((s) => {
-                  const active = form.intervenant === s.name;
+                  const active = intervenants.includes(s.name);
                   return (
                     <Pressable
                       key={s.id}
                       testID={`staff-chip-${s.id}`}
-                      onPress={() => set("intervenant", active ? "" : s.name)}
-                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => setIntervenants((cur) => active ? cur.filter((n) => n !== s.name) : [...cur, s.name])}
+                      style={[styles.staffChip, active && styles.staffChipActive]}
                     >
-                      <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>{s.name}</Text>
+                      {active && <Ionicons name="checkmark" size={14} color={colors.onBrandPrimary} />}
+                      <Text style={[styles.staffChipText, active && styles.staffChipTextActive]} numberOfLines={1}>{s.name}</Text>
                     </Pressable>
                   );
                 })}
-              </ScrollView>
+              </View>
             </>
           )}
-          <Field label={staff.length > 0 ? "Ou saisir un intervenant" : "Intervenant"} testID="intervention-intervenant" value={form.intervenant} onChangeText={(v) => set("intervenant", v)} placeholder="Nom de l'intervenant / société" />
+          <Text style={styles.label}>{staff.length > 0 ? "Ajouter un autre intervenant" : "Intervenant"}</Text>
+          <View style={styles.addRow}>
+            <View style={{ flex: 1 }}>
+              <Field label="" testID="intervention-intervenant" value={customName} onChangeText={setCustomName} placeholder="Nom de l'intervenant / société" />
+            </View>
+            <Pressable
+              testID="add-intervenant"
+              onPress={() => { const n = customName.trim(); if (n && !intervenants.includes(n)) { setIntervenants((c) => [...c, n]); setCustomName(""); } }}
+              style={styles.addBtn}
+            >
+              <Ionicons name="add" size={22} color={colors.onBrandPrimary} />
+            </Pressable>
+          </View>
+          {intervenants.length > 0 && (
+            <View style={styles.selectedWrap}>
+              {intervenants.map((n) => (
+                <View key={n} style={styles.selectedChip}>
+                  <Text style={styles.selectedChipText}>{n}</Text>
+                  <Pressable testID={`remove-intervenant-${n}`} onPress={() => setIntervenants((c) => c.filter((x) => x !== n))} hitSlop={6}>
+                    <Ionicons name="close-circle" size={16} color={colors.onSurfaceTertiary} />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
           <Field label="Description" testID="intervention-description" value={form.description} onChangeText={(v) => set("description", v)} placeholder="Détail de l'intervention..." multiline style={styles.textarea} />
           <Field label="Motif si non exécutée (optionnel)" testID="intervention-reason" value={form.not_done_reason} onChangeText={(v) => set("not_done_reason", v)} placeholder="Ex: accès impossible, reporté..." multiline style={styles.textarea} />
 
@@ -244,6 +274,16 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.brandPrimary },
   chipText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary },
   chipTextActive: { color: colors.onBrandPrimary },
+  staffWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.md },
+  staffChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.surfaceSecondary },
+  staffChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  staffChipText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary, maxWidth: 160 },
+  staffChipTextActive: { color: colors.onBrandPrimary },
+  addRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  addBtn: { width: 48, height: 48, borderRadius: radius.md, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  selectedWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.md },
+  selectedChip: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.md, paddingVertical: 7, borderRadius: radius.pill },
+  selectedChipText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
   textarea: { minHeight: 90, textAlignVertical: "top", paddingTop: 12 },
   hint: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
 });

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator, Modal } from "react-native";
+import { View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator, Modal, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -33,6 +33,13 @@ export default function OwnersScreen() {
     setSaving(false);
   }
 
+  function confirmRemove(o: any) {
+    Alert.alert("Supprimer", `Supprimer "${o.name}" ? Les logements associés seront déliés.`, [
+      { text: "Annuler", style: "cancel" },
+      { text: "Supprimer", style: "destructive", onPress: async () => { await api.del(`/owners/${o.id}`); await load(); } },
+    ]);
+  }
+
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
@@ -58,6 +65,9 @@ export default function OwnersScreen() {
                 <Text style={styles.rowTitle}>{item.name}</Text>
                 <Text style={styles.rowSub}>{item.property_count} logement(s){item.email ? ` · ${item.email}` : ""}</Text>
               </View>
+              <Pressable testID={`del-owner-${item.id}`} onPress={() => confirmRemove(item)} style={styles.trash} hitSlop={6}>
+                <Ionicons name="trash-outline" size={18} color={colors.error} />
+              </Pressable>
               <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceTertiary} />
             </Pressable>
           )}
@@ -99,6 +109,7 @@ const styles = StyleSheet.create({
   avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
   rowTitle: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface },
   rowSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  trash: { padding: 6, marginRight: 2 },
   fab: { position: "absolute", right: spacing.lg, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
   modalWrap: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
   sheet: { backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, maxHeight: "85%" },

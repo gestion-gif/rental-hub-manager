@@ -100,6 +100,7 @@ class InterventionIn(BaseModel):
     date: str  # YYYY-MM-DD
     description: str = ""
     intervenant: str = ""
+    intervenants: List[str] = []
     done: bool = False
     not_done_reason: str = ""
     auto: bool = False
@@ -355,6 +356,10 @@ async def list_interventions(property_id: Optional[str] = None, user=Depends(get
 @api_router.post("/interventions")
 async def create_intervention(payload: InterventionIn, user=Depends(get_current_user)):
     doc = payload.dict()
+    if doc.get("intervenants"):
+        doc["intervenant"] = ", ".join([x for x in doc["intervenants"] if x])
+    elif doc.get("intervenant"):
+        doc["intervenants"] = [doc["intervenant"]]
     doc["id"] = str(uuid.uuid4())
     doc["user_id"] = user["user_id"]
     doc["created_at"] = now_utc().isoformat()
@@ -365,9 +370,14 @@ async def create_intervention(payload: InterventionIn, user=Depends(get_current_
 
 @api_router.put("/interventions/{intervention_id}")
 async def update_intervention(intervention_id: str, payload: InterventionIn, user=Depends(get_current_user)):
+    data = payload.dict()
+    if data.get("intervenants"):
+        data["intervenant"] = ", ".join([x for x in data["intervenants"] if x])
+    elif data.get("intervenant"):
+        data["intervenants"] = [data["intervenant"]]
     res = await db.interventions.update_one(
         {"id": intervention_id, "user_id": user["user_id"]},
-        {"$set": payload.dict()},
+        {"$set": data},
     )
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Intervention not found")
