@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import { Drawer } from "expo-router/drawer";
 import { DrawerContentScrollView } from "@react-navigation/drawer";
@@ -7,6 +7,7 @@ import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { api } from "@/src/api";
 import { useAuth } from "@/src/context/AuthContext";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
@@ -24,6 +25,11 @@ function CustomDrawer(props: any) {
   const insets = useSafeAreaInsets();
   const { user, signOut } = useAuth();
   const current = state.routeNames[state.index];
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    api.get("/inbox-unread-count").then((r: any) => setUnread(r?.count || 0)).catch(() => {});
+  }, [state.index]);
 
   const goStack = (path: string) => {
     navigation.closeDrawer();
@@ -72,6 +78,11 @@ function CustomDrawer(props: any) {
         <Pressable testID="drawer-inbox" onPress={() => goStack("/inbox")} style={styles.item}>
           <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />
           <Text style={styles.itemText}>Boîte de réception</Text>
+          {unread > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{unread > 9 ? "9+" : unread}</Text>
+            </View>
+          )}
         </Pressable>
         <Pressable testID="drawer-settings" onPress={() => goStack("/settings")} style={styles.item}>
           <Ionicons name="settings-outline" size={20} color={colors.onSurfaceSecondary} />
@@ -119,4 +130,6 @@ const styles = StyleSheet.create({
   itemActive: { backgroundColor: colors.surfaceSecondary },
   itemText: { fontFamily: font.medium, fontSize: fontSize.lg, color: colors.onSurfaceSecondary },
   itemTextActive: { color: colors.brandPrimary, fontFamily: font.semibold },
+  badge: { marginLeft: "auto", backgroundColor: colors.error, borderRadius: radius.pill, minWidth: 20, height: 20, paddingHorizontal: 5, alignItems: "center", justifyContent: "center" },
+  badgeText: { fontFamily: font.bold, fontSize: fontSize.sm, color: "#fff" },
 });

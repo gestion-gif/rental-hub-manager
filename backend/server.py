@@ -1013,6 +1013,8 @@ async def channel_sync(user=Depends(get_current_user)):
         bookings = await adapter.list_bookings(http, "All")
 
     imported = updated = unmapped = conversations = 0
+    unread_candidates = []
+    today = date.today()
     for b in bookings:
         lp_id = str(b.get("property_id"))
         prop = prop_by_lodgify.get(lp_id)
@@ -1087,12 +1089,45 @@ async def channel_sync(user=Depends(get_current_user)):
                 upsert=True,
             )
             conversations += 1
+            if status != "annulee":
+                try:
+                    ci_d = date.fromisoformat(check_in) if check_in else None
+                except Exception:
+                    ci_d = None
+                if ci_d and (today - timedelta(days=21)) <= ci_d <= (today + timedelta(days=180)):
+                    unread_candidates.append((check_in, thread_uid))
+
+    # Determine unread status for recent/upcoming conversations from Lodgify (is_read)
+    unread_count = 0
+    if unread_candidates:
+        unread_candidates.sort(key=lambda x: x[0], reverse=True)
+        subset = [t for _, t in unread_candidates[:60]]
+        sem = asyncio.Semaphore(8)
+
+        async def check_unread(http, tuid):
+            async with sem:
+                try:
+                    thread = await adapter.get_thread(http, tuid)
+                    is_read = bool(thread.get("is_read", True))
+                    upd = {"unread": not is_read}
+                    lmd = thread.get("last_message_date")
+                    if lmd:
+                        upd["last_activity"] = lmd
+                    await db.conversations.update_one(
+                        {"user_id": uid, "thread_uid": tuid}, {"$set": upd})
+                    return 0 if is_read else 1
+                except Exception:
+                    return 0
+
+        async with httpx.AsyncClient(timeout=30) as http:
+            results = await asyncio.gather(*[check_unread(http, t) for t in subset])
+        unread_count = sum(results)
 
     await db.channel_settings.update_one(
         {"user_id": uid}, {"$set": {"last_sync": now_utc().isoformat()}})
     return {
         "imported": imported, "updated": updated, "unmapped": unmapped,
-        "conversations": conversations, "total": len(bookings),
+        "conversations": conversations, "total": len(bookings), "unread": unread_count,
     }
 
 
@@ -1104,6 +1139,12 @@ async def inbox(user=Depends(get_current_user)):
     convs = await db.conversations.find(
         {"user_id": user["user_id"]}, {"_id": 0}).sort("last_activity", -1).to_list(500)
     return convs
+
+
+@api_router.get("/inbox-unread-count")
+async def inbox_unread_count(user=Depends(get_current_user)):
+    n = await db.conversations.count_documents({"user_id": user["user_id"], "unread": True})
+    return {"count": n}
 
 
 @api_router.get("/inbox/{thread_uid}")

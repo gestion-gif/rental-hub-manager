@@ -42,14 +42,19 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [ivOpen, setIvOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
   const [arrOpen, setArrOpen] = useState(false);
   const [stayOpen, setStayOpen] = useState(false);
   const [depOpen, setDepOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const d = await api.get("/dashboard");
+      const [d, u] = await Promise.all([
+        api.get("/dashboard"),
+        api.get("/inbox-unread-count").catch(() => ({ count: 0 })),
+      ]);
       setData(d);
+      setUnread(u?.count || 0);
     } catch {}
     setLoading(false);
     setRefreshing(false);
@@ -94,6 +99,11 @@ export default function Dashboard() {
           <View style={styles.headerActions}>
             <Pressable testID="dash-inbox" onPress={() => router.push("/inbox")} style={styles.iconBtn}>
               <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />
+              {unread > 0 && (
+                <View style={styles.iconBadge}>
+                  <Text style={styles.iconBadgeText}>{unread > 9 ? "9+" : unread}</Text>
+                </View>
+              )}
             </Pressable>
             <Pressable testID="signout-button" onPress={signOut} style={styles.avatar}>
               {user?.picture ? (
@@ -357,6 +367,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  iconBadge: { position: "absolute", top: -2, right: -2, backgroundColor: colors.error, borderRadius: radius.pill, minWidth: 18, height: 18, paddingHorizontal: 4, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: colors.surface },
+  iconBadgeText: { fontFamily: font.bold, fontSize: 10, color: "#fff" },
   statsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
