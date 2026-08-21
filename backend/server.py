@@ -339,23 +339,42 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
     imported = 0
     updated = 0
     errors = []
-    headers = {"User-Agent": "Mozilla/5.0 (StayPilot iCal Sync)"}
+    details = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15",
+        "Accept": "text/calendar, text/plain, */*",
+    }
     async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=headers) as http:
         for link in links:
             platform = link.get("platform", "iCal")
             url = link.get("url", "").strip()
             if url.startswith("webcal://"):
                 url = "https://" + url[len("webcal://"):]
+            link_imported = 0
+            link_updated = 0
             try:
                 resp = await http.get(url)
+                body = resp.text
+                looks_ical = "BEGIN:VCALENDAR" in body or "BEGIN:VEVENT" in body
+                logger.info(
+                    "iCal sync %s: url=%s status=%s len=%s ical=%s",
+                    platform, url[:80], resp.status_code, len(body), looks_ical,
+                )
                 if resp.status_code != 200:
-                    errors.append(f"{platform}: HTTP {resp.status_code}")
+                    msg = f"{platform}: lien inaccessible (HTTP {resp.status_code})"
+                    errors.append(msg)
+                    details.append(msg)
                     continue
-                events = parse_ical(resp.text)
+                if not looks_ical:
+                    msg = f"{platform}: le lien ne renvoie pas un calendrier iCal (vérifiez l'URL d'export .ics)"
+                    errors.append(msg)
+                    details.append(msg)
+                    continue
+                events = parse_ical(body)
+                valid_events = [e for e in events if e.get("start") and e.get("end")]
+                logger.info("iCal sync %s: %s events parsed (%s valid)", platform, len(events), len(valid_events))
                 feed_uids = []
-                for ev in events:
-                    if not ev.get("start") or not ev.get("end"):
-                        continue
+                for ev in valid_events:
                     uid = ev.get("uid") or f"{platform}-{ev['start']}-{ev['end']}"
                     feed_uids.append(uid)
                     summary = (ev.get("summary") or "").strip()
@@ -373,6 +392,7 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
                             "platform": platform,
                         }})
                         updated += 1
+                        link_updated += 1
                     else:
                         await db.reservations.insert_one({
                             "id": str(uuid.uuid4()),
@@ -392,6 +412,7 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
                             "created_at": now_utc().isoformat(),
                         })
                         imported += 1
+                        link_imported += 1
                 # Remove imported reservations that disappeared from the feed
                 await db.reservations.delete_many({
                     "user_id": user["user_id"],
@@ -400,10 +421,17 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
                     "platform": platform,
                     "ical_uid": {"$nin": feed_uids},
                 })
+                if len(valid_events) == 0:
+                    details.append(f"{platform}: aucune réservation dans le calendrier")
+                else:
+                    details.append(f"{platform}: {link_imported} importée(s), {link_updated} mise(s) à jour ({len(valid_events)} évènement(s))")
             except Exception as e:
-                errors.append(f"{platform}: {str(e)[:80]}")
+                logger.exception("iCal sync error for %s", platform)
+                msg = f"{platform}: erreur ({str(e)[:80]})"
+                errors.append(msg)
+                details.append(msg)
 
-    return {"imported": imported, "updated": updated, "errors": errors}
+    return {"imported": imported, "updated": updated, "errors": errors, "details": details}
 
 
 # ---------------------------------------------------------------------------

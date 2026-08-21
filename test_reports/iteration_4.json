@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 4 — Backend-only re-verification of the enriched POST /api/properties/{id}/sync endpoint. Updated /app/backend/tests/test_ical_sync.py to (a) support arbitrary Content-Type/status per local HTTP path (so we can serve HTML), (b) assert on the new 'details' array in every scenario, and (c) added 3 new tests covering the new branches: non-iCal HTML response, empty-but-valid calendar, and HTTP 404 URL. Result: 43/43 pytest green (was 40/40 in iteration 3). Specifically: (1) auth guard still returns 401 without token; (2) unknown property still returns 404; (3) valid .ics with 2 VEVENTs → imported=2, updated=0, reservations status='confirmee', source='ical', platform preserved, response.details contains 'Airbnb: 2 importée(s)...'; (4) idempotent second sync → imported=0, updated=2, no duplicates, details contains 'mise(s) à jour'; (5) NEW — HTML response (Content-Type text/html, no BEGIN:VCALENDAR) → 200 OK, imported=0, updated=0, no reservations created, details/errors contain 'iCal'/'calendrier' rejection line; (6) NEW — 'BEGIN:VCALENDAR\\nVERSION:2.0\\nEND:VCALENDAR' → 200 OK, imported=0, errors=[], details contains 'aucune réservation dans le calendrier'; (7) NEW — URL returning HTTP 404 → 200 OK, imported=0, details/errors contain 'HTTP 404', no crash; (8) regression — all pre-existing auth, properties CRUD, reservations CRUD+filters+PATCH, dashboard, AI guest-reply, AI pricing, preferences tests still pass unchanged. Parser unit test (VALUE=DATE, datetime Z, RFC5545 folding) still green. No code changes to /app/backend/server.py were needed — the sync endpoint already implements all specified branches (looks_ical guard, HTTP status check with 'HTTP {code}' error, empty-feed 'aucune réservation' details line, browser-like User-Agent header, and the new response shape {imported, updated, errors, details}).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ical_sync.py",
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "None blocking. If a real user still reports 'sync imports nothing' after this iteration, the most likely remaining cause is Airbnb serving a login/HTML redirect for that specific export URL. The enriched details array now surfaces exactly that condition ('le lien ne renvoie pas un calendrier iCal (vérifiez l'URL d'export .ics)'), which the frontend already renders in testID 'sync-result' — this should give the user actionable feedback. Consider logging the first 200 chars of the response body server-side on rejection to help future diagnosis."
+  ],
+  "critical_code_review_comments": [
+    "sync_ical correctly returns HTTP 200 even on per-link failures (HTTP errors, non-iCal body, exceptions) and surfaces them via errors+details — never crashes the endpoint. Good defensive design.",
+    "looks_ical check uses 'BEGIN:VCALENDAR' OR 'BEGIN:VEVENT' as the substring guard — permissive enough to accept slightly malformed feeds while rejecting arbitrary HTML.",
+    "Empty-but-valid calendar branch appends 'aucune réservation dans le calendrier' to details only (not errors), which is semantically correct: it is informational, not an error.",
+    "The browser-like User-Agent + Accept: text/calendar headers + follow_redirects=True + 30s timeout are all appropriate for Airbnb/Booking .ics endpoints that sometimes gate on UA.",
+    "Stale-removal delete_many is correctly scoped to {source:'ical', platform, ical_uid $nin feed_uids} — cannot wipe manual reservations. Verified in test_sync_is_idempotent_then_removes_stale.",
+    "server.py is now 618 lines — still under the 700-line guideline. A future refactor could extract the sync helpers into /app/backend/ical.py but is not needed yet."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ical_sync.py (UPDATED — _IcsHandler now supports per-path Content-Type/status; existing tests assert on 'details'; +3 new tests: non-iCal HTML, empty valid calendar, HTTP 404)"
+  ],
+  "success_rate": {"backend": "100% (43/43)", "frontend": "not tested this iteration (backend-only per request)"},
+  "seed_data_creation": "Reused conftest test_user + module-scoped 127.0.0.1 HTTPServer fixture. Each test creates its own TEST_-prefixed property with an ical_link pointing to the local server and deletes it in finally (cascade also deletes imported reservations).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iCal sync coverage now spans 10 scenarios in /app/backend/tests/test_ical_sync.py (3 guards + 6 import/branch tests + 1 parser unit). The _IcsHandler supports arbitrary Content-Type and status codes via _set_ics(path, body, content_type=..., status=...). If future work adds RRULE, TZID, or CANCELLED VEVENT handling, extend _ICS_STORE-driven scenarios in the same file.",
+  "rca_of_issue": "User reported 'still nothing imports' after adding a real Airbnb .ics link. The backend enrichment in this iteration (details array + non-iCal rejection + HTTP-error surfacing + browser UA + empty-feed messaging) is validated end-to-end via the 6 new/updated tests. No code fix required — the endpoint behaves exactly as specified for all 4 new branches. If the real Airbnb URL still yields 0 imports for the user, the response.details array will now clearly state the reason ('HTTP 4xx', 'ne renvoie pas un calendrier iCal', or 'aucune réservation dans le calendrier') and the frontend already renders that string in testID 'sync-result'."
+}

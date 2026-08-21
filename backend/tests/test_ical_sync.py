@@ -20,23 +20,28 @@ BASE_URL = os.environ.get(
 
 # ---------------------------------------------------------------- ICS server -
 # In-memory registry so tests can rewrite the served payload on the fly.
+# Each entry: {"body": str, "content_type": str, "status": int}
 _ICS_STORE = {}
 
 
 class _IcsHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         key = self.path.lstrip("/")
-        body = _ICS_STORE.get(key)
-        if body is None:
+        entry = _ICS_STORE.get(key)
+        if entry is None:
             self.send_response(404)
             self.end_headers()
+            self.wfile.write(b"not found")
             return
-        data = body.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/calendar; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
+        body = entry["body"].encode("utf-8")
+        self.send_response(entry.get("status", 200))
+        self.send_header(
+            "Content-Type",
+            entry.get("content_type", "text/calendar; charset=utf-8"),
+        )
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(body)
 
     def log_message(self, *a, **kw):  # silence
         pass
@@ -59,8 +64,8 @@ def ics_server():
     srv.shutdown()
 
 
-def _set_ics(path: str, body: str):
-    _ICS_STORE[path] = body
+def _set_ics(path: str, body: str, content_type: str = "text/calendar; charset=utf-8", status: int = 200):
+    _ICS_STORE[path] = {"body": body, "content_type": content_type, "status": status}
 
 
 # ---------------------------------------------------------------- Sample ICS -
@@ -115,10 +120,10 @@ class TestSyncAuthAndErrors:
             r = api_client.post(f"{BASE_URL}/api/properties/{p['id']}/sync")
             assert r.status_code == 200, r.text
             body = r.json()
-            assert body == {
-                "imported": 0, "updated": 0,
-                "errors": ["Aucun lien iCal configuré"],
-            }
+            # response shape may or may not include 'details' when there are 0 links
+            assert body["imported"] == 0
+            assert body["updated"] == 0
+            assert body["errors"] == ["Aucun lien iCal configuré"]
         finally:
             api_client.delete(f"{BASE_URL}/api/properties/{p['id']}")
 
@@ -141,6 +146,9 @@ class TestSyncImport:
             assert body["imported"] == 2, body
             assert body["updated"] == 0
             assert body["errors"] == []
+            # New response shape: details array with a human-readable line
+            assert isinstance(body.get("details"), list)
+            assert any("Airbnb" in d and "2" in d and "importée" in d for d in body["details"]), body["details"]
 
             res_list = api_client.get(
                 f"{BASE_URL}/api/reservations?property_id={prop['id']}"
@@ -178,6 +186,8 @@ class TestSyncImport:
             r2 = api_client.post(f"{BASE_URL}/api/properties/{prop['id']}/sync").json()
             assert r2["imported"] == 0, r2
             assert r2["updated"] == 2, r2
+            assert isinstance(r2.get("details"), list) and r2["details"], r2
+            assert any("2" in d and ("mise" in d or "à jour" in d) for d in r2["details"]), r2["details"]
             res_list = api_client.get(
                 f"{BASE_URL}/api/reservations?property_id={prop['id']}"
             ).json()
@@ -204,6 +214,74 @@ class TestSyncImport:
             assert body["imported"] == 0
             assert body["errors"]
             assert "Vrbo" in body["errors"][0]
+            # details/errors should mention HTTP 404
+            joined = " ".join(body.get("details", []) + body.get("errors", []))
+            assert "404" in joined, joined
+        finally:
+            api_client.delete(f"{BASE_URL}/api/properties/{prop['id']}")
+
+    def test_non_ical_html_response_is_rejected_without_crash(self, api_client, ics_server):
+        """Point ical_links at an HTML page (no BEGIN:VCALENDAR).
+        Response must be 200, no reservations created, details/errors mention
+        that the link is not an iCal calendar."""
+        html_body = (
+            "<!doctype html><html><head><title>Airbnb</title></head>"
+            "<body><h1>Login required</h1></body></html>"
+        )
+        _set_ics("not-ical.html", html_body, content_type="text/html; charset=utf-8")
+        prop = self._make_prop(
+            api_client, f"{ics_server}/not-ical.html", platform="Airbnb"
+        )
+        try:
+            r = api_client.post(f"{BASE_URL}/api/properties/{prop['id']}/sync")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["imported"] == 0, body
+            assert body["updated"] == 0, body
+            joined = " ".join(body.get("details", []) + body.get("errors", []))
+            assert "iCal" in joined or "calendrier" in joined, joined
+            # No reservations were created
+            res_list = api_client.get(
+                f"{BASE_URL}/api/reservations?property_id={prop['id']}"
+            ).json()
+            assert res_list == []
+        finally:
+            api_client.delete(f"{BASE_URL}/api/properties/{prop['id']}")
+
+    def test_empty_but_valid_calendar_reports_no_reservations(self, api_client, ics_server):
+        """A valid iCal feed with zero VEVENT must yield imported=0 and a
+        French 'aucune réservation dans le calendrier' details line."""
+        empty = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n"
+        _set_ics("empty.ics", empty)
+        prop = self._make_prop(
+            api_client, f"{ics_server}/empty.ics", platform="Booking"
+        )
+        try:
+            r = api_client.post(f"{BASE_URL}/api/properties/{prop['id']}/sync")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["imported"] == 0, body
+            assert body["updated"] == 0, body
+            assert body.get("errors") == [], body
+            details = body.get("details") or []
+            assert any("aucune réservation" in d.lower() for d in details), details
+        finally:
+            api_client.delete(f"{BASE_URL}/api/properties/{prop['id']}")
+
+    def test_http_404_response_reports_http_error(self, api_client, ics_server):
+        """Point url to a local path that returns HTTP 404. details/errors
+        must contain 'HTTP 404' and the endpoint must not crash."""
+        prop = self._make_prop(
+            api_client, f"{ics_server}/does-not-exist.ics", platform="Airbnb"
+        )
+        try:
+            r = api_client.post(f"{BASE_URL}/api/properties/{prop['id']}/sync")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["imported"] == 0
+            assert body["updated"] == 0
+            joined = " ".join(body.get("details", []) + body.get("errors", []))
+            assert "HTTP 404" in joined, joined
         finally:
             api_client.delete(f"{BASE_URL}/api/properties/{prop['id']}")
 

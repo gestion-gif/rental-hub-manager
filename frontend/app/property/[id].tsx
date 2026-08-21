@@ -102,8 +102,13 @@ export default function PropertyDetail() {
     setSyncMsg(null);
     try {
       const r = await api.post(`/properties/${id}/sync`);
-      let msg = `${r.imported} importée(s), ${r.updated} mise(s) à jour`;
-      if (r.errors && r.errors.length) msg += ` · ${r.errors.join(" · ")}`;
+      let msg = "";
+      if (r.details && r.details.length) {
+        msg = r.details.join("\n");
+      } else {
+        msg = `${r.imported} importée(s), ${r.updated} mise(s) à jour`;
+        if (r.errors && r.errors.length) msg += `\n${r.errors.join("\n")}`;
+      }
       setSyncMsg(msg);
       await load();
     } catch {
