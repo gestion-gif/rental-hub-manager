@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 5 — Backend full coverage for the three new capabilities: (A) iCal DESCRIPTION import + guest_name preservation, (B) new Preferences schema with custom statuses, (C) richer Property fields with round-trip preservation. Updated /app/backend/tests/test_ical_sync.py (added a DESCRIPTION line on the Jean Dupont VEVENT and asserted r1.notes.startswith('Importé depuis'), r2.guest_name.startswith('Jean Dupont'), r2.notes contains both the reservation code 'HMABCD1234' and the escape-unescaped '4 guests, arriving 2pm'). Rewrote TestPreferences in /app/backend/tests/test_backend.py against the NEW schema {statuses:[{key,label,color}], status_colors(derived)}: get shape, partial legacy status_colors merge, custom status persistence, and CORE-keys-always-retained-even-if-omitted. Added TestCustomStatusPatch (custom key accepted, unknown key -> 400, unknown reservation still -> 404) and TestPropertyRichFields (owner/surface/address/postal_code/city/description/rooms[]/amenities[] round-trip through POST -> GET -> PUT -> GET with no fields wiped; defaults applied when omitted). Result: 48/48 pytest green (was 43/43 in iteration 4). All prior iCal-sync scenarios (auth, unknown property, no links, 2-event import, idempotency+stale removal, non-iCal HTML, empty valid calendar, HTTP 404) still pass. Frontend: verified the Expo web preview loads the login screen at localhost:3000 (mobile 375x667) and no red-screen error. Verified via source-code inspection that all requested testIDs exist: close-colors, label-input-<key>, remove-status-<key>, swatch-<key>-<hex>, new-status-label, new-swatch-<hex>, add-status, save-colors, prop-owner, prop-surface, prop-address, prop-postal, prop-city, prop-description, room-<opt>, amenity-<opt> (via generic Chips prefix). Behind Emergent Google OAuth so full UI flow test not runnable without a real Google account; backend + testID structure inspection is the only reliable path.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/test_ical_sync.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No blocking backend issues. Optional: consider extracting DEFAULT_STATUSES + _build_statuses into a preferences module if the file grows further; server.py is now 674 lines (still under 700).",
+    "Optional frontend self-test by the main agent: sign in with a real Google account, open Réservations > gear icon, add a status labelled 'Ménage' with color #AF52DE, save; verify (i) chip appears in filter row, (ii) chip appears in reservation-form status picker, (iii) planning legend renders it. Backend already validates all three read paths (GET /preferences and PATCH /reservations/{id}/status against custom keys)."
+  ],
+  "critical_code_review_comments": [
+    "parse_ical unescapes \\n and \\, in DESCRIPTION correctly (server.py:334). Verified with 'Reservation code: HMABCD1234\\n4 guests\\, arriving 2pm' -> two lines with a real comma. Good.",
+    "sync_ical correctly branches guest_name on SUMMARY: preserves any non-block SUMMARY (Airbnb's 'Reserved'/'CLOSED - Not available' -> 'Réservation <platform>'; 'Jean Dupont' -> 'Jean Dupont'). Notes always starts with 'Importé depuis <platform>' and appends DESCRIPTION on a new line when present.",
+    "PATCH /reservations/{id}/status now builds valid_keys from _build_statuses(preferences_doc), so any user-defined custom key from /preferences.statuses is accepted. Rejection returns 400. Unknown reservation still returns 404 (order of checks correct: status validation first, then update result).",
+    "PUT /preferences with a payload that omits some core keys correctly re-appends them via the DEFAULT_STATUSES loop (server.py:630-633). Verified in test_core_keys_always_retained_even_if_omitted.",
+    "PropertyIn Pydantic model now includes owner/surface/address/postal_code/city/description/rooms/amenities with typed defaults; PUT uses payload.dict() so a full-object PUT preserves every field. Frontend (property/[id].tsx) sends the full form back, so no field is ever wiped in the intended flow.",
+    "Preferences GET always returns both statuses[] and derived status_colors — good for backward compatibility with the old frontend palette API."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_backend.py (rewrote TestPreferences for new schema; added TestCustomStatusPatch + TestPropertyRichFields)",
+    "/app/backend/tests/test_ical_sync.py (added DESCRIPTION line on evt-2; asserted notes content and 'Importé depuis' prefix on the anonymised event)"
+  ],
+  "success_rate": {"backend": "100% (48/48)", "frontend": "loads OK; UI behind Google OAuth not covered by playwright"},
+  "seed_data_creation": "Reused conftest test_user (fake user + session_token). Every test creates TEST_-prefixed properties/reservations and deletes them in finally blocks. Preferences are per-user in Mongo and cleaned up on test_user teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend now has 48 tests split across test_backend.py (34) and test_ical_sync.py (14). New schemas: Preferences.statuses[{key,label,color}] with derived status_colors; PropertyIn includes rich fields. When testing custom statuses via API, first PUT /preferences to register the key, then use it in PATCH /reservations/{id}/status. For iCal, _set_ics(path, body, content_type=..., status=...) drives the in-process HTTPServer.",
+  "rca_of_issue": "N/A — this iteration adds the three new features rather than fixing a defect. The prior iteration's bug (Airbnb iCal 'Reserved' hiding guest names) is addressed at the parser+sync layer by keeping SUMMARY as guest_name when it isn't in the blocklist and importing DESCRIPTION into notes. Validated end-to-end in test_import_creates_two_reservations."
+}

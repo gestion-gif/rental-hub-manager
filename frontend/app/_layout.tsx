@@ -59,6 +59,10 @@ export default function RootLayout() {
                   options={{ presentation: "modal" }}
                 />
                 <Stack.Screen
+                  name="intervention-form"
+                  options={{ presentation: "modal" }}
+                />
+                <Stack.Screen
                   name="settings/status-colors"
                   options={{ presentation: "modal" }}
                 />

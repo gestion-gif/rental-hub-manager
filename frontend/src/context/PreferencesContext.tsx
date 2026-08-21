@@ -4,37 +4,34 @@ import React, {
   useEffect,
   useState,
   ReactNode,
+  useMemo,
 } from "react";
 import { api } from "@/src/api";
-import { StatusKey } from "@/src/theme";
 import { useAuth } from "@/src/context/AuthContext";
 
-export const DEFAULT_STATUS_COLORS: Record<StatusKey, string> = {
-  demande: "#FF9500",
-  confirmee: "#34C759",
-  arrivee: "#32ADE6",
-  depart: "#8E8E93",
-  annulee: "#FF3B30",
-};
+export type StatusDef = { key: string; label: string; color: string };
 
-// 10 selectable colors
+export const DEFAULT_STATUSES: StatusDef[] = [
+  { key: "demande", label: "Demande", color: "#FF9500" },
+  { key: "confirmee", label: "Confirmée", color: "#34C759" },
+  { key: "arrivee", label: "Arrivée", color: "#32ADE6" },
+  { key: "depart", label: "Départ", color: "#8E8E93" },
+  { key: "annulee", label: "Annulée", color: "#FF3B30" },
+];
+
+export const CORE_STATUS_KEYS = DEFAULT_STATUSES.map((s) => s.key);
+
+// 12 selectable colors
 export const COLOR_PALETTE = [
-  "#FF9500", // orange
-  "#34C759", // green
-  "#32ADE6", // blue
-  "#8E8E93", // grey
-  "#FF3B30", // red
-  "#AF52DE", // purple
-  "#FF2D55", // pink
-  "#5856D6", // indigo
-  "#00C7BE", // teal
-  "#FFCC00", // yellow
+  "#FF9500", "#34C759", "#32ADE6", "#8E8E93", "#FF3B30", "#AF52DE",
+  "#FF2D55", "#5856D6", "#00C7BE", "#FFCC00", "#A2845E", "#1C1C1E",
 ];
 
 type PrefsState = {
-  statusColors: Record<StatusKey, string>;
-  setStatusColor: (status: StatusKey, color: string) => void;
-  save: (colors: Record<StatusKey, string>) => Promise<void>;
+  statuses: StatusDef[];
+  statusColors: Record<string, string>;
+  getStatus: (key: string) => StatusDef;
+  save: (statuses: StatusDef[]) => Promise<void>;
   refresh: () => void;
 };
 
@@ -43,14 +40,13 @@ export const usePreferences = () => useContext(PreferencesContext);
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [statusColors, setStatusColors] =
-    useState<Record<StatusKey, string>>(DEFAULT_STATUS_COLORS);
+  const [statuses, setStatuses] = useState<StatusDef[]>(DEFAULT_STATUSES);
 
   async function refresh() {
     try {
       const res = await api.get("/preferences");
-      if (res?.status_colors) {
-        setStatusColors({ ...DEFAULT_STATUS_COLORS, ...res.status_colors });
+      if (res?.statuses && Array.isArray(res.statuses) && res.statuses.length) {
+        setStatuses(res.statuses);
       }
     } catch {}
   }
@@ -59,20 +55,32 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     if (user) refresh();
   }, [user]);
 
-  function setStatusColor(status: StatusKey, color: string) {
-    setStatusColors((c) => ({ ...c, [status]: color }));
+  const statusColors = useMemo(() => {
+    const m: Record<string, string> = {};
+    statuses.forEach((s) => (m[s.key] = s.color));
+    return m;
+  }, [statuses]);
+
+  const statusMap = useMemo(() => {
+    const m: Record<string, StatusDef> = {};
+    statuses.forEach((s) => (m[s.key] = s));
+    return m;
+  }, [statuses]);
+
+  function getStatus(key: string): StatusDef {
+    return statusMap[key] || { key, label: key, color: "#8E8E93" };
   }
 
-  async function save(colors: Record<StatusKey, string>) {
-    setStatusColors(colors);
+  async function save(next: StatusDef[]) {
+    setStatuses(next);
     try {
-      await api.put("/preferences", { status_colors: colors });
+      await api.put("/preferences", { statuses: next });
     } catch {}
   }
 
   return (
     <PreferencesContext.Provider
-      value={{ statusColors, setStatusColor, save, refresh }}
+      value={{ statuses, statusColors, getStatus, save, refresh }}
     >
       {children}
     </PreferencesContext.Provider>

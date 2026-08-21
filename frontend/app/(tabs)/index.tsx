@@ -12,10 +12,14 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
+import dayjs from "dayjs";
+import "dayjs/locale/fr";
+dayjs.locale("fr");
 
 import { useAuth } from "@/src/context/AuthContext";
 import { api } from "@/src/api";
 import StatusBadge from "@/src/components/StatusBadge";
+import { getInterventionType } from "@/src/interventionTypes";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 type Dash = {
@@ -23,8 +27,10 @@ type Dash = {
   revenue_month: number;
   total_properties: number;
   upcoming_count: number;
+  current_stays: any[];
   arrivals_today: any[];
   departures_today: any[];
+  interventions: any[];
 };
 
 export default function Dashboard() {
@@ -120,17 +126,37 @@ export default function Dashboard() {
             <Section title="Arrivées du jour">
               {data?.arrivals_today?.length ? (
                 data.arrivals_today.map((r) => (
-                  <FlowCard key={r.id} r={r} kind="Arrivée" onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
+                  <StayCard key={r.id} r={r} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
                 ))
               ) : (
                 <EmptyRow text="Aucune arrivée aujourd'hui" />
               )}
             </Section>
 
+            <Section title="Interventions">
+              {data?.interventions?.length ? (
+                data.interventions.map((iv) => (
+                  <InterventionCard key={iv.id} iv={iv} onPress={() => router.push(`/intervention-form?id=${iv.id}`)} />
+                ))
+              ) : (
+                <EmptyRow text="Aucune intervention prévue" />
+              )}
+            </Section>
+
+            <Section title="Séjours en cours">
+              {data?.current_stays?.length ? (
+                data.current_stays.map((r) => (
+                  <StayCard key={r.id} r={r} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
+                ))
+              ) : (
+                <EmptyRow text="Aucun séjour en cours" />
+              )}
+            </Section>
+
             <Section title="Départs du jour">
               {data?.departures_today?.length ? (
                 data.departures_today.map((r) => (
-                  <FlowCard key={r.id} r={r} kind="Départ" onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
+                  <StayCard key={r.id} r={r} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
                 ))
               ) : (
                 <EmptyRow text="Aucun départ aujourd'hui" />
@@ -181,14 +207,65 @@ function Section({ title, children }: any) {
   );
 }
 
-function FlowCard({ r, kind, onPress }: any) {
+function StayCard({ r, onPress }: any) {
   return (
-    <Pressable onPress={onPress} style={styles.flowCard}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.flowGuest}>{r.guest_name}</Text>
-        <Text style={styles.flowProp}>{r.property_name}</Text>
+    <Pressable onPress={onPress} style={styles.stayCard} testID={`stay-card-${r.id}`}>
+      <View style={styles.stayTop}>
+        <View style={styles.stayPropRow}>
+          <Ionicons name="business-outline" size={15} color={colors.onSurfaceSecondary} />
+          <Text style={styles.stayProp} numberOfLines={1}>{r.property_name}</Text>
+        </View>
+        <StatusBadge status={r.status} />
       </View>
-      <StatusBadge status={r.status} />
+      <Text style={styles.stayGuest}>{r.guest_name}</Text>
+      <View style={styles.stayMetaRow}>
+        <View style={styles.stayMeta}>
+          <Ionicons name="calendar-outline" size={14} color={colors.onSurfaceTertiary} />
+          <Text style={styles.stayMetaText}>
+            {dayjs(r.check_in).format("DD MMM")} → {dayjs(r.check_out).format("DD MMM")}
+          </Text>
+        </View>
+        <View style={styles.stayMeta}>
+          <Ionicons name="people-outline" size={14} color={colors.onSurfaceTertiary} />
+          <Text style={styles.stayMetaText}>{r.guests} voy.</Text>
+        </View>
+        <View style={styles.otaTag}>
+          <Text style={styles.otaText}>{r.platform || "Direct"}</Text>
+        </View>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceTertiary} style={styles.stayChevron} />
+    </Pressable>
+  );
+}
+
+function InterventionCard({ iv, onPress }: any) {
+  const t = getInterventionType(iv.kind);
+  return (
+    <Pressable onPress={onPress} style={[styles.stayCard, { borderLeftWidth: 4, borderLeftColor: t.color }]} testID={`intervention-card-${iv.id}`}>
+      <View style={styles.stayTop}>
+        <View style={styles.stayPropRow}>
+          <Ionicons name="business-outline" size={15} color={colors.onSurfaceSecondary} />
+          <Text style={styles.stayProp} numberOfLines={1}>{iv.property_name}</Text>
+        </View>
+        <View style={[styles.ivBadge, { backgroundColor: t.color + "22" }]}>
+          <View style={[styles.ivDot, { backgroundColor: t.color }]} />
+          <Text style={[styles.ivBadgeText, { color: t.color }]}>{t.label}</Text>
+        </View>
+      </View>
+      {!!iv.description && <Text style={styles.stayGuest}>{iv.description}</Text>}
+      <View style={styles.stayMetaRow}>
+        <View style={styles.stayMeta}>
+          <Ionicons name="calendar-outline" size={14} color={colors.onSurfaceTertiary} />
+          <Text style={styles.stayMetaText}>{dayjs(iv.date).format("ddd DD MMM")}</Text>
+        </View>
+        {!!iv.intervenant && (
+          <View style={styles.stayMeta}>
+            <Ionicons name="person-outline" size={14} color={colors.onSurfaceTertiary} />
+            <Text style={styles.stayMetaText}>{iv.intervenant}</Text>
+          </View>
+        )}
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceTertiary} style={styles.stayChevron} />
     </Pressable>
   );
 }
@@ -251,16 +328,32 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     marginBottom: spacing.md,
   },
-  flowCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surfaceSecondary,
-    borderRadius: radius.md,
+  stayCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
     padding: spacing.lg,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
-  flowGuest: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface },
-  flowProp: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, marginTop: 2 },
+  stayTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  stayPropRow: { flexDirection: "row", alignItems: "center", gap: 5, flex: 1, marginRight: spacing.sm },
+  stayProp: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary, flex: 1 },
+  stayGuest: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.sm },
+  stayMetaRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, flexWrap: "wrap" },
+  stayMeta: { flexDirection: "row", alignItems: "center", gap: 4 },
+  stayMetaText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary },
+  otaTag: {
+    backgroundColor: colors.surfaceSecondary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+  },
+  otaText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  ivBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.pill },
+  ivDot: { width: 7, height: 7, borderRadius: 999 },
+  ivBadgeText: { fontFamily: font.semibold, fontSize: 12 },
+  stayChevron: { position: "absolute", right: spacing.md, top: spacing.lg },
   emptyRow: {
     backgroundColor: colors.surfaceSecondary,
     borderRadius: radius.md,

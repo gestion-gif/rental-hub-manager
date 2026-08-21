@@ -64,6 +64,15 @@ class PropertyIn(BaseModel):
     base_price: float = 0
     capacity: int = 2
     bedrooms: int = 1
+    owner: str = ""
+    surface: float = 0
+    address: str = ""
+    postal_code: str = ""
+    city: str = ""
+    address_complement: str = ""
+    description: str = ""
+    rooms: List[str] = []
+    amenities: List[str] = []
     seasons: List[Season] = []
     ical_links: List[IcalLink] = []
 
@@ -79,6 +88,14 @@ class ReservationIn(BaseModel):
     total_price: float = 0
     status: str = "demande"  # demande|confirmee|arrivee|depart|annulee
     notes: str = ""
+
+
+class InterventionIn(BaseModel):
+    property_id: str
+    kind: str = "menage"  # menage | intervention
+    date: str  # YYYY-MM-DD
+    description: str = ""
+    intervenant: str = ""
 
 
 class GuestReplyRequest(BaseModel):
@@ -256,7 +273,13 @@ async def update_reservation(reservation_id: str, payload: ReservationIn, user=D
 @api_router.patch("/reservations/{reservation_id}/status")
 async def update_status(reservation_id: str, body: dict, user=Depends(get_current_user)):
     new_status = body.get("status")
-    if new_status not in ["demande", "confirmee", "arrivee", "depart", "annulee"]:
+    if not isinstance(new_status, str) or not new_status.strip():
+        raise HTTPException(status_code=400, detail="Invalid status")
+    new_status = new_status.strip()
+    # Allow core statuses + any custom status defined in the user's preferences
+    doc = await db.preferences.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    valid_keys = {s["key"] for s in _build_statuses(doc)}
+    if new_status not in valid_keys:
         raise HTTPException(status_code=400, detail="Invalid status")
     res = await db.reservations.update_one(
         {"id": reservation_id, "user_id": user["user_id"]},
@@ -271,6 +294,47 @@ async def update_status(reservation_id: str, body: dict, user=Depends(get_curren
 @api_router.delete("/reservations/{reservation_id}")
 async def delete_reservation(reservation_id: str, user=Depends(get_current_user)):
     await db.reservations.delete_one({"id": reservation_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Interventions (ménage / interventions techniques) shown in calendar + dashboard
+# ---------------------------------------------------------------------------
+@api_router.get("/interventions")
+async def list_interventions(property_id: Optional[str] = None, user=Depends(get_current_user)):
+    query = {"user_id": user["user_id"]}
+    if property_id:
+        query["property_id"] = property_id
+    items = await db.interventions.find(query, {"_id": 0}).sort("date", 1).to_list(1000)
+    return items
+
+
+@api_router.post("/interventions")
+async def create_intervention(payload: InterventionIn, user=Depends(get_current_user)):
+    doc = payload.dict()
+    doc["id"] = str(uuid.uuid4())
+    doc["user_id"] = user["user_id"]
+    doc["created_at"] = now_utc().isoformat()
+    await db.interventions.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/interventions/{intervention_id}")
+async def update_intervention(intervention_id: str, payload: InterventionIn, user=Depends(get_current_user)):
+    res = await db.interventions.update_one(
+        {"id": intervention_id, "user_id": user["user_id"]},
+        {"$set": payload.dict()},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Intervention not found")
+    item = await db.interventions.find_one({"id": intervention_id}, {"_id": 0})
+    return item
+
+
+@api_router.delete("/interventions/{intervention_id}")
+async def delete_intervention(intervention_id: str, user=Depends(get_current_user)):
+    await db.interventions.delete_one({"id": intervention_id, "user_id": user["user_id"]})
     return {"ok": True}
 
 
@@ -316,6 +380,8 @@ def parse_ical(text: str):
                 cur["end"] = _parse_ical_date(val)
             elif key == "SUMMARY":
                 cur["summary"] = val.strip()
+            elif key == "DESCRIPTION":
+                cur["description"] = val.strip().replace("\\n", "\n").replace("\\,", ",")
             elif key == "UID":
                 cur["uid"] = val.strip()
     return events
@@ -378,10 +444,14 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
                     uid = ev.get("uid") or f"{platform}-{ev['start']}-{ev['end']}"
                     feed_uids.append(uid)
                     summary = (ev.get("summary") or "").strip()
+                    description = (ev.get("description") or "").strip()
                     if summary and summary.lower() not in _BLOCK_SUMMARIES:
                         guest = summary
                     else:
                         guest = f"Réservation {platform}"
+                    note = f"Importé depuis {platform}"
+                    if description:
+                        note += f"\n{description}"
                     q = {"user_id": user["user_id"], "property_id": property_id, "ical_uid": uid}
                     existing = await db.reservations.find_one(q)
                     if existing:
@@ -390,6 +460,7 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
                             "check_out": ev["end"],
                             "guest_name": guest,
                             "platform": platform,
+                            "notes": note,
                         }})
                         updated += 1
                         link_updated += 1
@@ -406,7 +477,7 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
                             "guests": 1,
                             "total_price": 0,
                             "status": "confirmee",
-                            "notes": f"Importé depuis {platform}",
+                            "notes": note,
                             "source": "ical",
                             "ical_uid": uid,
                             "created_at": now_utc().isoformat(),
@@ -449,6 +520,7 @@ async def dashboard(user=Depends(get_current_user)):
 
     props = await db.properties.find({"user_id": uid}, {"_id": 0}).to_list(500)
     reservations = await db.reservations.find({"user_id": uid}, {"_id": 0}).to_list(2000)
+    interventions = await db.interventions.find({"user_id": uid}, {"_id": 0}).sort("date", 1).to_list(1000)
 
     prop_map = {p["id"]: p for p in props}
 
@@ -460,6 +532,7 @@ async def dashboard(user=Depends(get_current_user)):
 
     arrivals_today = []
     departures_today = []
+    current_stays = []
     revenue_month = 0.0
     booked_nights = 0
 
@@ -474,6 +547,9 @@ async def dashboard(user=Depends(get_current_user)):
             arrivals_today.append(r_view)
         if r.get("check_out") == today_str:
             departures_today.append(r_view)
+        # current stay: today is within [check_in, check_out) (checkout day excluded)
+        if ci and co and ci <= today < co:
+            current_stays.append(r_view)
         # revenue + occupancy for current month
         if ci and co and r["status"] in ("confirmee", "arrivee", "depart"):
             overlap_start = max(ci, month_start)
@@ -485,6 +561,8 @@ async def dashboard(user=Depends(get_current_user)):
             if month_start <= ci <= month_end:
                 revenue_month += float(r.get("total_price", 0) or 0)
 
+    current_stays.sort(key=lambda x: x.get("check_out") or "")
+
     capacity_nights = max(len(props) * days_in_month, 1)
     occupancy = round(min(booked_nights / capacity_nights * 100, 100))
 
@@ -494,13 +572,26 @@ async def dashboard(user=Depends(get_current_user)):
         if ci and ci >= today and r["status"] in ("demande", "confirmee"):
             upcoming += 1
 
+    # Upcoming interventions (today and future), enriched with property name
+    upcoming_interventions = []
+    for iv in interventions:
+        d = parse(iv.get("date"))
+        if d and d >= today:
+            upcoming_interventions.append({
+                **iv,
+                "property_name": prop_map.get(iv["property_id"], {}).get("name", "Logement"),
+            })
+    upcoming_interventions.sort(key=lambda x: x.get("date") or "")
+
     return {
         "occupancy_rate": occupancy,
         "revenue_month": round(revenue_month),
         "total_properties": len(props),
         "upcoming_count": upcoming,
+        "current_stays": current_stays,
         "arrivals_today": arrivals_today,
         "departures_today": departures_today,
+        "interventions": upcoming_interventions,
     }
 
 
@@ -556,37 +647,72 @@ async def ai_pricing(payload: PricingRequest, user=Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
-# Preferences (customizable status colors)
+# Preferences (customizable statuses + colors)
 # ---------------------------------------------------------------------------
-DEFAULT_STATUS_COLORS = {
-    "demande": "#FF9500",
-    "confirmee": "#34C759",
-    "arrivee": "#32ADE6",
-    "depart": "#8E8E93",
-    "annulee": "#FF3B30",
-}
+DEFAULT_STATUSES = [
+    {"key": "demande", "label": "Demande", "color": "#FF9500"},
+    {"key": "confirmee", "label": "Confirmée", "color": "#34C759"},
+    {"key": "arrivee", "label": "Arrivée", "color": "#32ADE6"},
+    {"key": "depart", "label": "Départ", "color": "#8E8E93"},
+    {"key": "annulee", "label": "Annulée", "color": "#FF3B30"},
+]
+DEFAULT_STATUS_COLORS = {s["key"]: s["color"] for s in DEFAULT_STATUSES}
+CORE_STATUS_KEYS = {s["key"] for s in DEFAULT_STATUSES}
 
 
 class PreferencesIn(BaseModel):
-    status_colors: dict
+    status_colors: Optional[dict] = None
+    statuses: Optional[list] = None
+
+
+def _build_statuses(doc):
+    """Return the full statuses list for a preferences doc, migrating legacy status_colors."""
+    if doc and isinstance(doc.get("statuses"), list) and doc["statuses"]:
+        return doc["statuses"]
+    colors = (doc or {}).get("status_colors") or {}
+    return [{**s, "color": colors.get(s["key"], s["color"])} for s in DEFAULT_STATUSES]
 
 
 @api_router.get("/preferences")
 async def get_preferences(user=Depends(get_current_user)):
     doc = await db.preferences.find_one({"user_id": user["user_id"]}, {"_id": 0})
-    colors = (doc or {}).get("status_colors") or {}
-    return {"status_colors": {**DEFAULT_STATUS_COLORS, **colors}}
+    statuses = _build_statuses(doc)
+    return {
+        "statuses": statuses,
+        "status_colors": {s["key"]: s["color"] for s in statuses},
+    }
 
 
 @api_router.put("/preferences")
 async def update_preferences(payload: PreferencesIn, user=Depends(get_current_user)):
-    merged = {**DEFAULT_STATUS_COLORS, **(payload.status_colors or {})}
+    if payload.statuses is not None:
+        cleaned = []
+        seen = set()
+        for s in payload.statuses:
+            key = str(s.get("key") or "").strip()
+            label = str(s.get("label") or "").strip()
+            color = str(s.get("color") or "#8E8E93").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            cleaned.append({"key": key, "label": label or key, "color": color})
+        # Always keep the core statuses so existing reservations stay valid
+        for d in DEFAULT_STATUSES:
+            if d["key"] not in seen:
+                cleaned.append(d)
+                seen.add(d["key"])
+        statuses = cleaned
+    else:
+        colors = {**DEFAULT_STATUS_COLORS, **(payload.status_colors or {})}
+        statuses = [{**s, "color": colors.get(s["key"], s["color"])} for s in DEFAULT_STATUSES]
+
     await db.preferences.update_one(
         {"user_id": user["user_id"]},
-        {"$set": {"user_id": user["user_id"], "status_colors": merged}},
+        {"$set": {"user_id": user["user_id"], "statuses": statuses,
+                  "status_colors": {s["key"]: s["color"] for s in statuses}}},
         upsert=True,
     )
-    return {"status_colors": merged}
+    return {"statuses": statuses, "status_colors": {s["key"]: s["color"] for s in statuses}}
 
 
 # ---------------------------------------------------------------------------
@@ -610,6 +736,7 @@ async def startup():
     await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
     await db.properties.create_index("user_id")
     await db.reservations.create_index("user_id")
+    await db.interventions.create_index("user_id")
 
 
 @app.on_event("shutdown")

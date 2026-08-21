@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 6 — Backend full coverage for the three new capabilities: (A) Interventions CRUD (POST/GET/PUT/DELETE + property_id filter + user scoping), (B) Dashboard.interventions (today/future only, past excluded, sorted asc, enriched with property_name), (C) Property.address_complement (persist through POST -> GET, and full PUT preserves it + owner/surface/rooms/amenities). Added to /app/backend/tests/test_backend.py: 4 new auth-guard params (GET/POST/PUT/DELETE /api/interventions), TestInterventions (full CRUD, no _id leak, property_id filter, PUT-unknown 404), test_interventions_scoped_per_user (user B cannot see or PUT user A's intervention), TestDashboardInterventions (past excluded, today+future included, sorted asc, property_name enrichment, no _id, regression on all 7 legacy dashboard keys), TestPropertyAddressComplement (persist + full-PUT round-trip + default ''). Result: 58/58 pytest green (was 48/48 in iteration 5). All prior suites (auth, properties, reservations incl. custom status PATCH, rich property fields, preferences, iCal sync, dashboard current_stays, AI, isolation, logout) still pass. Frontend: verified the Expo web preview loads the StayPilot login screen at the public URL (mobile 375x667), no red-screen or console errors; source-code inspection confirms all requested testIDs exist: dashboard sections order Arrivées -> Interventions -> Séjours en cours -> Départs (app/(tabs)/index.tsx:126-164), 'add-intervention-fab' (planning.tsx:198), 'timeline-iv-<id>' (planning.tsx:309), 'prop-address-complement' (property-form.tsx:134), and options WC/Parking/Bouilloire/Grille-pain present in src/propertyOptions.ts. Behind Emergent Google OAuth so full playwright UI flow is not runnable without a real Google account; backend + testID structure inspection is the reliable path.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/test_ical_sync.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No blocking backend issues.",
+    "Optional frontend self-test by the main agent behind a real Google account: (1) Dashboard section order — verify Arrivées -> Interventions -> Séjours en cours -> Départs. (2) Planning tab — tap 'add-intervention-fab', pick kind (menage=violet / intervention=jaune), property chip 'intervention-prop-<pid>', date, save; expect a colored dot on the month calendar for that date and a 'timeline-iv-<id>' entry in the day timeline, plus the item in the dashboard Interventions section. (3) Property form — verify 'prop-address-complement' input persists on save (POST/PUT already covered by backend tests), and chips 'room-Parking', 'room-WC', 'amenity-Bouilloire', 'amenity-Grille-pain' are present and selectable."
+  ],
+  "critical_code_review_comments": [
+    "InterventionIn model correctly typed with kind:str default 'menage', description/intervenant default ''. POST/PUT use payload.dict() -> field wipe-safe on PUT. All handlers scope by user_id and project out _id (server.py:303-338).",
+    "GET /api/interventions supports optional property_id filter and sorts by date asc (server.py:308) — matches what the planning timeline expects.",
+    "Dashboard interventions correctly filter d>=today (server.py:576-583) and enrich with property_name from prop_map, then sort by date asc (server.py:584). Past-dated intervention is excluded as required.",
+    "PropertyIn now includes address_complement:str default '' (server.py:72). GET/POST return it; full PUT via payload.dict() preserves it together with owner/surface/rooms/amenities. Frontend property-form.tsx sends the field via testID 'prop-address-complement' (property-form.tsx:134).",
+    "Dashboard section order in app/(tabs)/index.tsx: Arrivées (126) -> Interventions (136) -> Séjours en cours (146) -> Départs (156) — matches spec exactly. InterventionCard uses left-border color-code from getInterventionType(iv.kind).",
+    "propertyOptions.ts contains 'WC' at line 7 and 'Parking' at line 13 in ROOM_OPTIONS; 'Bouilloire' at 31, 'Grille-pain' at 32, 'Parking' at 33 in AMENITY_OPTIONS — matches spec.",
+    "No mongo _id leak observed on any /api/interventions response (tested explicitly). No user-cross-visibility (test_interventions_scoped_per_user)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_backend.py (added 4 auth-guard endpoints, TestInterventions, test_interventions_scoped_per_user, TestDashboardInterventions, TestPropertyAddressComplement — +10 tests, 58 total)"
+  ],
+  "success_rate": {"backend": "100% (58/58)", "frontend": "loads OK; UI behind Google OAuth not covered by playwright"},
+  "seed_data_creation": "Reused conftest test_user (fake user + session_token). Each test creates TEST_-prefixed properties/reservations/interventions and deletes them in finally blocks. User-B isolation tests seed/teardown a dedicated Mongo user directly.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend now has 58 tests across test_backend.py (44) and test_ical_sync.py (14). Interventions collection: {property_id, kind('menage'|'intervention'), date(YYYY-MM-DD), description, intervenant, id, user_id, created_at}. Dashboard.interventions is date>=today, enriched with property_name, sorted asc. PropertyIn now has address_complement. When adding new intervention tests, remember to clean up in finally (DELETE /api/interventions/{id}) or they leak into other users' listing tests only for the same test_user (they are scoped by user_id, so leaks stay bounded).",
+  "rca_of_issue": "N/A — this iteration adds tests for three new features rather than fixing a defect. All new endpoints and dashboard enrichment work per spec on first run."
+}

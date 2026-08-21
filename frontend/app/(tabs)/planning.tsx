@@ -16,7 +16,8 @@ import "dayjs/locale/fr";
 import { api } from "@/src/api";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import StatusBadge, { tint } from "@/src/components/StatusBadge";
-import { STATUS, StatusKey, colors, font, fontSize, radius, spacing } from "@/src/theme";
+import { INTERVENTION_TYPES, getInterventionType } from "@/src/interventionTypes";
+import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 dayjs.locale("fr");
 
@@ -31,9 +32,10 @@ const WEEKDAYS = ["L", "M", "M", "J", "V", "S", "D"];
 export default function Planning() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { statusColors } = usePreferences();
+  const { statusColors, statuses } = usePreferences();
   const [props, setProps] = useState<any[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
+  const [interventions, setInterventions] = useState<any[]>([]);
   const [mode, setMode] = useState<"timeline" | "month">("timeline");
   const [selectedProp, setSelectedProp] = useState<string>("all");
   const [anchor, setAnchor] = useState(dayjs().startOf("month"));
@@ -41,12 +43,14 @@ export default function Planning() {
 
   const load = useCallback(async () => {
     try {
-      const [pr, res] = await Promise.all([
+      const [pr, res, ivs] = await Promise.all([
         api.get("/properties"),
         api.get("/reservations"),
+        api.get("/interventions"),
       ]);
       setProps(pr);
       setReservations(res.filter((r: any) => r.status !== "annulee"));
+      setInterventions(ivs);
     } catch {}
   }, []);
 
@@ -67,6 +71,10 @@ export default function Planning() {
     selectedProp === "all"
       ? reservations
       : reservations.filter((r) => r.property_id === selectedProp);
+  const filteredIvs =
+    selectedProp === "all"
+      ? interventions
+      : interventions.filter((iv) => iv.property_id === selectedProp);
 
   const monthStart = anchor.startOf("month");
   const daysInMonth = anchor.daysInMonth();
@@ -158,9 +166,12 @@ export default function Planning() {
           monthStart={monthStart}
           daysInMonth={daysInMonth}
           filtered={filtered}
+          interventions={filteredIvs}
           statusColors={statusColors}
+          statuses={statuses}
           todayStr={todayStr}
           onBar={(id: string) => router.push(`/reservation-form?id=${id}`)}
+          onIv={(id: string) => router.push(`/intervention-form?id=${id}`)}
           bottomPad={insets.bottom + 90}
         />
       ) : (
@@ -169,6 +180,7 @@ export default function Planning() {
           daysInMonth={daysInMonth}
           monthStart={monthStart}
           filtered={filtered}
+          interventions={filteredIvs}
           propMap={propMap}
           statusColors={statusColors}
           single={selectedProp !== "all"}
@@ -176,8 +188,22 @@ export default function Planning() {
           setSelectedDay={setSelectedDay}
           todayStr={todayStr}
           onRes={(id: string) => router.push(`/reservation-form?id=${id}`)}
+          onIv={(id: string) => router.push(`/intervention-form?id=${id}`)}
           bottomPad={insets.bottom + 90}
         />
+      )}
+
+      {props.length > 0 && (
+        <Pressable
+          testID="add-intervention-fab"
+          onPress={() => {
+            const q = selectedProp !== "all" ? `?property=${selectedProp}` : "";
+            router.push(`/intervention-form${q}` as any);
+          }}
+          style={[styles.fab, { bottom: insets.bottom + 76 }]}
+        >
+          <Ionicons name="construct" size={24} color={colors.onBrandPrimary} />
+        </Pressable>
       )}
     </View>
   );
@@ -197,7 +223,7 @@ function PropChip({ label, active, onPress, testID }: any) {
   );
 }
 
-function TimelineView({ rows, days, monthStart, daysInMonth, filtered, statusColors, todayStr, onBar, bottomPad }: any) {
+function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, onBar, onIv, bottomPad }: any) {
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: bottomPad }} showsVerticalScrollIndicator={false}>
       <View style={{ flexDirection: "row" }}>
@@ -229,6 +255,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, statusCol
             {/* Rows */}
             {rows.map((p: any) => {
               const rowRes = filtered.filter((r: any) => r.property_id === p.id);
+              const rowIvs = interventions.filter((iv: any) => iv.property_id === p.id);
               return (
                 <View key={p.id} style={{ width: daysInMonth * DAY_W, height: ROW_H }}>
                   {/* background cells */}
@@ -252,7 +279,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, statusCol
                     const endOffset = Math.min(daysInMonth, co.diff(monthStart, "day"));
                     const nights = endOffset - startOffset;
                     if (nights <= 0) return null;
-                    const color = statusColors[r.status as StatusKey] || STATUS[r.status as StatusKey]?.color;
+                    const color = statusColors[r.status] || "#8E8E93";
                     return (
                       <Pressable
                         key={r.id}
@@ -271,6 +298,22 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, statusCol
                       </Pressable>
                     );
                   })}
+                  {/* intervention markers (single day, bottom strip) */}
+                  {rowIvs.map((iv: any) => {
+                    const off = dayjs(iv.date).diff(monthStart, "day");
+                    if (off < 0 || off >= daysInMonth) return null;
+                    const t = getInterventionType(iv.kind);
+                    return (
+                      <Pressable
+                        key={iv.id}
+                        testID={`timeline-iv-${iv.id}`}
+                        onPress={() => onIv(iv.id)}
+                        style={[styles.ivMarker, { left: off * DAY_W + 3, backgroundColor: t.color }]}
+                      >
+                        <Ionicons name="construct" size={9} color="#fff" />
+                      </Pressable>
+                    );
+                  })}
                 </View>
               );
             })}
@@ -278,10 +321,16 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, statusCol
         </ScrollView>
       </View>
       <View style={styles.legend}>
-        {(Object.keys(STATUS) as StatusKey[]).map((s) => (
-          <View key={s} style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: statusColors[s] }]} />
-            <Text style={styles.legendText}>{STATUS[s].label}</Text>
+        {statuses.map((s: any) => (
+          <View key={s.key} style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: s.color }]} />
+            <Text style={styles.legendText}>{s.label}</Text>
+          </View>
+        ))}
+        {INTERVENTION_TYPES.map((t) => (
+          <View key={t.key} style={styles.legendItem}>
+            <View style={[styles.legendDot, { backgroundColor: t.color }]} />
+            <Text style={styles.legendText}>{t.label}</Text>
           </View>
         ))}
       </View>
@@ -289,7 +338,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, statusCol
   );
 }
 
-function MonthView({ anchor, daysInMonth, monthStart, filtered, propMap, statusColors, single, selectedDay, setSelectedDay, todayStr, onRes, bottomPad }: any) {
+function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, propMap, statusColors, single, selectedDay, setSelectedDay, todayStr, onRes, onIv, bottomPad }: any) {
   const offset = (monthStart.day() + 6) % 7; // Monday start
   const cells: (any | null)[] = [
     ...Array(offset).fill(null),
@@ -300,8 +349,12 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, propMap, statusC
   function resForDay(dayStr: string) {
     return filtered.filter((r: any) => dayStr >= r.check_in && dayStr < r.check_out);
   }
+  function ivsForDay(dayStr: string) {
+    return interventions.filter((iv: any) => iv.date === dayStr);
+  }
 
   const selRes = selectedDay ? resForDay(selectedDay) : [];
+  const selIvs = selectedDay ? ivsForDay(selectedDay) : [];
 
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.lg, paddingBottom: bottomPad }} showsVerticalScrollIndicator={false}>
@@ -317,10 +370,11 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, propMap, statusC
           if (!d) return <View key={`e${i}`} style={{ width: CELL_W, height: CELL_W }} />;
           const dayStr = d.format("YYYY-MM-DD");
           const res = resForDay(dayStr);
+          const dayIvs = ivsForDay(dayStr);
           const isToday = dayStr === todayStr;
           const isSel = dayStr === selectedDay;
-          const firstColor = res.length ? statusColors[res[0].status as StatusKey] : null;
-          const uniqueStatuses = Array.from(new Set(res.map((r: any) => r.status))) as StatusKey[];
+          const firstColor = res.length ? statusColors[res[0].status] : null;
+          const uniqueStatuses = Array.from(new Set(res.map((r: any) => r.status))) as string[];
           return (
             <Pressable
               key={dayStr}
@@ -337,13 +391,20 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, propMap, statusC
               </Text>
               {!single && (
                 <View style={styles.dotsRow}>
-                  {uniqueStatuses.slice(0, 4).map((s) => (
-                    <View key={s} style={[styles.miniDot, { backgroundColor: statusColors[s] }]} />
+                  {uniqueStatuses.slice(0, 3).map((s) => (
+                    <View key={s} style={[styles.miniDot, { backgroundColor: statusColors[s] || "#8E8E93" }]} />
                   ))}
                 </View>
               )}
               {single && res.length > 0 && (
                 <View style={[styles.occBar, { backgroundColor: firstColor }]} />
+              )}
+              {dayIvs.length > 0 && (
+                <View style={styles.ivDotsRow}>
+                  {dayIvs.slice(0, 3).map((iv: any) => (
+                    <View key={iv.id} style={[styles.ivDot, { backgroundColor: getInterventionType(iv.kind).color }]} />
+                  ))}
+                </View>
               )}
             </Pressable>
           );
@@ -353,18 +414,37 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, propMap, statusC
       {selectedDay && (
         <View style={styles.dayDetail}>
           <Text style={styles.detailTitle}>{dayjs(selectedDay).format("dddd D MMMM")}</Text>
-          {selRes.length === 0 ? (
+          {selRes.length === 0 && selIvs.length === 0 ? (
             <Text style={styles.detailEmpty}>Journée libre ✓</Text>
           ) : (
-            selRes.map((r: any) => (
-              <Pressable key={r.id} testID={`day-res-${r.id}`} onPress={() => onRes(r.id)} style={styles.detailCard}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.detailGuest}>{r.guest_name}</Text>
-                  <Text style={styles.detailProp}>{propMap[r.property_id]?.name || "Logement"}</Text>
-                </View>
-                <StatusBadge status={r.status} />
-              </Pressable>
-            ))
+            <>
+              {selRes.map((r: any) => (
+                <Pressable key={r.id} testID={`day-res-${r.id}`} onPress={() => onRes(r.id)} style={styles.detailCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.detailGuest}>{r.guest_name}</Text>
+                    <Text style={styles.detailProp}>{propMap[r.property_id]?.name || "Logement"}</Text>
+                  </View>
+                  <StatusBadge status={r.status} />
+                </Pressable>
+              ))}
+              {selIvs.map((iv: any) => {
+                const t = getInterventionType(iv.kind);
+                return (
+                  <Pressable key={iv.id} testID={`day-iv-${iv.id}`} onPress={() => onIv(iv.id)} style={[styles.detailCard, { borderLeftWidth: 4, borderLeftColor: t.color }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detailGuest}>{iv.description || t.label}</Text>
+                      <Text style={styles.detailProp}>
+                        {propMap[iv.property_id]?.name || "Logement"}{iv.intervenant ? ` · ${iv.intervenant}` : ""}
+                      </Text>
+                    </View>
+                    <View style={[styles.ivBadge, { backgroundColor: t.color + "22" }]}>
+                      <View style={[styles.ivDotSm, { backgroundColor: t.color }]} />
+                      <Text style={[styles.ivBadgeText, { color: t.color }]}>{t.label}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </>
           )}
         </View>
       )}
@@ -461,4 +541,33 @@ const styles = StyleSheet.create({
   empty: { alignItems: "center", marginTop: 80, gap: spacing.sm },
   emptyText: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface },
   emptySub: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
+  ivMarker: {
+    position: "absolute",
+    bottom: 4,
+    width: DAY_W - 6,
+    height: 14,
+    borderRadius: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ivDotsRow: { flexDirection: "row", gap: 3, marginTop: 3 },
+  ivDot: { width: 6, height: 6, borderRadius: 2 },
+  ivBadge: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.pill },
+  ivDotSm: { width: 7, height: 7, borderRadius: 999 },
+  ivBadgeText: { fontFamily: font.semibold, fontSize: 12 },
+  fab: {
+    position: "absolute",
+    right: spacing.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
 });

@@ -63,6 +63,15 @@ export default function PropertyDetail() {
       base_price: next.base_price,
       capacity: next.capacity,
       bedrooms: next.bedrooms,
+      owner: next.owner || "",
+      surface: next.surface || 0,
+      address: next.address || "",
+      postal_code: next.postal_code || "",
+      city: next.city || "",
+      address_complement: next.address_complement || "",
+      description: next.description || "",
+      rooms: next.rooms || [],
+      amenities: next.amenities || [],
       seasons: next.seasons || [],
       ical_links: next.ical_links || [],
     };
@@ -158,6 +167,61 @@ export default function PropertyDetail() {
             <Stat icon="bed-outline" value={`${prop.bedrooms}`} label="Chambres" />
             <Stat icon="people-outline" value={`${prop.capacity}`} label="Capacité" />
           </View>
+
+          {/* Informations */}
+          {(prop.owner || prop.surface || prop.address || prop.city || prop.address_complement) && (
+            <>
+              <Text style={styles.sectionTitle}>Informations</Text>
+              <View style={styles.infoCard}>
+                {!!prop.owner && <InfoRow icon="person-outline" label="Propriétaire" value={prop.owner} />}
+                {!!prop.surface && <InfoRow icon="resize-outline" label="Surface" value={`${prop.surface} m²`} />}
+                {(!!prop.address || !!prop.postal_code || !!prop.city) && (
+                  <InfoRow
+                    icon="location-outline"
+                    label="Adresse"
+                    value={[prop.address, [prop.postal_code, prop.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
+                  />
+                )}
+                {!!prop.address_complement && (
+                  <InfoRow icon="navigate-outline" label="Complément" value={prop.address_complement} />
+                )}
+              </View>
+            </>
+          )}
+
+          {!!prop.description && (
+            <>
+              <Text style={styles.sectionTitle}>Descriptif</Text>
+              <Text style={styles.description}>{prop.description}</Text>
+            </>
+          )}
+
+          {(prop.rooms || []).length > 0 && (
+            <>
+              <Text style={styles.sectionTitle}>Pièces de l'hébergement</Text>
+              <View style={styles.tagWrap}>
+                {prop.rooms.map((r: string) => (
+                  <View key={r} style={styles.tag}>
+                    <Text style={styles.tagText}>{r}</Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
+          {(prop.amenities || []).length > 0 && (
+            <>
+              <Text style={styles.sectionTitle}>Équipements</Text>
+              <View style={styles.tagWrap}>
+                {prop.amenities.map((a: string) => (
+                  <View key={a} style={styles.tag}>
+                    <Ionicons name="checkmark-circle" size={14} color={colors.success} />
+                    <Text style={styles.tagText}>{a}</Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
 
           {/* Seasonal pricing */}
           <Text style={styles.sectionTitle}>Tarifs par saison</Text>
@@ -269,6 +333,16 @@ function Stat({ icon, value, label }: any) {
   );
 }
 
+function InfoRow({ icon, label, value }: any) {
+  return (
+    <View style={styles.infoRow}>
+      <Ionicons name={icon} size={18} color={colors.onSurfaceTertiary} />
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
@@ -307,9 +381,19 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   statValue: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
-  statLabel: { fontFamily: font.regular, fontSize: 11, color: colors.onSurfaceTertiary },
-  sectionTitle: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, marginTop: spacing.xl, marginBottom: spacing.md },
+  statLabel: { fontFamily: font.regular, fontSize: 11, color: colors.onSurfaceTertiary },  sectionTitle: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, marginTop: spacing.xl, marginBottom: spacing.md },
   sectionHint: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, marginBottom: spacing.md, marginTop: -spacing.sm },
+  infoCard: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.md },
+  infoRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 8 },
+  infoLabel: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceTertiary, width: 96 },
+  infoValue: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface, flex: 1 },
+  description: { fontFamily: font.regular, fontSize: fontSize.lg, color: colors.onSurfaceSecondary, lineHeight: 23 },
+  tagWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  tag: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill,
+  },
+  tagText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface },
   listItem: {
     flexDirection: "row",
     alignItems: "center",

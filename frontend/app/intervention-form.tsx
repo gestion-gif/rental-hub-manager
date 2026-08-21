@@ -1,0 +1,212 @@
+import React, { useEffect, useState } from "react";
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+
+import { api } from "@/src/api";
+import { Field, PrimaryButton } from "@/src/components/ui";
+import { INTERVENTION_TYPES } from "@/src/interventionTypes";
+import { colors, font, fontSize, radius, spacing } from "@/src/theme";
+
+export default function InterventionForm() {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { id, date: dateParam, property: propParam } = useLocalSearchParams<{ id?: string; date?: string; property?: string }>();
+  const editing = !!id;
+
+  const [props, setProps] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const [form, setForm] = useState({
+    property_id: propParam || "",
+    kind: "menage",
+    date: dateParam || "",
+    description: "",
+    intervenant: "",
+  });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const pr = await api.get("/properties");
+        setProps(pr);
+        if (editing) {
+          const list = await api.get("/interventions");
+          const iv = list.find((x: any) => x.id === id);
+          if (iv) {
+            setForm({
+              property_id: iv.property_id,
+              kind: iv.kind || "menage",
+              date: iv.date,
+              description: iv.description || "",
+              intervenant: iv.intervenant || "",
+            });
+          }
+        } else if (pr.length && !propParam) {
+          setForm((f) => ({ ...f, property_id: pr[0].id }));
+        }
+      } catch {}
+      setLoading(false);
+    })();
+  }, []);
+
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const valid = form.property_id && form.date;
+
+  async function save() {
+    if (!valid || saving) return;
+    setSaving(true);
+    try {
+      if (editing) await api.put(`/interventions/${id}`, form);
+      else await api.post("/interventions", form);
+      router.back();
+    } catch {
+      setSaving(false);
+    }
+  }
+
+  async function remove() {
+    await api.del(`/interventions/${id}`);
+    router.back();
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color={colors.brandPrimary} />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+        <Text style={styles.title}>{editing ? "Modifier l'intervention" : "Nouvelle intervention"}</Text>
+        <Pressable testID="close-intervention-form" onPress={() => router.back()} style={styles.closeBtn}>
+          <Ionicons name="close" size={22} color={colors.onSurface} />
+        </Pressable>
+      </View>
+
+      {props.length === 0 ? (
+        <View style={styles.center}>
+          <Text style={styles.hint}>Ajoutez d'abord un logement.</Text>
+        </View>
+      ) : (
+        <KeyboardAwareScrollView
+          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 40 }}
+          bottomOffset={20}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.label}>Type d'intervention</Text>
+          <View style={styles.typeRow}>
+            {INTERVENTION_TYPES.map((t) => {
+              const active = form.kind === t.key;
+              return (
+                <Pressable
+                  key={t.key}
+                  testID={`intervention-kind-${t.key}`}
+                  onPress={() => set("kind", t.key)}
+                  style={[styles.typeCard, active && { borderColor: t.color, backgroundColor: t.color + "1A" }]}
+                >
+                  <View style={[styles.typeDot, { backgroundColor: t.color }]} />
+                  <Text style={[styles.typeLabel, active && { color: t.color }]}>{t.label}</Text>
+                  {active && <Ionicons name="checkmark-circle" size={18} color={t.color} />}
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={{ height: spacing.lg }} />
+          <Text style={styles.label}>Logement</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+            {props.map((p) => {
+              const active = form.property_id === p.id;
+              return (
+                <Pressable
+                  key={p.id}
+                  testID={`intervention-prop-${p.id}`}
+                  onPress={() => set("property_id", p.id)}
+                  style={[styles.chip, active && styles.chipActive]}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>{p.name}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          <View style={{ height: spacing.lg }} />
+          <Field label="Date" testID="intervention-date" value={form.date} onChangeText={(v) => set("date", v)} placeholder="AAAA-MM-JJ" />
+          <Field label="Intervenant" testID="intervention-intervenant" value={form.intervenant} onChangeText={(v) => set("intervenant", v)} placeholder="Nom de l'intervenant / société" />
+          <Field label="Description" testID="intervention-description" value={form.description} onChangeText={(v) => set("description", v)} placeholder="Détail de l'intervention..." multiline style={styles.textarea} />
+
+          <PrimaryButton
+            testID="save-intervention"
+            label={editing ? "Enregistrer" : "Ajouter au calendrier"}
+            onPress={save}
+            loading={saving}
+            disabled={!valid}
+          />
+          {editing && (
+            <PrimaryButton
+              testID="delete-intervention"
+              label="Supprimer"
+              onPress={remove}
+              variant="danger"
+              style={{ marginTop: spacing.md, backgroundColor: colors.surfaceSecondary }}
+            />
+          )}
+        </KeyboardAwareScrollView>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.surface },
+  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  title: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface, flex: 1 },
+  closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
+  label: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary, marginBottom: spacing.sm },
+  typeRow: { flexDirection: "row", gap: spacing.md },
+  typeCard: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  typeDot: { width: 12, height: 12, borderRadius: 999 },
+  typeLabel: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface, flex: 1 },
+  chipRow: { gap: spacing.sm, paddingRight: spacing.lg },
+  chip: {
+    flexShrink: 0,
+    maxWidth: 180,
+    height: 38,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chipActive: { backgroundColor: colors.brandPrimary },
+  chipText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary },
+  chipTextActive: { color: colors.onBrandPrimary },
+  textarea: { minHeight: 90, textAlignVertical: "top", paddingTop: 12 },
+  hint: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
+});

@@ -15,15 +15,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { api } from "@/src/api";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import { Field, PrimaryButton } from "@/src/components/ui";
-import {
-  colors,
-  font,
-  fontSize,
-  radius,
-  spacing,
-  STATUS_ORDER,
-  STATUS,
-} from "@/src/theme";
+import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const PLATFORMS = ["Direct", "Airbnb", "Booking.com", "Vrbo"];
 
@@ -32,7 +24,7 @@ export default function ReservationForm() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const editing = !!id;
-  const { statusColors } = usePreferences();
+  const { statuses } = usePreferences();
 
   const [props, setProps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,7 +138,7 @@ export default function ReservationForm() {
           <View style={{ height: spacing.lg }} />
           <Text style={styles.label}>Statut</Text>
           <ChipRow
-            items={STATUS_ORDER.map((s) => ({ key: s, label: STATUS[s].label, color: statusColors[s] }))}
+            items={statuses.map((s) => ({ key: s.key, label: s.label, color: s.color }))}
             value={form.status}
             onSelect={(v: string) => set("status", v)}
             prefix="res-status"

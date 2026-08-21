@@ -18,16 +18,17 @@ dayjs.locale("fr");
 
 import { api } from "@/src/api";
 import StatusBadge from "@/src/components/StatusBadge";
-import { colors, font, fontSize, radius, spacing, STATUS_ORDER, STATUS } from "@/src/theme";
-
-const FILTERS = [
-  { key: "all", label: "Toutes" },
-  ...STATUS_ORDER.map((s) => ({ key: s, label: STATUS[s].label })),
-];
+import { usePreferences } from "@/src/context/PreferencesContext";
+import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 export default function CalendarScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { statuses } = usePreferences();
+  const FILTERS = useMemo(
+    () => [{ key: "all", label: "Toutes" }, ...statuses.map((s) => ({ key: s.key, label: s.label }))],
+    [statuses],
+  );
   const [items, setItems] = useState<any[]>([]);
   const [props, setProps] = useState<Record<string, any>>({});
   const [filter, setFilter] = useState("all");

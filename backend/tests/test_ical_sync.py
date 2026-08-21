@@ -85,6 +85,7 @@ ICS_TWO_EVENTS = (
     "DTEND:20260225T110000Z\r\n"
     "SUMMARY:Jean Dupont\r\n"
     " -Vacances\r\n"  # folded continuation
+    "DESCRIPTION:Reservation code: HMABCD1234\\n4 guests\\, arriving 2pm\r\n"
     "END:VEVENT\r\n"
     "END:VCALENDAR\r\n"
 )
@@ -165,12 +166,17 @@ class TestSyncImport:
             assert r1["platform"] == "Airbnb"
             # SUMMARY 'Reserved' -> anonymised guest_name
             assert r1["guest_name"] == "Réservation Airbnb"
+            # No description on evt-1 -> notes still starts with 'Importé depuis'
+            assert r1["notes"].startswith("Importé depuis"), r1["notes"]
 
             r2 = by_uid["evt-2@test"]
             assert r2["check_in"] == "2026-02-20"
             assert r2["check_out"] == "2026-02-25"
             # Real name SUMMARY preserved (folded line concatenated)
             assert r2["guest_name"].startswith("Jean Dupont")
+            # DESCRIPTION content imported into notes (with \n unescaped, \, -> ,)
+            assert "HMABCD1234" in r2["notes"], r2["notes"]
+            assert "4 guests, arriving 2pm" in r2["notes"], r2["notes"]
         finally:
             api_client.delete(f"{BASE_URL}/api/properties/{prop['id']}")
 
