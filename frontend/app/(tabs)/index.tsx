@@ -42,6 +42,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [ivOpen, setIvOpen] = useState(false);
+  const [arrOpen, setArrOpen] = useState(false);
+  const [stayOpen, setStayOpen] = useState(false);
+  const [depOpen, setDepOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -124,16 +127,23 @@ export default function Dashboard() {
                 value={`${data?.total_properties ?? 0}`}
                 icon="business"
                 tint={colors.warning}
+                onPress={() => router.push("/(tabs)/properties")}
               />
               <StatCard
                 label="À venir"
                 value={`${data?.upcoming_count ?? 0}`}
                 icon="time"
                 tint={colors.brandPrimary}
+                onPress={() => router.push("/(tabs)/planning")}
               />
             </View>
 
-            <Section title="Arrivées du jour">
+            <CollapsibleSection
+              title="Arrivées du jour"
+              count={data?.arrivals_today?.length || 0}
+              open={arrOpen}
+              onToggle={() => setArrOpen((o) => !o)}
+            >
               {data?.arrivals_today?.length ? (
                 data.arrivals_today.map((r) => (
                   <StayCard key={r.id} r={r} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
@@ -141,7 +151,7 @@ export default function Dashboard() {
               ) : (
                 <EmptyRow text="Aucune arrivée aujourd'hui" />
               )}
-            </Section>
+            </CollapsibleSection>
 
             <CollapsibleSection
               title="Interventions"
@@ -158,7 +168,12 @@ export default function Dashboard() {
               )}
             </CollapsibleSection>
 
-            <Section title="Séjours en cours">
+            <CollapsibleSection
+              title="Séjours en cours"
+              count={data?.current_stays?.length || 0}
+              open={stayOpen}
+              onToggle={() => setStayOpen((o) => !o)}
+            >
               {data?.current_stays?.length ? (
                 data.current_stays.map((r) => (
                   <StayCard key={r.id} r={r} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
@@ -166,9 +181,14 @@ export default function Dashboard() {
               ) : (
                 <EmptyRow text="Aucun séjour en cours" />
               )}
-            </Section>
+            </CollapsibleSection>
 
-            <Section title="Départs du jour">
+            <CollapsibleSection
+              title="Départs du jour"
+              count={data?.departures_today?.length || 0}
+              open={depOpen}
+              onToggle={() => setDepOpen((o) => !o)}
+            >
               {data?.departures_today?.length ? (
                 data.departures_today.map((r) => (
                   <StayCard key={r.id} r={r} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
@@ -176,7 +196,7 @@ export default function Dashboard() {
               ) : (
                 <EmptyRow text="Aucun départ aujourd'hui" />
               )}
-            </Section>
+            </CollapsibleSection>
 
             <Pressable
               testID="ai-banner"
@@ -201,24 +221,19 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ label, value, icon, tint }: any) {
+function StatCard({ label, value, icon, tint, onPress }: any) {
+  const Wrapper: any = onPress ? Pressable : View;
   return (
-    <View style={styles.statCard} testID={`stat-${label}`}>
+    <Wrapper style={styles.statCard} testID={`stat-${label}`} onPress={onPress}>
       <View style={[styles.statIcon, { backgroundColor: tint + "1A" }]}>
         <Ionicons name={icon} size={18} color={tint} />
       </View>
       <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function Section({ title, children }: any) {
-  return (
-    <View style={{ marginTop: spacing.xl }}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
-    </View>
+      <View style={styles.statLabelRow}>
+        <Text style={styles.statLabel}>{label}</Text>
+        {onPress && <Ionicons name="chevron-forward" size={14} color={colors.onSurfaceTertiary} />}
+      </View>
+    </Wrapper>
   );
 }
 
@@ -365,6 +380,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   statValue: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface },
+  statLabelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   statLabel: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
   sectionTitle: {
     fontFamily: font.semibold,
