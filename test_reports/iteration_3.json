@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 3 — Primary bug fix (iCal sync) validated. Backend: 40/40 pytest green (33 regression from iteration 2 + 7 new iCal tests). New /app/backend/tests/test_ical_sync.py spins up a local HTTP server on 127.0.0.1 (backend can reach localhost) that serves crafted .ics feeds and covers: (a) POST /api/properties/{id}/sync returns 401 without token; (b) 404 for unknown property; (c) property with no ical_links returns {imported:0, updated:0, errors:['Aucun lien iCal configuré']}; (d) 2 VEVENTs (DATE + datetime Z) imported → 2 confirmed reservations with correct check_in/check_out (YYYY-MM-DD from YYYYMMDD, including datetime→date truncation for DTSTART Z form), status='confirmee', source='ical', platform matches link; SUMMARY 'Reserved' → guest_name 'Réservation Airbnb'; real-name SUMMARY 'Jean Dupont' with folded continuation line ' -Vacances' is preserved and concatenated correctly by _unfold_ical; (e) idempotency: 2nd /sync with same feed yields imported=0/updated=2, no duplicates in DB; (f) stale-removal: after re-serving a feed missing one VEVENT the endpoint deletes the stale imported reservation and length drops to 1; (g) unreachable feed URL produces errors=['<Platform>: HTTP 404'] and imported=0. Parser unit test asserts VALUE=DATE, datetime-with-Z and RFC5545 line folding all yield correct start/end/summary. Regression: existing auth, properties CRUD, reservations CRUD+PATCH, dashboard, AI, preferences all pass unchanged. Frontend: verified via static inspection that (i) property/[id].tsx conditionally renders the 'sync-ical' PrimaryButton and 'sync-result' Text only when ical_links.length > 0 (property/[id].tsx:222-235), (ii) syncIcal() POSTs to /properties/${id}/sync via api.ts, (iii) planning.tsx exposes testIDs prev-year, prev-month, today-button, next-month, next-year (planning.tsx:126-142). Iteration 2 already established that frontend authenticates end-to-end via IndexedDB seeding + /auth/me route mock, and the target testIDs exist, so no re-run of the auth-injected UI test was necessary this iteration.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "Global styles (shadow props)", "issue": "React Native Web still logs 'shadow* style props are deprecated. Use boxShadow.' (carried over from iteration 2). Reference: /app/frontend/app/(tabs)/planning.tsx:379 segBtnActive (shadowColor/shadowOpacity/shadowRadius)."},
+      {"component": "pointerEvents prop", "issue": "React Native Web still logs 'props.pointerEvents is deprecated. Use style.pointerEvents' (carried over from iteration 2)."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ical_sync.py",
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Nothing blocking for the reported bug — iCal sync endpoint and frontend button are working as specified. Remaining deprecation warnings (shadow*/pointerEvents) still open from iteration 2."
+  ],
+  "critical_code_review_comments": [
+    "server.py sync_ical correctly dedupes by (user_id, property_id, ical_uid) and only deletes stale docs scoped to source='ical' + matching platform — safe against wiping manual/direct reservations.",
+    "_parse_ical_date uses a regex on the first \\d{8} group, so it handles both VALUE=DATE:YYYYMMDD and datetime YYYYMMDDT...Z transparently. Note: datetimes are truncated to their date component — acceptable for booking calendars but worth documenting.",
+    "_unfold_ical correctly preserves leading-space continuation lines per RFC 5545 (verified by test with folded ' -Vacances').",
+    "SUMMARY 'Reserved' (and other well-known block strings) is anonymised to 'Réservation <platform>' via _BLOCK_SUMMARIES set — matches spec.",
+    "Fallback UID (f\"{platform}-{start}-{end}\") when VEVENT has no UID keeps dedupe stable across syncs.",
+    "Timeout of 30s per iCal fetch + follow_redirects=True + explicit User-Agent — good defensive defaults.",
+    "server.py is now 588 lines — still within the <700-line guideline but approaching; a future refactor could extract the iCal module into backend/ical.py."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ical_sync.py (NEW — 7 tests: 3 guards + 3 import/idempotency/stale + 1 parser unit)"
+  ],
+  "success_rate": {"backend": "100% (40/40)", "frontend": "static-verified for sync-ical + planning nav testIDs; full flow verified in iteration 2"},
+  "seed_data_creation": "Reused conftest test_user session. Each iCal test creates its own TEST_-prefixed property (with ical_links pointing to 127.0.0.1:<free-port>/<key>.ics) and deletes it via /api/properties/{id} in finally blocks; the property DELETE cascade also removes the imported reservations. In-process HTTP server on an ephemeral port serves ICS payloads from a per-test dict, no external network needed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iCal endpoint tests live in /app/backend/tests/test_ical_sync.py and require no external services — the HTTPServer fixture is module-scoped and thread-based. If new .ics quirks appear (e.g. RRULE, timezone-aware DTSTART with TZID param), extend _ICS_STORE-driven scenarios. Auth-injected UI helper pattern from iteration 2 remains valid.",
+  "rca_of_issue": "Reported bug (Airbnb .ics link not importing reservations) — root cause was that ical_links were persisted on the property document but never fetched. Fix: new POST /api/properties/{id}/sync that iterates ical_links, GETs each URL via httpx (30s timeout, redirects, custom UA), runs parse_ical() → upserts by ical_uid, deletes stale imported docs per-platform. Verified end-to-end: 2 VEVENTs → 2 confirmed reservations with correct dates and platform tagging, idempotent second call, stale removal, error messages surfaced on HTTP failure. Frontend property detail exposes a 'Synchroniser maintenant' button (testID sync-ical) that calls the endpoint and renders the result string in a Text (testID sync-result)."
+}

@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
 import logging
 import uuid
 import calendar as pycalendar
@@ -274,6 +275,138 @@ async def delete_reservation(reservation_id: str, user=Depends(get_current_user)
 
 
 # ---------------------------------------------------------------------------
+# iCal synchronization (import reservations from Airbnb/Booking .ics feeds)
+# ---------------------------------------------------------------------------
+def _unfold_ical(text: str):
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out = []
+    for ln in lines:
+        if ln[:1] in (" ", "\t") and out:
+            out[-1] += ln[1:]
+        else:
+            out.append(ln)
+    return out
+
+
+def _parse_ical_date(val: str):
+    m = re.search(r"(\d{8})", val)
+    if not m:
+        return None
+    s = m.group(1)
+    return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
+
+
+def parse_ical(text: str):
+    events = []
+    cur = None
+    for ln in _unfold_ical(text):
+        stripped = ln.strip()
+        if stripped == "BEGIN:VEVENT":
+            cur = {}
+        elif stripped == "END:VEVENT":
+            if cur is not None:
+                events.append(cur)
+            cur = None
+        elif cur is not None and ":" in ln:
+            key, val = ln.split(":", 1)
+            key = key.split(";")[0].upper()
+            if key == "DTSTART":
+                cur["start"] = _parse_ical_date(val)
+            elif key == "DTEND":
+                cur["end"] = _parse_ical_date(val)
+            elif key == "SUMMARY":
+                cur["summary"] = val.strip()
+            elif key == "UID":
+                cur["uid"] = val.strip()
+    return events
+
+
+_BLOCK_SUMMARIES = {
+    "reserved", "not available", "closed", "blocked", "unavailable",
+    "airbnb (not available)", "closed - not available", "busy",
+}
+
+
+@api_router.post("/properties/{property_id}/sync")
+async def sync_ical(property_id: str, user=Depends(get_current_user)):
+    prop = await db.properties.find_one({"id": property_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    links = prop.get("ical_links") or []
+    if not links:
+        return {"imported": 0, "updated": 0, "errors": ["Aucun lien iCal configuré"]}
+
+    imported = 0
+    updated = 0
+    errors = []
+    headers = {"User-Agent": "Mozilla/5.0 (StayPilot iCal Sync)"}
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=headers) as http:
+        for link in links:
+            platform = link.get("platform", "iCal")
+            url = link.get("url", "").strip()
+            if url.startswith("webcal://"):
+                url = "https://" + url[len("webcal://"):]
+            try:
+                resp = await http.get(url)
+                if resp.status_code != 200:
+                    errors.append(f"{platform}: HTTP {resp.status_code}")
+                    continue
+                events = parse_ical(resp.text)
+                feed_uids = []
+                for ev in events:
+                    if not ev.get("start") or not ev.get("end"):
+                        continue
+                    uid = ev.get("uid") or f"{platform}-{ev['start']}-{ev['end']}"
+                    feed_uids.append(uid)
+                    summary = (ev.get("summary") or "").strip()
+                    if summary and summary.lower() not in _BLOCK_SUMMARIES:
+                        guest = summary
+                    else:
+                        guest = f"Réservation {platform}"
+                    q = {"user_id": user["user_id"], "property_id": property_id, "ical_uid": uid}
+                    existing = await db.reservations.find_one(q)
+                    if existing:
+                        await db.reservations.update_one(q, {"$set": {
+                            "check_in": ev["start"],
+                            "check_out": ev["end"],
+                            "guest_name": guest,
+                            "platform": platform,
+                        }})
+                        updated += 1
+                    else:
+                        await db.reservations.insert_one({
+                            "id": str(uuid.uuid4()),
+                            "user_id": user["user_id"],
+                            "property_id": property_id,
+                            "guest_name": guest,
+                            "guest_email": "",
+                            "platform": platform,
+                            "check_in": ev["start"],
+                            "check_out": ev["end"],
+                            "guests": 1,
+                            "total_price": 0,
+                            "status": "confirmee",
+                            "notes": f"Importé depuis {platform}",
+                            "source": "ical",
+                            "ical_uid": uid,
+                            "created_at": now_utc().isoformat(),
+                        })
+                        imported += 1
+                # Remove imported reservations that disappeared from the feed
+                await db.reservations.delete_many({
+                    "user_id": user["user_id"],
+                    "property_id": property_id,
+                    "source": "ical",
+                    "platform": platform,
+                    "ical_uid": {"$nin": feed_uids},
+                })
+            except Exception as e:
+                errors.append(f"{platform}: {str(e)[:80]}")
+
+    return {"imported": imported, "updated": updated, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
 # Dashboard
 # ---------------------------------------------------------------------------
 @api_router.get("/dashboard")
@@ -392,6 +525,40 @@ async def ai_pricing(payload: PricingRequest, user=Depends(get_current_user)):
     )
     suggestion = await chat.send_message(UserMessage(text=prompt))
     return {"suggestion": suggestion}
+
+
+# ---------------------------------------------------------------------------
+# Preferences (customizable status colors)
+# ---------------------------------------------------------------------------
+DEFAULT_STATUS_COLORS = {
+    "demande": "#FF9500",
+    "confirmee": "#34C759",
+    "arrivee": "#32ADE6",
+    "depart": "#8E8E93",
+    "annulee": "#FF3B30",
+}
+
+
+class PreferencesIn(BaseModel):
+    status_colors: dict
+
+
+@api_router.get("/preferences")
+async def get_preferences(user=Depends(get_current_user)):
+    doc = await db.preferences.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    colors = (doc or {}).get("status_colors") or {}
+    return {"status_colors": {**DEFAULT_STATUS_COLORS, **colors}}
+
+
+@api_router.put("/preferences")
+async def update_preferences(payload: PreferencesIn, user=Depends(get_current_user)):
+    merged = {**DEFAULT_STATUS_COLORS, **(payload.status_colors or {})}
+    await db.preferences.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"user_id": user["user_id"], "status_colors": merged}},
+        upsert=True,
+    )
+    return {"status_colors": merged}
 
 
 # ---------------------------------------------------------------------------

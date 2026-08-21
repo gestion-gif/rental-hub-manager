@@ -54,6 +54,15 @@ export default function TabsLayout() {
         options={{
           title: "Réservations",
           tabBarIcon: ({ color, size }) => (
+            <Ionicons name="list-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="planning"
+        options={{
+          title: "Planning",
+          tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar-outline" size={size} color={color} />
           ),
         }}

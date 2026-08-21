@@ -26,6 +26,8 @@ PROTECTED = [
     ("GET", "/api/dashboard"),
     ("POST", "/api/ai/guest-reply"),
     ("POST", "/api/ai/pricing-suggestion"),
+    ("GET", "/api/preferences"),
+    ("PUT", "/api/preferences"),
 ]
 
 
@@ -246,6 +248,117 @@ def test_data_isolation(api_client, anon_client, test_user):
         assert r.status_code == 401
     finally:
         api_client.delete(f"{BASE_URL}/api/properties/{pid}")
+
+# ---------------------------------------------------------------- Preferences
+class TestPreferences:
+    """Customizable status colors — new feature."""
+
+    def test_get_returns_defaults_shape(self, api_client):
+        r = api_client.get(f"{BASE_URL}/api/preferences")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert "status_colors" in data
+        sc = data["status_colors"]
+        for key in ("demande", "confirmee", "arrivee", "depart", "annulee"):
+            assert key in sc, f"missing status key {key}"
+            assert isinstance(sc[key], str) and sc[key].startswith("#")
+
+    def test_put_partial_merges_with_defaults(self, api_client):
+        r = api_client.put(f"{BASE_URL}/api/preferences",
+                           json={"status_colors": {"demande": "#FF2D55"}})
+        assert r.status_code == 200, r.text
+        merged = r.json()["status_colors"]
+        assert merged["demande"] == "#FF2D55"
+        for key in ("confirmee", "arrivee", "depart", "annulee"):
+            assert key in merged
+        # GET reflects the change.
+        r2 = api_client.get(f"{BASE_URL}/api/preferences")
+        assert r2.status_code == 200
+        assert r2.json()["status_colors"]["demande"] == "#FF2D55"
+
+    def test_put_full_palette_and_persists(self, api_client):
+        payload = {
+            "status_colors": {
+                "demande": "#FFCC00",
+                "confirmee": "#30D158",
+                "arrivee": "#0A84FF",
+                "depart": "#5E5CE6",
+                "annulee": "#FF453A",
+            }
+        }
+        r = api_client.put(f"{BASE_URL}/api/preferences", json=payload)
+        assert r.status_code == 200
+        assert r.json()["status_colors"] == payload["status_colors"]
+        r2 = api_client.get(f"{BASE_URL}/api/preferences")
+        assert r2.json()["status_colors"] == payload["status_colors"]
+
+
+def test_preferences_scoped_per_user(anon_client, test_user):
+    """Colors saved by user B must not leak into user A's preferences."""
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from motor.motor_asyncio import AsyncIOMotorClient
+    import asyncio as _aio
+    import requests as _rq
+
+    mongo = AsyncIOMotorClient(os.environ["MONGO_URL"])
+    _db = mongo[os.environ["DB_NAME"]]
+    uid_b = f"user_TEST_prefiso_{_uuid.uuid4().hex[:8]}"
+    tok_b = f"tst_prefiso_{_uuid.uuid4().hex}"
+
+    async def seed():
+        await _db.users.insert_one({
+            "user_id": uid_b, "email": f"{uid_b}@t.test",
+            "name": "IsoB", "picture": "",
+            "created_at": _dt.now(_tz.utc).isoformat(),
+        })
+        await _db.user_sessions.insert_one({
+            "session_token": tok_b, "user_id": uid_b,
+            "created_at": _dt.now(_tz.utc),
+            "expires_at": _dt.now(_tz.utc) + _td(days=1),
+        })
+
+    async def cleanup():
+        await _db.preferences.delete_many({"user_id": uid_b})
+        await _db.user_sessions.delete_many({"user_id": uid_b})
+        await _db.users.delete_one({"user_id": uid_b})
+        mongo.close()
+
+    _loop = _aio.new_event_loop()
+    _loop.run_until_complete(seed())
+    try:
+        # user A resets their preferences to default palette explicitly first.
+        s_a = _rq.Session()
+        s_a.headers.update({
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {test_user['session_token']}",
+        })
+        s_a.put(f"{BASE_URL}/api/preferences", json={
+            "status_colors": {
+                "demande": "#FF9500", "confirmee": "#34C759",
+                "arrivee": "#32ADE6", "depart": "#8E8E93", "annulee": "#FF3B30",
+            }
+        })
+        # user B sets a distinctive value.
+        s_b = _rq.Session()
+        s_b.headers.update({
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {tok_b}",
+        })
+        r_b = s_b.put(f"{BASE_URL}/api/preferences",
+                      json={"status_colors": {"demande": "#123456"}})
+        assert r_b.status_code == 200
+        assert r_b.json()["status_colors"]["demande"] == "#123456"
+
+        # user A should NOT see #123456.
+        r_a = s_a.get(f"{BASE_URL}/api/preferences")
+        assert r_a.status_code == 200
+        assert r_a.json()["status_colors"]["demande"] != "#123456"
+    finally:
+        _loop.run_until_complete(cleanup())
+        _loop.close()
+
+
 
 
 def test_logout(anon_client, test_user):

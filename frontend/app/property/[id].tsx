@@ -37,6 +37,8 @@ export default function PropertyDetail() {
   // ical inputs
   const [icalPlatform, setIcalPlatform] = useState("Airbnb");
   const [icalUrl, setIcalUrl] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -93,6 +95,21 @@ export default function PropertyDetail() {
 
   function removeIcal(idx: number) {
     persist({ ...prop, ical_links: prop.ical_links.filter((_: any, i: number) => i !== idx) });
+  }
+
+  async function syncIcal() {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const r = await api.post(`/properties/${id}/sync`);
+      let msg = `${r.imported} importée(s), ${r.updated} mise(s) à jour`;
+      if (r.errors && r.errors.length) msg += ` · ${r.errors.join(" · ")}`;
+      setSyncMsg(msg);
+      await load();
+    } catch {
+      setSyncMsg("Échec de la synchronisation. Vérifiez le lien iCal.");
+    }
+    setSyncing(false);
   }
 
   async function deleteProperty() {
@@ -202,6 +219,21 @@ export default function PropertyDetail() {
             <PrimaryButton testID="add-ical" label="Ajouter le lien" onPress={addIcal} variant="secondary" />
           </View>
 
+          {(prop.ical_links || []).length > 0 && (
+            <View style={styles.syncBox}>
+              <PrimaryButton
+                testID="sync-ical"
+                label="Synchroniser maintenant"
+                onPress={syncIcal}
+                loading={syncing}
+                icon={<Ionicons name="sync" size={16} color={colors.onBrandPrimary} />}
+              />
+              {!!syncMsg && (
+                <Text style={styles.syncMsg} testID="sync-result">{syncMsg}</Text>
+              )}
+            </View>
+          )}
+
           <PrimaryButton
             testID="ai-pricing-link"
             label="Suggestions de prix par IA"
@@ -307,4 +339,12 @@ const styles = StyleSheet.create({
   pillActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   pillText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary },
   pillTextActive: { color: colors.onBrandPrimary },
+  syncBox: { marginTop: spacing.md },
+  syncMsg: {
+    fontFamily: font.medium,
+    fontSize: fontSize.base,
+    color: colors.onSurfaceSecondary,
+    marginTop: spacing.md,
+    textAlign: "center",
+  },
 });

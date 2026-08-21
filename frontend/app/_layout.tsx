@@ -9,6 +9,7 @@ import { useFonts } from "expo-font";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/context/AuthContext";
+import { PreferencesProvider } from "@/src/context/PreferencesContext";
 
 // Disable logbox errors etc so that users can see the app
 // and agent works as expected.
@@ -44,20 +45,26 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <KeyboardProvider>
           <AuthProvider>
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="index" />
-              <Stack.Screen name="login" />
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen
-                name="property-form"
-                options={{ presentation: "modal" }}
-              />
-              <Stack.Screen
-                name="reservation-form"
-                options={{ presentation: "modal" }}
-              />
-              <Stack.Screen name="property/[id]" />
-            </Stack>
+            <PreferencesProvider>
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="index" />
+                <Stack.Screen name="login" />
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen
+                  name="property-form"
+                  options={{ presentation: "modal" }}
+                />
+                <Stack.Screen
+                  name="reservation-form"
+                  options={{ presentation: "modal" }}
+                />
+                <Stack.Screen
+                  name="settings/status-colors"
+                  options={{ presentation: "modal" }}
+                />
+                <Stack.Screen name="property/[id]" />
+              </Stack>
+            </PreferencesProvider>
           </AuthProvider>
         </KeyboardProvider>
       </SafeAreaProvider>

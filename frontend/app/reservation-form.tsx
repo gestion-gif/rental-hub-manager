@@ -13,6 +13,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { api } from "@/src/api";
+import { usePreferences } from "@/src/context/PreferencesContext";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import {
   colors,
@@ -31,6 +32,7 @@ export default function ReservationForm() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const editing = !!id;
+  const { statusColors } = usePreferences();
 
   const [props, setProps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -137,16 +139,16 @@ export default function ReservationForm() {
           <ChipRow
             items={props.map((p) => ({ key: p.id, label: p.name }))}
             value={form.property_id}
-            onSelect={(v) => set("property_id", v)}
+            onSelect={(v: string) => set("property_id", v)}
             prefix="res-prop"
           />
 
           <View style={{ height: spacing.lg }} />
           <Text style={styles.label}>Statut</Text>
           <ChipRow
-            items={STATUS_ORDER.map((s) => ({ key: s, label: STATUS[s].label, color: STATUS[s].color }))}
+            items={STATUS_ORDER.map((s) => ({ key: s, label: STATUS[s].label, color: statusColors[s] }))}
             value={form.status}
-            onSelect={(v) => set("status", v)}
+            onSelect={(v: string) => set("status", v)}
             prefix="res-status"
           />
 
@@ -158,7 +160,7 @@ export default function ReservationForm() {
           <ChipRow
             items={PLATFORMS.map((p) => ({ key: p, label: p }))}
             value={form.platform}
-            onSelect={(v) => set("platform", v)}
+            onSelect={(v: string) => set("platform", v)}
             prefix="res-platform"
           />
           <View style={{ height: spacing.lg }} />

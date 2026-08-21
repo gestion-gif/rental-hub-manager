@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 2 — Planning tab + customizable status colors. Backend: 33/33 pytest tests pass, including 4 NEW preferences tests (GET returns defaults with 5 keys, PUT partial merges with defaults, PUT full palette persists, and cross-user scoping). Auth guard extended to /api/preferences (GET + PUT return 401 without token). Existing endpoints (auth, properties CRUD, reservations CRUD+PATCH status, dashboard, AI guest-reply, AI pricing) all regression-green. Frontend: seeded a session_token directly into IndexedDB (db 'AsyncStorage', store 'keyvaluepairs') and intercepted /api/auth/me — full authenticated navigation achieved on mobile viewport (390×844). Verified: Planning tab is present in bottom tab bar (Accueil/Réservations/Planning/Logements/Assistant); segmented toggle Réglette/Mois works (testIDs planning-mode-timeline, planning-mode-month); property chips render (prop-chip-all + prop-chip-<id>, French label 'Tous' + 'Villa Test'); month nav works (prev-month/next-month, label 'Août 2026'); Timeline view renders property rows + colored legend and produces timeline-bar-<id> for the seeded reservation (1 bar found); Month view renders 31 day-<YYYY-MM-DD> cells with status dots; gear (open-color-settings) navigates to /settings/status-colors; 50 swatches rendered (5 statuses × 10 colors, testIDs swatch-<status>-<hex>); tapping a new swatch + save-colors persists and routes back to /planning. Console still logs the previously-reported React-Native-Web deprecations (shadow* props and props.pointerEvents) — non-blocking but should be migrated.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "Global styles (shadow props)", "issue": "React Native Web logs 'shadow* style props are deprecated. Use boxShadow.' — planning.tsx segBtnActive uses shadowColor/shadowOpacity/shadowRadius (planning.tsx:379). Migrate all shadow* usages across StyleSheet.create() to the unified boxShadow style."},
+      {"component": "pointerEvents prop", "issue": "React Native Web logs 'props.pointerEvents is deprecated. Use style.pointerEvents' — move any pointerEvents={...} JSX prop into style. Likely in overlay/ui components."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Migrate deprecated RN-Web styles: replace shadow*/shadowColor/shadowOpacity/shadowRadius keys with the new boxShadow style (start with planning.tsx:379 segBtnActive), and move any pointerEvents JSX prop into style.pointerEvents.",
+    "Optional hardening: /api/preferences PUT accepts any dict for status_colors — consider validating hex format and that keys are within the 5 known statuses (unknown keys currently persist silently after being spread into the merged doc).",
+    "Consider making the 401 handler in /app/frontend/src/api.ts less aggressive on the first cold-boot /auth/me call (still noted from iteration 1)."
+  ],
+  "critical_code_review_comments": [
+    "server.py DEFAULT_STATUS_COLORS + merge-on-PUT keeps behavior forward-compatible (partial payloads work).",
+    "Preferences are correctly scoped per-user via upsert on user_id.",
+    "planning.tsx uses testIDs consistently for every interactive element (segments, chips, month nav, timeline bars, day cells, day-res items).",
+    "status-colors.tsx uses a Record<StatusKey, string> draft state and only commits on save — good UX.",
+    "Timeline bar rendering clips correctly at month boundaries (nights <= 0 short-circuits)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_backend.py (added TestPreferences class + test_preferences_scoped_per_user + 2 new auth-guard params for GET/PUT /api/preferences)"
+  ],
+  "success_rate": {"backend": "100% (33/33)", "frontend": "100% for Planning + status-colors flows tested"},
+  "seed_data_creation": "Reused conftest test_user fixture. For UI, seeded a temporary user (user_UITEST_*) + session_token + 1 property + 1 reservation directly in Mongo, then injected token into IndexedDB (db 'AsyncStorage', store 'keyvaluepairs', key 'session_token') and mocked /api/auth/me via page.route to bypass the api.ts 401 race. Test data is TEST_/UITEST_ prefixed; only backend test-cases self-clean.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend preferences endpoints are green — reuse TestPreferences in /app/backend/tests/test_backend.py. For UI: seed IndexedDB before load and page.route the /auth/me endpoint (see iteration_2 script) — this fully authenticates the app and exposes testIDs. Deprecation warnings (shadow*, pointerEvents) are still open action items from iteration 1.",
+  "rca_of_issue": "N/A — no bugs found in this iteration."
+}

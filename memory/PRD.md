@@ -34,6 +34,14 @@
 - Assistant IA: onglet Messages (réponse voyageur + copier) et onglet Tarifs (recommandation prix + copier)
 - Backend testé: 27/27 pytest verts
 
+### Ajout Planning (2026-06)
+- Nouvel onglet **Planning** (la liste Réservations est conservée)
+- Bascule **Réglette** (timeline lignes=logements, colonnes=jours, barres colorées) / **Mois** (grille mensuelle)
+- Mode **Tous les logements** (pastilles de statut par jour) ou **par logement** (jours occupés/libres colorés)
+- Navigation mois précédent/suivant, tap sur une barre/journée → réservation
+- **Couleurs des statuts personnalisables** : palette de 10 couleurs assignables à chacun des 5 statuts, stockées par utilisateur (GET/PUT /api/preferences), appliquées partout (badges, planning, formulaire)
+- Backend testé: 33/33 pytest verts
+
 ## Backlog priorisé
 - P1: Vraie synchronisation iCal (parsing des .ics → import automatique des réservations)
 - P1: Sélecteur de dates natif (calendrier) au lieu de saisie texte
