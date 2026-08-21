@@ -184,3 +184,57 @@ test_plan:
 agent_communication:
     -agent: "main"
     -message: "Nouveaux endpoints Lodgify + inbox ajoutés et validés via curl avec vraie clé API. Merci de tester les endpoints backend channel/* et inbox/*. Auth: créer une session en insérant dans user_sessions un doc {session_token, user_id, expires_at futur} + un user dans users, puis header Authorization: Bearer <token>. Clé Lodgify de test à utiliser dans /channel/connect: I6T0EMSnL+oqohaXmF3/SPjgQkisvNWD+nvretEaGWtRvOuedVYZ8vhE0XMd/7Np. NE PAS tester le frontend (Google OAuth non automatisable)."
+
+## Iteration 9 — Intervenants, Propriétaires, Envoi message, Navigation drawer
+backend:
+  - task: "Staff (intervenants) CRUD"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "GET/POST/PUT/DELETE /api/staff. Testé curl create/list/delete OK."
+  - task: "Owners (propriétaires) CRUD + summary"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "GET/POST/PUT/DELETE /api/owners + GET /api/owners/{id}/summary (revenus totaux, per_month, nuitées, logements liés via owner_id). list renvoie property_count. delete délie les logements. Testé curl OK."
+  - task: "Property owner_id link + preservation"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "PropertyIn.owner_id ajouté. update_property retire owner_id/lodgify_id du $set si None (préserve le lien quand le formulaire l'omet)."
+  - task: "Inbox reply (envoi message Lodgify v1)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "POST /api/inbox/{thread_uid}/reply. Trouve la réservation par thread_uid -> lodgify_id (booking id), envoie via POST v1 /reservation/{id}/messages (payload array, type Owner). Validé: message vide -> 400, thread inconnu -> 404 (avant tout envoi). NE PAS tester l'envoi réel (message envoyé au vrai voyageur)."
+
+frontend:
+  - task: "Drawer navigation + square property grid + settings + inbox reply UI"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/(tabs)/_layout.tsx, properties.tsx, settings/*, inbox/[thread].tsx"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Navigation convertie en drawer coulissant (hamburger). Fixé conflit de version @react-navigation/drawer -> 7.3.9 (compatible native 7.2.5). Cartes logements en grille carrée 2 colonnes. Écran Paramètres (intervenants, propriétaires, clé API, couleurs). Interventions repliables sur le dashboard. Réponse inbox avec brouillon IA + envoi. Non testable auto (Google OAuth)."
+
+agent_communication:
+    -agent: "main"
+    -message: "Iteration 9. Tester UNIQUEMENT le backend: /api/staff (CRUD), /api/owners (CRUD + /summary avec calcul revenus), préservation owner_id/lodgify_id sur PUT /api/properties, et VALIDATION de POST /api/inbox/{thread}/reply (message vide->400, thread inconnu->404). NE JAMAIS tester l'envoi réel de message (part au vrai voyageur Airbnb/Booking). Auth: insérer users + user_sessions dans Mongo (user_id de TEST distinct) et header Bearer. Ne pas tester le frontend."

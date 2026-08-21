@@ -18,6 +18,7 @@ dayjs.locale("fr");
 
 import { useAuth } from "@/src/context/AuthContext";
 import { api } from "@/src/api";
+import { MenuButton } from "@/src/components/MenuButton";
 import StatusBadge from "@/src/components/StatusBadge";
 import { getInterventionType } from "@/src/interventionTypes";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
@@ -40,6 +41,7 @@ export default function Dashboard() {
   const [data, setData] = useState<Dash | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [ivOpen, setIvOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -79,9 +81,12 @@ export default function Dashboard() {
         }
       >
         <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.hello}>Bonjour,</Text>
-            <Text style={styles.name}>{firstName} 👋</Text>
+          <View style={styles.headerLeft}>
+            <MenuButton />
+            <View>
+              <Text style={styles.hello}>Bonjour,</Text>
+              <Text style={styles.name}>{firstName} 👋</Text>
+            </View>
           </View>
           <View style={styles.headerActions}>
             <Pressable testID="dash-inbox" onPress={() => router.push("/inbox")} style={styles.iconBtn}>
@@ -138,7 +143,12 @@ export default function Dashboard() {
               )}
             </Section>
 
-            <Section title="Interventions">
+            <CollapsibleSection
+              title="Interventions"
+              count={data?.interventions?.length || 0}
+              open={ivOpen}
+              onToggle={() => setIvOpen((o) => !o)}
+            >
               {data?.interventions?.length ? (
                 data.interventions.map((iv) => (
                   <InterventionCard key={iv.id} iv={iv} onPress={() => router.push(`/intervention-form?id=${iv.id}`)} />
@@ -146,7 +156,7 @@ export default function Dashboard() {
               ) : (
                 <EmptyRow text="Aucune intervention prévue" />
               )}
-            </Section>
+            </CollapsibleSection>
 
             <Section title="Séjours en cours">
               {data?.current_stays?.length ? (
@@ -208,6 +218,25 @@ function Section({ title, children }: any) {
     <View style={{ marginTop: spacing.xl }}>
       <Text style={styles.sectionTitle}>{title}</Text>
       {children}
+    </View>
+  );
+}
+
+function CollapsibleSection({ title, count, open, onToggle, children }: any) {
+  return (
+    <View style={{ marginTop: spacing.xl }}>
+      <Pressable testID="interventions-toggle" onPress={onToggle} style={styles.collapseHeader}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <View style={styles.collapseRight}>
+          {count > 0 && (
+            <View style={styles.countBadge}>
+              <Text style={styles.countBadgeText}>{count}</Text>
+            </View>
+          )}
+          <Ionicons name={open ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurfaceSecondary} />
+        </View>
+      </Pressable>
+      {open && children}
     </View>
   );
 }
@@ -293,6 +322,7 @@ const styles = StyleSheet.create({
   },
   hello: { fontFamily: font.regular, fontSize: fontSize.lg, color: colors.onSurfaceTertiary },
   name: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   avatar: {
     width: 42,
     height: 42,
@@ -342,6 +372,10 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     marginBottom: spacing.md,
   },
+  collapseHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  collapseRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.md },
+  countBadge: { backgroundColor: colors.brandPrimary, borderRadius: radius.pill, minWidth: 22, height: 22, paddingHorizontal: 6, alignItems: "center", justifyContent: "center" },
+  countBadgeText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onBrandPrimary },
   stayCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,

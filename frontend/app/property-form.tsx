@@ -37,6 +37,12 @@ export default function PropertyForm() {
   });
   const [rooms, setRooms] = useState<string[]>([]);
   const [amenities, setAmenities] = useState<string[]>([]);
+  const [owners, setOwners] = useState<any[]>([]);
+  const [ownerId, setOwnerId] = useState("");
+
+  useEffect(() => {
+    api.get("/owners").then(setOwners).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!editing) return;
@@ -61,6 +67,7 @@ export default function PropertyForm() {
         });
         setRooms(p.rooms || []);
         setAmenities(p.amenities || []);
+        setOwnerId(p.owner_id || "");
       } catch {}
       setLoading(false);
     })();
@@ -82,6 +89,7 @@ export default function PropertyForm() {
       capacity: parseInt(form.capacity) || 1,
       bedrooms: parseInt(form.bedrooms) || 1,
       owner: form.owner.trim(),
+      owner_id: ownerId || "",
       surface: parseFloat(form.surface) || 0,
       address: form.address.trim(),
       postal_code: form.postal_code.trim(),
@@ -125,7 +133,34 @@ export default function PropertyForm() {
       >
         <SectionLabel text="Général" />
         <Field label="Nom du logement" testID="prop-name" value={form.name} onChangeText={(v) => set("name", v)} placeholder="Villa Azur" />
-        <Field label="Propriétaire" testID="prop-owner" value={form.owner} onChangeText={(v) => set("owner", v)} placeholder="Nom du propriétaire" />
+        {owners.length > 0 && (
+          <View style={{ marginBottom: spacing.lg }}>
+            <Text style={styles.ownerLabel}>Propriétaire</Text>
+            <View style={styles.ownerChips}>
+              <Pressable
+                testID="owner-chip-none"
+                onPress={() => { setOwnerId(""); set("owner", ""); }}
+                style={[styles.ownerChip, !ownerId && styles.ownerChipActive]}
+              >
+                <Text style={[styles.ownerChipText, !ownerId && styles.ownerChipTextActive]}>Aucun</Text>
+              </Pressable>
+              {owners.map((o) => {
+                const active = ownerId === o.id;
+                return (
+                  <Pressable
+                    key={o.id}
+                    testID={`owner-chip-${o.id}`}
+                    onPress={() => { setOwnerId(o.id); set("owner", o.name); }}
+                    style={[styles.ownerChip, active && styles.ownerChipActive]}
+                  >
+                    <Text style={[styles.ownerChipText, active && styles.ownerChipTextActive]}>{o.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
+        <Field label={owners.length > 0 ? "Propriétaire (nom libre)" : "Propriétaire"} testID="prop-owner" value={form.owner} onChangeText={(v) => set("owner", v)} placeholder="Nom du propriétaire" />
         <Field label="Localisation (résumé)" testID="prop-location" value={form.location} onChangeText={(v) => set("location", v)} placeholder="Nice, France" />
         <Field label="URL de la photo" testID="prop-image" value={form.image_url} onChangeText={(v) => set("image_url", v)} placeholder="https://..." autoCapitalize="none" />
 
@@ -227,6 +262,12 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   title: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface, flex: 1 },
+  ownerLabel: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary, marginBottom: spacing.sm },
+  ownerChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  ownerChip: { paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.surfaceSecondary },
+  ownerChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  ownerChipText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary },
+  ownerChipTextActive: { color: colors.onBrandPrimary },
   closeBtn: {
     width: 34,
     height: 34,

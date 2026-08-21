@@ -17,6 +17,7 @@ import "dayjs/locale/fr";
 dayjs.locale("fr");
 
 import { api } from "@/src/api";
+import { MenuButton } from "@/src/components/MenuButton";
 import StatusBadge from "@/src/components/StatusBadge";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
@@ -64,7 +65,10 @@ export default function CalendarScreen() {
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
-        <Text style={styles.title}>Réservations</Text>
+        <View style={styles.titleRow}>
+          <MenuButton />
+          <Text style={styles.title}>Réservations</Text>
+        </View>
         <View style={styles.chipRow}>
           <ScrollView
             horizontal
@@ -160,6 +164,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   title: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface, marginBottom: spacing.md },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   chipRow: { height: 56, justifyContent: "center" },
   chipContent: { gap: spacing.sm, paddingRight: spacing.lg, alignItems: "center" },
   chip: {

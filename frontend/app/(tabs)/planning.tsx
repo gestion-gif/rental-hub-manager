@@ -14,6 +14,7 @@ import dayjs from "dayjs";
 import "dayjs/locale/fr";
 
 import { api } from "@/src/api";
+import { MenuButton } from "@/src/components/MenuButton";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import StatusBadge, { tint } from "@/src/components/StatusBadge";
 import { INTERVENTION_TYPES, getInterventionType } from "@/src/interventionTypes";
@@ -86,7 +87,10 @@ export default function Planning() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
         <View style={styles.headerTop}>
-          <Text style={styles.title}>Calendrier</Text>
+          <View style={styles.titleRow}>
+            <MenuButton />
+            <Text style={styles.title}>Calendrier</Text>
+          </View>
           <Pressable
             testID="open-color-settings"
             onPress={() => router.push("/settings/status-colors")}
@@ -462,6 +466,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   headerTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   title: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface },
   gear: {
     width: 38, height: 38, borderRadius: 19,

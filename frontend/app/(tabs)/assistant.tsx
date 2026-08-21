@@ -20,6 +20,7 @@ import {
 import { Platform } from "react-native";
 
 import { api } from "@/src/api";
+import { MenuButton } from "@/src/components/MenuButton";
 import { PrimaryButton } from "@/src/components/ui";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
@@ -34,7 +35,10 @@ export default function Assistant() {
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
-        <Text style={styles.title}>Assistant IA</Text>
+        <View style={styles.titleRow}>
+          <MenuButton />
+          <Text style={styles.title}>Assistant IA</Text>
+        </View>
         <View style={styles.segment}>
           {(["messages", "prix"] as const).map((t) => (
             <Pressable
@@ -278,6 +282,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   title: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface, marginBottom: spacing.md },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   segment: {
     flexDirection: "row",
     backgroundColor: colors.surfaceSecondary,

@@ -78,6 +78,7 @@ class PropertyIn(BaseModel):
     seasons: List[Season] = []
     ical_links: List[IcalLink] = []
     lodgify_id: Optional[str] = None
+    owner_id: Optional[str] = None
 
 
 class ReservationIn(BaseModel):
@@ -226,6 +227,8 @@ async def update_property(property_id: str, payload: PropertyIn, user=Depends(ge
     # Never wipe an existing channel mapping when the form omits it
     if data.get("lodgify_id") is None:
         data.pop("lodgify_id", None)
+    if data.get("owner_id") is None:
+        data.pop("owner_id", None)
     res = await db.properties.update_one(
         {"id": property_id, "user_id": user["user_id"]},
         {"$set": data},
@@ -855,6 +858,22 @@ class LodgifyAdapter:
     async def get_thread(self, http, uid):
         return await self._get(http, f"/messaging/{uid}")
 
+    async def send_message(self, http, booking_id: str, message: str, subject: str = ""):
+        payload = [{
+            "subject": subject or "Re:",
+            "message": message,
+            "type": "Owner",
+            "send_notification": True,
+        }]
+        r = await http.post(
+            f"https://api.lodgify.com/v1/reservation/{booking_id}/messages",
+            json=payload,
+            headers={**self._headers(), "Content-Type": "application/json"},
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"Lodgify envoi {r.status_code}")
+        return r.status_code
+
 
 async def get_channel_adapter(user_id: str):
     doc = await db.channel_settings.find_one({"user_id": user_id}, {"_id": 0})
@@ -1115,6 +1134,177 @@ async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
         "property_name": (conv or {}).get("property_name"),
         "source": (conv or {}).get("source"),
         "messages": msgs,
+    }
+
+
+class ReplyIn(BaseModel):
+    message: str
+    subject: str = ""
+
+
+@api_router.post("/inbox/{thread_uid}/reply")
+async def inbox_reply(thread_uid: str, payload: ReplyIn, user=Depends(get_current_user)):
+    if not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Message vide")
+    adapter, _ = await get_channel_adapter(user["user_id"])
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channel manager non connecté")
+    res = await db.reservations.find_one(
+        {"user_id": user["user_id"], "thread_uid": thread_uid, "lodgify_id": {"$nin": [None, ""]}},
+        {"_id": 0})
+    if not res or not res.get("lodgify_id"):
+        raise HTTPException(status_code=404, detail="Réservation liée introuvable pour cette conversation")
+    async with httpx.AsyncClient(timeout=30) as http:
+        await adapter.send_message(http, res["lodgify_id"], payload.message.strip(), payload.subject)
+    await db.conversations.update_one(
+        {"user_id": user["user_id"], "thread_uid": thread_uid},
+        {"$set": {"last_activity": now_utc().isoformat()}})
+    return {
+        "ok": True,
+        "message": {
+            "id": str(uuid.uuid4()),
+            "text": payload.message.strip(),
+            "type": "Owner",
+            "date": now_utc().isoformat(),
+            "mine": True,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Staff (intervenants) — managed in Settings, used in intervention form
+# ---------------------------------------------------------------------------
+class StaffIn(BaseModel):
+    name: str
+    role: str = ""
+    phone: str = ""
+
+
+@api_router.get("/staff")
+async def list_staff(user=Depends(get_current_user)):
+    return await db.staff.find({"user_id": user["user_id"]}, {"_id": 0}).sort("name", 1).to_list(500)
+
+
+@api_router.post("/staff")
+async def create_staff(payload: StaffIn, user=Depends(get_current_user)):
+    doc = payload.dict()
+    doc["id"] = str(uuid.uuid4())
+    doc["user_id"] = user["user_id"]
+    doc["created_at"] = now_utc().isoformat()
+    await db.staff.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/staff/{staff_id}")
+async def update_staff(staff_id: str, payload: StaffIn, user=Depends(get_current_user)):
+    res = await db.staff.update_one(
+        {"id": staff_id, "user_id": user["user_id"]}, {"$set": payload.dict()})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Intervenant introuvable")
+    return await db.staff.find_one({"id": staff_id}, {"_id": 0})
+
+
+@api_router.delete("/staff/{staff_id}")
+async def delete_staff(staff_id: str, user=Depends(get_current_user)):
+    await db.staff.delete_one({"id": staff_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Owners (propriétaires) — managed in Settings, linked to properties
+# ---------------------------------------------------------------------------
+class OwnerIn(BaseModel):
+    name: str
+    email: str = ""
+    phone: str = ""
+    notes: str = ""
+
+
+@api_router.get("/owners")
+async def list_owners(user=Depends(get_current_user)):
+    owners = await db.owners.find({"user_id": user["user_id"]}, {"_id": 0}).sort("name", 1).to_list(500)
+    props = await db.properties.find({"user_id": user["user_id"]}, {"_id": 0, "id": 1, "owner_id": 1}).to_list(2000)
+    counts = {}
+    for p in props:
+        oid = p.get("owner_id")
+        if oid:
+            counts[oid] = counts.get(oid, 0) + 1
+    for o in owners:
+        o["property_count"] = counts.get(o["id"], 0)
+    return owners
+
+
+@api_router.post("/owners")
+async def create_owner(payload: OwnerIn, user=Depends(get_current_user)):
+    doc = payload.dict()
+    doc["id"] = str(uuid.uuid4())
+    doc["user_id"] = user["user_id"]
+    doc["created_at"] = now_utc().isoformat()
+    await db.owners.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/owners/{owner_id}")
+async def update_owner(owner_id: str, payload: OwnerIn, user=Depends(get_current_user)):
+    res = await db.owners.update_one(
+        {"id": owner_id, "user_id": user["user_id"]}, {"$set": payload.dict()})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Propriétaire introuvable")
+    return await db.owners.find_one({"id": owner_id}, {"_id": 0})
+
+
+@api_router.delete("/owners/{owner_id}")
+async def delete_owner(owner_id: str, user=Depends(get_current_user)):
+    await db.owners.delete_one({"id": owner_id, "user_id": user["user_id"]})
+    await db.properties.update_many(
+        {"user_id": user["user_id"], "owner_id": owner_id}, {"$set": {"owner_id": None}})
+    return {"ok": True}
+
+
+@api_router.get("/owners/{owner_id}/summary")
+async def owner_summary(owner_id: str, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    owner = await db.owners.find_one({"id": owner_id, "user_id": uid}, {"_id": 0})
+    if not owner:
+        raise HTTPException(status_code=404, detail="Propriétaire introuvable")
+    props = await db.properties.find({"user_id": uid, "owner_id": owner_id}, {"_id": 0}).to_list(500)
+    prop_ids = [p["id"] for p in props]
+    reservations = []
+    if prop_ids:
+        reservations = await db.reservations.find(
+            {"user_id": uid, "property_id": {"$in": prop_ids}}, {"_id": 0}).to_list(5000)
+
+    def parse(d):
+        try:
+            return date.fromisoformat(d)
+        except Exception:
+            return None
+
+    revenue_total = 0.0
+    per_month = {}
+    nights_total = 0
+    for r in reservations:
+        if r.get("status") == "annulee":
+            continue
+        ci = parse(r.get("check_in"))
+        co = parse(r.get("check_out"))
+        price = float(r.get("total_price", 0) or 0)
+        revenue_total += price
+        if ci:
+            key = f"{ci.year}-{ci.month:02d}"
+            per_month[key] = per_month.get(key, 0) + price
+        if ci and co and co > ci:
+            nights_total += (co - ci).days
+    months_sorted = sorted(per_month.items())
+    return {
+        "owner": owner,
+        "properties": props,
+        "revenue_total": round(revenue_total),
+        "reservations_count": len([r for r in reservations if r.get("status") != "annulee"]),
+        "nights_total": nights_total,
+        "per_month": [{"month": k, "revenue": round(v)} for k, v in months_sorted],
     }
 
 

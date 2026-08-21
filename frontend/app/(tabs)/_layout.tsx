@@ -1,90 +1,122 @@
 import React from "react";
-import { Platform, StyleSheet, View } from "react-native";
-import { Tabs } from "expo-router";
-import { BlurView } from "expo-blur";
+import { View, Text, StyleSheet, Pressable } from "react-native";
+import { Drawer } from "expo-router/drawer";
+import { DrawerContentScrollView } from "@react-navigation/drawer";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, font } from "@/src/theme";
+import { Image } from "expo-image";
+import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-function TabBarBg() {
-  if (Platform.OS === "ios") {
-    return (
-      <BlurView tint="light" intensity={80} style={StyleSheet.absoluteFill} />
-    );
-  }
+import { useAuth } from "@/src/context/AuthContext";
+import { colors, font, fontSize, radius, spacing } from "@/src/theme";
+
+const ITEMS = [
+  { name: "index", label: "Accueil", icon: "home-outline" },
+  { name: "calendar", label: "Réservations", icon: "list-outline" },
+  { name: "planning", label: "Calendrier", icon: "calendar-outline" },
+  { name: "properties", label: "Logements", icon: "business-outline" },
+  { name: "assistant", label: "Assistant IA", icon: "sparkles-outline" },
+];
+
+function CustomDrawer(props: any) {
+  const { state, navigation } = props;
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { user, signOut } = useAuth();
+  const current = state.routeNames[state.index];
+
+  const goStack = (path: string) => {
+    navigation.closeDrawer();
+    router.push(path);
+  };
+
   return (
-    <View
-      style={[
-        StyleSheet.absoluteFill,
-        { backgroundColor: "rgba(255,255,255,0.98)" },
-      ]}
-    />
+    <View style={{ flex: 1, backgroundColor: colors.surface }}>
+      <DrawerContentScrollView {...props} contentContainerStyle={{ paddingTop: insets.top + spacing.lg }}>
+        <View style={styles.brand}>
+          <View style={styles.logo}><Ionicons name="home" size={20} color={colors.onBrandPrimary} /></View>
+          <Text style={styles.brandText}>StayPilot</Text>
+        </View>
+
+        <View style={styles.userRow}>
+          {user?.picture ? (
+            <Image source={{ uri: user.picture }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatar}><Ionicons name="person" size={18} color={colors.onSurfaceSecondary} /></View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.userName} numberOfLines={1}>{user?.name || "Hôte"}</Text>
+            <Text style={styles.userEmail} numberOfLines={1}>{user?.email || ""}</Text>
+          </View>
+        </View>
+
+        <View style={styles.sep} />
+
+        {ITEMS.map((it) => {
+          const active = current === it.name;
+          return (
+            <Pressable
+              key={it.name}
+              testID={`drawer-${it.name}`}
+              onPress={() => navigation.navigate(it.name)}
+              style={[styles.item, active && styles.itemActive]}
+            >
+              <Ionicons name={it.icon as any} size={20} color={active ? colors.brandPrimary : colors.onSurfaceSecondary} />
+              <Text style={[styles.itemText, active && styles.itemTextActive]}>{it.label}</Text>
+            </Pressable>
+          );
+        })}
+
+        <View style={styles.sep} />
+
+        <Pressable testID="drawer-inbox" onPress={() => goStack("/inbox")} style={styles.item}>
+          <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />
+          <Text style={styles.itemText}>Boîte de réception</Text>
+        </Pressable>
+        <Pressable testID="drawer-settings" onPress={() => goStack("/settings")} style={styles.item}>
+          <Ionicons name="settings-outline" size={20} color={colors.onSurfaceSecondary} />
+          <Text style={styles.itemText}>Paramètres</Text>
+        </Pressable>
+      </DrawerContentScrollView>
+
+      <Pressable
+        testID="drawer-signout"
+        onPress={signOut}
+        style={[styles.item, { marginBottom: insets.bottom + spacing.md, marginHorizontal: spacing.md }]}
+      >
+        <Ionicons name="log-out-outline" size={20} color={colors.error} />
+        <Text style={[styles.itemText, { color: colors.error }]}>Déconnexion</Text>
+      </Pressable>
+    </View>
   );
 }
 
-export default function TabsLayout() {
+export default function DrawerLayout() {
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.brandPrimary,
-        tabBarInactiveTintColor: colors.onSurfaceTertiary,
-        tabBarStyle: {
-          position: "absolute",
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: colors.border,
-          elevation: 0,
-          height: Platform.OS === "ios" ? 88 : 64,
-          paddingTop: 6,
-        },
-        tabBarBackground: () => <TabBarBg />,
-        tabBarLabelStyle: { fontFamily: font.medium, fontSize: 11 },
-      }}
+    <Drawer
+      drawerContent={(p) => <CustomDrawer {...p} />}
+      screenOptions={{ headerShown: false, drawerType: "front", swipeEdgeWidth: 60 }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Accueil",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="calendar"
-        options={{
-          title: "Réservations",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="list-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="planning"
-        options={{
-          title: "Calendrier",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="properties"
-        options={{
-          title: "Logements",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="business-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="assistant"
-        options={{
-          title: "Assistant",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="sparkles-outline" size={size} color={color} />
-          ),
-        }}
-      />
-    </Tabs>
+      <Drawer.Screen name="index" />
+      <Drawer.Screen name="calendar" />
+      <Drawer.Screen name="planning" />
+      <Drawer.Screen name="properties" />
+      <Drawer.Screen name="assistant" />
+    </Drawer>
   );
 }
+
+const styles = StyleSheet.create({
+  brand: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.lg },
+  logo: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  brandText: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
+  userRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.lg, marginBottom: spacing.md },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  userName: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface },
+  userEmail: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
+  sep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginVertical: spacing.md, marginHorizontal: spacing.lg },
+  item: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: 13, paddingHorizontal: spacing.lg, borderRadius: radius.md, marginHorizontal: spacing.sm },
+  itemActive: { backgroundColor: colors.surfaceSecondary },
+  itemText: { fontFamily: font.medium, fontSize: fontSize.lg, color: colors.onSurfaceSecondary },
+  itemTextActive: { color: colors.brandPrimary, fontFamily: font.semibold },
+});

@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 9 — Backend coverage for Staff, Owners, Owner Summary, Property owner_id/lodgify_id preservation, and Inbox reply validation. New file /app/backend/tests/test_staff_owners.py adds 29 tests (all green in ~4.5s). Full regression: 116/116 pytest green (was 87/87 in iteration 8; +29 new tests). Server code untouched — no bugs found. Verified: (1) Staff CRUD — POST requires name (missing name -> 422), GET returns list sorted by name, PUT updates and 404 on unknown id, DELETE removes (verified via follow-up GET). (2) Owners CRUD — POST creates, GET returns each owner with property_count reflecting linked properties (owner_id) and sorted by name, PUT updates, PUT/DELETE 404 on unknown id, DELETE unlinks properties (owner_id → null on all previously linked properties, verified via GET /properties/{id}). (3) GET /api/owners/{id}/summary — returns owner, properties (via owner_id link), revenue_total (cancelled excluded), reservations_count (cancelled excluded), nights_total (sum of check_out-check_in), per_month sorted list of {month:'YYYY-MM', revenue}; 404 when owner not found; empty owner returns zeros/empty arrays. Concrete assertion: 2 confirmed reservations (400€+300€) + 1 cancelled (999€) → revenue_total=700, nights_total=7, reservations_count=2, per_month=[{2025-06:400},{2025-07:300}]. (4) Owner<->property link visible in owner summary.properties and property_count. (5) PUT /api/properties/{id} preservation: PUT without owner_id nor lodgify_id in body preserves both existing values (verified via response and follow-up GET); PUT with owner_id='' explicitly clears the link (returns owner_id null/empty). (6) POST /api/inbox/{thread_uid}/reply validation only — empty/whitespace message -> 400 'Message vide'; unknown thread_uid with non-empty message returns 400 'Channel manager non connecté' (test user has no channel_settings) OR 404 'Réservation liée introuvable' — either is acceptable because the request never reaches Lodgify send (test verifies detail message never indicates a real send happened). (7) All new endpoints return 401 without Authorization header (10 endpoints checked).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_staff_owners.py",
+    "/app/backend/tests/test_lodgify_channel.py",
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/test_ical_sync.py",
+    "/app/backend/tests/test_auto_cleaning.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No blocking issues. Iteration 9 features (staff, owners, owner summary, owner<->property link, PUT preservation, inbox reply validation) all validated. Optional main-agent frontend self-test behind Google OAuth: (a) Parametres → Intervenants → create/edit/delete a staff row and confirm it appears in the intervention form; (b) Parametres → Propriétaires → create an owner, link a logement (owner_id) and verify property_count=1 in the owners list and properties[] in the summary screen; (c) open owner summary → verify revenue_total, nights_total, reservations_count and per_month chart data; (d) delete the owner → verify the logement is preserved and its owner_id badge disappears; (e) edit a logement without touching the Lodgify mapping → verify lodgify_id is preserved (channel manager status page still shows it as mapped); (f) Inbox → try sending an empty message → toast 'Message vide'."
+  ],
+  "critical_code_review_comments": [
+    "update_property (server.py:224-239) correctly pops owner_id and lodgify_id when the value is None (i.e. field omitted in body) — preservation confirmed by test_put_without_owner_id_preserves. An explicit '' (empty string) is NOT popped, so it overwrites owner_id to '' — this is the intended semantics to clear the link (verified). Good.",
+    "delete_owner (server.py:1259-1263) uses update_many with $set owner_id:None to unlink properties — matches spec. Reservations attached to those properties are untouched (correct: owner change should not impact bookings).",
+    "owner_summary (server.py:1266-1308) excludes 'annulee' from revenue_total, reservations_count and per_month (verified). nights_total is (check_out - check_in).days for non-cancelled with valid dates — matches spec.",
+    "list_owners (server.py:1224-1235) computes property_count in-memory by scanning all user properties. Fine for small tenants; if a user has thousands of properties, consider a $lookup/aggregate pipeline. Not blocking.",
+    "inbox_reply (server.py:1145-1171) validates payload.message.strip() before adapter lookup — good; returns 400 for empty message, 400 for missing channel_settings, 404 for unknown thread_uid. Order is safe (message check first).",
+    "StaffIn / OwnerIn Pydantic models: 'name' is required (no default), other fields default to empty string — matches the '422 when name missing' behaviour verified in tests.",
+    "Minor: staff/owner endpoints do not verify uniqueness of name — a user can create two staff with the same name. Not a bug, just noting.",
+    "Minor: owner_summary per_month is keyed by check_in month only; revenue for a stay that straddles two months is fully attributed to the check_in month. Matches the existing dashboard revenue_month semantics — consistent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_staff_owners.py (new — 29 tests across 6 classes: TestAuth401 (10), TestStaffCRUD (6), TestOwnersCRUD (5), TestOwnerSummary (3), TestPropertyOwnerAndLodgifyPreservation (2), TestInboxReplyValidation (3))"
+  ],
+  "success_rate": {"backend": "100% (116/116 total, 29/29 new)", "frontend": "not tested (backend-only per E1)"},
+  "seed_data_creation": "Reused the session-scoped test_user from conftest (isolated user_TEST_*). Test suite creates staff, owners, properties and reservations under that user_id, then session teardown wipes properties/reservations/users/sessions. Owners/staff/channel_settings docs are prefixed with TEST_ and the clean_owners_and_props per-test fixture keeps the owner/property namespace deterministic across tests. No production data is touched. POST /api/inbox/{thread_uid}/reply is called with a random UUID thread and empty/whitespace messages so no real Lodgify message is ever sent (verified: test user has no channel_settings, so the code path short-circuits at 'Channel manager non connecté').",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend now has 116 tests across 5 files: test_backend.py (44), test_ical_sync.py (14), test_auto_cleaning.py (9), test_lodgify_channel.py (20), test_staff_owners.py (29). Full run ~28s. If a later iteration adds an inbox_reply test that hits a REAL thread, DO NOT invoke it against a production Lodgify api_key — the endpoint sends a real message to a real guest. For staff/owners endpoints, the sort order is 'name ascending' (natural string sort — case-sensitive), so tests seed names like TEST_A_Owner / TEST_B_Owner to make sort deterministic.",
+  "rca_of_issue": "N/A — feature validation iteration. All 7 items from the review request verified passing."
+}

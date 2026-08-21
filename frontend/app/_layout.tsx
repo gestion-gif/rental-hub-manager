@@ -66,6 +66,11 @@ export default function RootLayout() {
                   name="settings/status-colors"
                   options={{ presentation: "modal" }}
                 />
+                <Stack.Screen name="settings/index" />
+                <Stack.Screen name="settings/staff" />
+                <Stack.Screen name="settings/owners" />
+                <Stack.Screen name="settings/owner/[id]" />
+                <Stack.Screen name="settings/api-key" />
                 <Stack.Screen name="property/[id]" />
                 <Stack.Screen name="channel-manager" />
                 <Stack.Screen name="inbox" />

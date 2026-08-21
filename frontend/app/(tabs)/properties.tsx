@@ -9,12 +9,12 @@ import {
   RefreshControl,
 } from "react-native";
 import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 
 import { api } from "@/src/api";
+import { MenuButton } from "@/src/components/MenuButton";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const FALLBACK =
@@ -29,23 +29,21 @@ export default function Properties() {
 
   const load = useCallback(async () => {
     try {
-      const d = await api.get("/properties");
-      setItems(d);
+      setItems(await api.get("/properties"));
     } catch {}
     setLoading(false);
     setRefreshing(false);
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [load]),
-  );
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
-        <Text style={styles.title}>Logements</Text>
+        <View style={styles.headerLeft}>
+          <MenuButton />
+          <Text style={styles.title}>Logements</Text>
+        </View>
         <Pressable testID="channel-manager-btn" onPress={() => router.push("/channel-manager")} style={styles.cmBtn}>
           <Ionicons name="git-network-outline" size={16} color={colors.onSurface} />
           <Text style={styles.cmBtnText}>Channel Manager</Text>
@@ -58,14 +56,13 @@ export default function Properties() {
           testID="properties-list"
           data={items}
           keyExtractor={(i) => i.id}
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 }}
+          numColumns={2}
+          columnWrapperStyle={{ gap: spacing.md }}
+          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 40, gap: spacing.md }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                load();
-              }}
+              onRefresh={() => { setRefreshing(true); load(); }}
             />
           }
           ListEmptyComponent={
@@ -86,23 +83,21 @@ export default function Properties() {
                 style={styles.image}
                 contentFit="cover"
               />
-              <LinearGradient
-                colors={["transparent", "rgba(28,28,30,0.85)"]}
-                style={styles.scrim}
-              />
               <View style={styles.cardBody}>
-                <Text style={styles.propName}>{item.name}</Text>
+                <Text style={styles.propName} numberOfLines={1}>{item.name}</Text>
                 {!!item.location && (
                   <View style={styles.locRow}>
-                    <Ionicons name="location-outline" size={13} color="rgba(255,255,255,0.85)" />
-                    <Text style={styles.loc}>{item.location}</Text>
+                    <Ionicons name="location-outline" size={12} color={colors.onSurfaceTertiary} />
+                    <Text style={styles.loc} numberOfLines={1}>{item.location}</Text>
                   </View>
                 )}
-              </View>
-              <View style={styles.metaRow}>
-                <Meta icon="cash-outline" text={`${item.base_price} €/nuit`} />
-                <Meta icon="bed-outline" text={`${item.bedrooms} ch.`} />
-                <Meta icon="people-outline" text={`${item.capacity} pers.`} />
+                <View style={styles.metaRow}>
+                  <Text style={styles.price}>{item.base_price} €</Text>
+                  <View style={styles.metaPill}>
+                    <Ionicons name="people-outline" size={12} color={colors.onSurfaceSecondary} />
+                    <Text style={styles.metaText}>{item.capacity}</Text>
+                  </View>
+                </View>
               </View>
             </Pressable>
           )}
@@ -112,19 +107,10 @@ export default function Properties() {
       <Pressable
         testID="add-property-fab"
         onPress={() => router.push("/property-form")}
-        style={[styles.fab, { bottom: insets.bottom + 76 }]}
+        style={[styles.fab, { bottom: insets.bottom + 24 }]}
       >
         <Ionicons name="add" size={28} color={colors.onBrandPrimary} />
       </Pressable>
-    </View>
-  );
-}
-
-function Meta({ icon, text }: any) {
-  return (
-    <View style={styles.meta}>
-      <Ionicons name={icon} size={15} color={colors.onSurfaceSecondary} />
-      <Text style={styles.metaText}>{text}</Text>
     </View>
   );
 }
@@ -140,6 +126,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   title: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface },
   cmBtn: {
     flexDirection: "row",
@@ -152,26 +139,22 @@ const styles = StyleSheet.create({
   },
   cmBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
   card: {
+    flex: 1,
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    marginBottom: spacing.lg,
     overflow: "hidden",
   },
-  image: { width: "100%", height: 170 },
-  scrim: { position: "absolute", left: 0, right: 0, top: 60, height: 110 },
-  cardBody: { position: "absolute", left: spacing.lg, top: 130 },
-  propName: { fontFamily: font.bold, fontSize: fontSize.xl, color: "#fff" },
-  locRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
-  loc: { fontFamily: font.regular, fontSize: fontSize.sm, color: "rgba(255,255,255,0.85)" },
-  metaRow: {
-    flexDirection: "row",
-    gap: spacing.lg,
-    padding: spacing.lg,
-  },
-  meta: { flexDirection: "row", alignItems: "center", gap: 5 },
-  metaText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary },
+  image: { width: "100%", aspectRatio: 1 },
+  cardBody: { padding: spacing.md },
+  propName: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
+  locRow: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2 },
+  loc: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, flex: 1 },
+  metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.sm },
+  price: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  metaPill: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: colors.surfaceSecondary, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.sm },
+  metaText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
   empty: { alignItems: "center", marginTop: 80, gap: spacing.sm },
   emptyText: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface },
   emptySub: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary },

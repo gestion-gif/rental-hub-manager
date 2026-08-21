@@ -18,6 +18,7 @@ export default function InterventionForm() {
   const editing = !!id;
 
   const [props, setProps] = useState<any[]>([]);
+  const [staff, setStaff] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -33,8 +34,9 @@ export default function InterventionForm() {
   useEffect(() => {
     (async () => {
       try {
-        const pr = await api.get("/properties");
+        const [pr, st] = await Promise.all([api.get("/properties"), api.get("/staff")]);
         setProps(pr);
+        setStaff(st);
         if (editing) {
           const list = await api.get("/interventions");
           const iv = list.find((x: any) => x.id === id);
@@ -143,7 +145,27 @@ export default function InterventionForm() {
 
           <View style={{ height: spacing.lg }} />
           <DateField label="Date" testID="intervention-date" value={form.date} onChange={(v) => set("date", v)} />
-          <Field label="Intervenant" testID="intervention-intervenant" value={form.intervenant} onChangeText={(v) => set("intervenant", v)} placeholder="Nom de l'intervenant / société" />
+          {staff.length > 0 && (
+            <>
+              <Text style={styles.label}>Intervenant</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chipRow, { marginBottom: spacing.md }]}>
+                {staff.map((s) => {
+                  const active = form.intervenant === s.name;
+                  return (
+                    <Pressable
+                      key={s.id}
+                      testID={`staff-chip-${s.id}`}
+                      onPress={() => set("intervenant", active ? "" : s.name)}
+                      style={[styles.chip, active && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>{s.name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </>
+          )}
+          <Field label={staff.length > 0 ? "Ou saisir un intervenant" : "Intervenant"} testID="intervention-intervenant" value={form.intervenant} onChangeText={(v) => set("intervenant", v)} placeholder="Nom de l'intervenant / société" />
           <Field label="Description" testID="intervention-description" value={form.description} onChangeText={(v) => set("description", v)} placeholder="Détail de l'intervention..." multiline style={styles.textarea} />
           <Field label="Motif si non exécutée (optionnel)" testID="intervention-reason" value={form.not_done_reason} onChangeText={(v) => set("not_done_reason", v)} placeholder="Ex: accès impossible, reporté..." multiline style={styles.textarea} />
 
