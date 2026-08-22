@@ -7,6 +7,7 @@ import {
   Pressable,
   RefreshControl,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -40,6 +41,19 @@ export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, signOut } = useAuth();
+
+  function openAccountMenu() {
+    Alert.alert(
+      user?.name || "Compte",
+      user?.email || "",
+      [
+        { text: "Changer de compte", onPress: () => { signOut(); } },
+        { text: "Déconnexion", style: "destructive", onPress: () => { signOut(); } },
+        { text: "Annuler", style: "cancel" },
+      ],
+    );
+  }
+
   const [data, setData] = useState<Dash | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -111,7 +125,7 @@ export default function Dashboard() {
                 )}
               </Pressable>
             )}
-            <Pressable testID="signout-button" onPress={signOut} style={styles.avatar}>
+            <Pressable testID="signout-button" onPress={openAccountMenu} style={styles.avatar}>
               {user?.picture ? (
                 <Image source={{ uri: user.picture }} style={styles.avatarImg} />
               ) : (

@@ -168,7 +168,7 @@ export default function Planning() {
           </Pressable>
         </View>
 
-        {mode === "timeline" && singleProp && (
+        {singleProp && (
           <Pressable
             testID="toggle-prices"
             onPress={() => setShowPrices((s) => !s)}
@@ -284,6 +284,9 @@ export default function Planning() {
           propMap={propMap}
           statusColors={statusColors}
           single={selectedProp !== "all"}
+          showPrices={showPrices && !!singleProp}
+          priceProp={singleProp}
+          onEditPrice={openEditPrice}
           selectedDay={selectedDay}
           setSelectedDay={setSelectedDay}
           todayStr={todayStr}
@@ -552,7 +555,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
   );
 }
 
-function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, propMap, statusColors, single, selectedDay, setSelectedDay, todayStr, onRes, onIv, bottomPad }: any) {
+function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, propMap, statusColors, single, showPrices, priceProp, onEditPrice, selectedDay, setSelectedDay, todayStr, onRes, onIv, bottomPad }: any) {
   const { user } = useAuth();
   const offset = (monthStart.day() + 6) % 7; // Monday start
   const cells: (any | null)[] = [
@@ -614,6 +617,19 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, p
               {single && res.length > 0 && (
                 <View style={[styles.occBar, { backgroundColor: firstColor }]} />
               )}
+              {showPrices && priceProp && (() => {
+                const pr = priceForDay(priceProp, dayStr);
+                return (
+                  <Text
+                    testID={`month-price-${dayStr}`}
+                    onPress={() => onEditPrice && onEditPrice(dayStr)}
+                    style={styles.monthPrice}
+                    numberOfLines={1}
+                  >
+                    {pr != null ? `${Math.round(pr)}€` : "—"}
+                  </Text>
+                );
+              })()}
               {dayIvs.length > 0 && (
                 <View style={styles.ivDotsRow}>
                   {dayIvs.slice(0, 3).map((iv: any) => (
@@ -754,6 +770,7 @@ const styles = StyleSheet.create({
   dotsRow: { flexDirection: "row", gap: 3, marginTop: 4 },
   miniDot: { width: 6, height: 6, borderRadius: 999 },
   occBar: { position: "absolute", bottom: 6, height: 4, left: 8, right: 8, borderRadius: 2 },
+  monthPrice: { position: "absolute", bottom: 3, alignSelf: "center", fontFamily: font.semibold, fontSize: 9, color: colors.brandPrimary },
   dayDetail: { marginTop: spacing.xl },
   detailTitle: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.md, textTransform: "capitalize" },
   detailEmpty: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary },

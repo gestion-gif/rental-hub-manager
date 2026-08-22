@@ -34,6 +34,9 @@ export default function Statement() {
   const [expLabel, setExpLabel] = useState("");
   const [expAmount, setExpAmount] = useState("");
   const [expCharge, setExpCharge] = useState<"owner" | "concierge">("owner");
+  const [feeModal, setFeeModal] = useState<any>(null);
+  const [feeInput, setFeeInput] = useState("");
+  const [savingFee, setSavingFee] = useState(false);
 
   const month = anchor.format("YYYY-MM");
 
@@ -68,6 +71,20 @@ export default function Statement() {
 
   async function delExpense(id: string) {
     try { await api.del(`/statement-expenses/${id}`); load(); } catch {}
+  }
+
+  async function saveFee() {
+    if (!feeModal || savingFee) return;
+    const prop = props.find((p) => p.id === feeModal.property_id);
+    if (!prop) return;
+    setSavingFee(true);
+    const pct = parseFloat((feeInput || "0").replace(",", ".")) || 0;
+    try {
+      await api.put(`/properties/${prop.id}`, { ...prop, management_fee_pct: pct });
+      setFeeModal(null);
+      load();
+    } catch {}
+    setSavingFee(false);
   }
 
   function shareStatement(s: any) {
@@ -146,7 +163,17 @@ export default function Statement() {
                 <View style={styles.cardHead}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.propName}>{s.property_name}</Text>
-                    <Text style={styles.propSub}>{s.reservations_count} réservation{s.reservations_count > 1 ? "s" : ""} · gestion {s.management_fee_pct}%</Text>
+                    <View style={styles.subRow}>
+                      <Text style={styles.propSub}>{s.reservations_count} réservation{s.reservations_count > 1 ? "s" : ""}</Text>
+                      {editable ? (
+                        <Pressable testID={`stmt-fee-${s.property_id}`} onPress={() => { setFeeModal(s); setFeeInput(String(s.management_fee_pct || "")); }} style={styles.feePill}>
+                          <Ionicons name="pencil" size={11} color={colors.brandPrimary} />
+                          <Text style={styles.feePillText}>gestion {s.management_fee_pct}%</Text>
+                        </Pressable>
+                      ) : (
+                        <Text style={styles.propSub}> · gestion {s.management_fee_pct}%</Text>
+                      )}
+                    </View>
                   </View>
                   <Pressable testID={`stmt-share-${s.property_id}`} onPress={() => shareStatement(s)} style={styles.shareBtn}>
                     <Ionicons name={Platform.OS === "web" ? "copy-outline" : "share-outline"} size={18} color={colors.brandPrimary} />
@@ -250,6 +277,22 @@ export default function Statement() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Edit management fee modal */}
+      <Modal visible={!!feeModal} transparent animationType="fade" onRequestClose={() => setFeeModal(null)}>
+        <Pressable style={styles.backdrop} onPress={() => setFeeModal(null)}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.sheetTitle}>Frais de gestion</Text>
+            <Text style={styles.sheetSub}>{feeModal?.property_name}</Text>
+            <Text style={styles.fieldLabel}>Pourcentage (%)</Text>
+            <TextInput testID="fee-input" value={feeInput} onChangeText={setFeeInput} keyboardType="decimal-pad" placeholder="20" placeholderTextColor={colors.onSurfaceTertiary} style={styles.input} autoFocus />
+            <Text style={styles.feeHint}>Appliqué sur le montant des nuitées pour calculer le revenu conciergerie.</Text>
+            <Pressable testID="fee-save" onPress={saveFee} disabled={savingFee} style={[styles.saveBtn, savingFee && { opacity: 0.6 }]}>
+              {savingFee ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.saveText}>Enregistrer</Text>}
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -287,6 +330,10 @@ const styles = StyleSheet.create({
   cardHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   propName: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
   propSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  subRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: 4, flexWrap: "wrap" },
+  feePill: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: colors.brandPrimary + "14", paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill },
+  feePillText: { fontFamily: font.semibold, fontSize: 11, color: colors.brandPrimary },
+  feeHint: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: spacing.sm, lineHeight: 17 },
   shareBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
   detailToggle: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.md },
   detailToggleText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },

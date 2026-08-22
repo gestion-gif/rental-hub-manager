@@ -4,7 +4,7 @@ import { Drawer } from "expo-router/drawer";
 import { DrawerContentScrollView } from "@react-navigation/drawer";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
+import { useRouter, Redirect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "@/src/api";
@@ -111,7 +111,7 @@ function CustomDrawer(props: any) {
 
       <Pressable
         testID="drawer-signout"
-        onPress={signOut}
+        onPress={async () => { navigation.closeDrawer(); await signOut(); }}
         style={[styles.item, { marginBottom: insets.bottom + spacing.md, marginHorizontal: spacing.md }]}
       >
         <Ionicons name="log-out-outline" size={20} color={colors.error} />
@@ -122,6 +122,8 @@ function CustomDrawer(props: any) {
 }
 
 export default function DrawerLayout() {
+  const { user, loading } = useAuth();
+  if (!loading && !user) return <Redirect href="/login" />;
   return (
     <Drawer
       drawerContent={(p) => <CustomDrawer {...p} />}

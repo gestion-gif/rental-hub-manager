@@ -223,3 +223,9 @@
 - **Backend** : POST /api/auth/apple ({identity_token, name, email}) vérifie l'identity token Apple (RS256 via JWKS appleid.apple.com, issuer + audience contrôlés), upsert user par `apple_sub` (lié au compte email existant si même email), crée une session 7j compatible user_sessions, renvoie {session_token, user}. Env `APPLE_AUDIENCES` (bundle id + host.exp.Exponent). PyJWT + cryptography présents. Vérifié : token invalide → 401.
 - **Frontend** : bouton natif `AppleAuthenticationButton` sur l'écran de connexion, affiché uniquement sur iOS (isAvailableAsync). `loginWithApple` ajouté à AuthContext (stocke le session_token en SecureStore, charge /auth/me). app.json `ios.usesAppleSignIn: true`. expo-apple-authentication installé.
 - **Limite native** : Sign in with Apple ne fonctionne PAS sur le web, Android, ni le simulateur iOS — uniquement sur un vrai iPhone (Expo Go iOS ou build). Doc: /app/auth_testing.md. 185/185 pytest verts.
+
+## Déconnexion/changement de compte + prix sur calendrier + % gestion dans le relevé (2026-06)
+- **Déconnexion → page de connexion** : garde `if (!loading && !user) return <Redirect href="/login" />` dans (tabs)/_layout ; le bouton Déconnexion ferme le drawer puis signOut → redirection auto vers /login.
+- **Avatar (tête) = changer de compte** : tap sur l'avatar de l'accueil ouvre un menu (Alert) « Changer de compte » / « Déconnexion » / « Annuler » → signOut → login.
+- **Prix des nuitées sur le calendrier (vue mois)** : le bouton « Afficher les tarifs par saison » est désormais dispo en vue Réglette ET Mois (dès qu'un seul logement est sélectionné). Chaque case du mois affiche le prix/nuit (priceForDay), tappable pour modifier le tarif de la saison couvrante.
+- **% frais de gestion modifiable dans le Relevé** : chaque carte logement du Relevé propriétaires a une pastille « gestion X% » (éditable, canModify) ouvrant une modale ; enregistre via PUT /properties/{id}.management_fee_pct et recharge le relevé.
