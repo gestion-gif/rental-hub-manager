@@ -126,7 +126,7 @@ export default function CalendarScreen() {
             >
               <View style={styles.cardTop}>
                 <Text style={styles.guest}>{item.guest_name}</Text>
-                <StatusBadge status={item.status} />
+                <StatusBadge status={item.display_status || item.status} />
               </View>
               <Text style={styles.prop}>{props[item.property_id]?.name || "Logement"}</Text>
               <View style={styles.dateRow}>

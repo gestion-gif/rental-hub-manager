@@ -1,4 +1,5 @@
 import { storage } from "@/src/utils/storage";
+import { Platform } from "react-native";
 
 const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
 export const TOKEN_KEY = "session_token";
@@ -57,3 +58,27 @@ export const api = {
     request(p, { method: "PATCH", body: JSON.stringify(body || {}) }),
   del: (p: string) => request(p, { method: "DELETE" }),
 };
+
+export async function uploadFile(uri: string, name: string, type: string): Promise<string> {
+  const token = await getToken();
+  const form = new FormData();
+  if (Platform.OS === "web") {
+    const blob = await (await fetch(uri)).blob();
+    form.append("file", blob, name);
+  } else {
+    form.append("file", { uri, name, type } as any);
+  }
+  const res = await fetch(`${BASE}/upload`, {
+    method: "POST",
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: form,
+  });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new ApiError(res.status, data?.detail || "Upload échoué");
+  return data.path;
+}
+
+export function fileUrl(path: string): string {
+  return `${BASE}/files/${path}?token=${memToken || ""}`;
+}

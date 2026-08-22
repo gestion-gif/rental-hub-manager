@@ -28,6 +28,7 @@ export default function ReservationForm() {
   const { statuses } = usePreferences();
 
   const [props, setProps] = useState<any[]>([]);
+  const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -53,6 +54,7 @@ export default function ReservationForm() {
           const list = await api.get("/reservations");
           const r = list.find((x: any) => x.id === id);
           if (r) {
+            setDetail(r);
             setForm({
               property_id: r.property_id,
               guest_name: r.guest_name,
@@ -128,6 +130,7 @@ export default function ReservationForm() {
           bottomOffset={20}
           showsVerticalScrollIndicator={false}
         >
+          {detail?.finance && <FinanceCard detail={detail} />}
           <Text style={styles.label}>Logement</Text>
           <ChipRow
             items={props.map((p) => ({ key: p.id, label: p.name }))}
@@ -198,6 +201,64 @@ export default function ReservationForm() {
   );
 }
 
+function FinanceCard({ detail }: any) {
+  const f = detail.finance || {};
+  const cur = f.currency || "EUR";
+  const money = (n: number) => `${(n || 0).toFixed(2)} ${cur === "EUR" ? "€" : cur}`;
+  const Line = ({ label, value, bold }: any) => (
+    <View style={styles.qLine}>
+      <Text style={[styles.qLabel, bold && styles.qBold]}>{label}</Text>
+      <Text style={[styles.qValue, bold && styles.qBold]}>{value}</Text>
+    </View>
+  );
+  return (
+    <View style={styles.finWrap}>
+      {/* Payé / Dû / Total */}
+      <View style={styles.payRow}>
+        <View style={styles.payCell}><Text style={styles.payLabel}>Payé</Text><Text style={styles.payVal}>{money(f.paid)}</Text></View>
+        <View style={styles.payCell}><Text style={styles.payLabel}>Dû</Text><Text style={styles.payVal}>{money(f.due)}</Text></View>
+        <View style={styles.payCell}><Text style={styles.payLabel}>Total</Text><Text style={[styles.payVal, styles.qBold]}>{money(f.total)}</Text></View>
+      </View>
+
+      {/* Devis */}
+      <View style={styles.finCard}>
+        <View style={styles.finHead}>
+          <Text style={styles.finTitle}>Devis</Text>
+          {!!f.quote_status && <View style={styles.quoteTag}><Text style={styles.quoteTagText}>{f.quote_status === "Agreed" ? "Accepté" : f.quote_status}</Text></View>}
+        </View>
+        {f.stay > 0 && <Line label="Hébergement" value={money(f.stay)} />}
+        {f.fees > 0 && <Line label="Frais de ménage / services" value={money(f.fees)} />}
+        {f.taxes > 0 && <Line label="Taxes de séjour" value={money(f.taxes)} />}
+        {f.addons > 0 && <Line label="Extras" value={money(f.addons)} />}
+        {f.promotions > 0 && <Line label="Promotions" value={`-${money(f.promotions)}`} />}
+        <View style={styles.qSep} />
+        <Line label="Total" value={money(f.total)} bold />
+      </View>
+
+      {/* Politique + infos invité */}
+      <View style={styles.finCard}>
+        <Text style={styles.finTitle}>Invité</Text>
+        {!!detail.guest_name && <InfoLine icon="person-outline" text={detail.guest_name} />}
+        {!!detail.guest_phone && <InfoLine icon="call-outline" text={detail.guest_phone} />}
+        {!!detail.guest_email && <InfoLine icon="mail-outline" text={detail.guest_email} />}
+        {!!detail.language && <InfoLine icon="language-outline" text={detail.language.toUpperCase()} />}
+        {!!detail.confirmation_code && <InfoLine icon="pricetag-outline" text={detail.confirmation_code} />}
+        {!!f.policy_payments && <InfoLine icon="card-outline" text={`Paiement : ${f.policy_payments}`} />}
+        {!!f.damage_deposit && <InfoLine icon="shield-outline" text={`Caution : ${f.damage_deposit}`} />}
+      </View>
+    </View>
+  );
+}
+
+function InfoLine({ icon, text }: any) {
+  return (
+    <View style={styles.infoLine}>
+      <Ionicons name={icon} size={16} color={colors.onSurfaceSecondary} />
+      <Text style={styles.infoText}>{text}</Text>
+    </View>
+  );
+}
+
 function ChipRow({ items, value, onSelect, prefix }: any) {
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
@@ -259,4 +320,21 @@ const styles = StyleSheet.create({
   chipTextActive: { color: colors.onBrandPrimary },
   row: { flexDirection: "row", gap: spacing.md },
   hintSub: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
+  finWrap: { marginBottom: spacing.lg },
+  payRow: { flexDirection: "row", backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.md },
+  payCell: { flex: 1, alignItems: "center" },
+  payLabel: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
+  payVal: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, marginTop: 3 },
+  finCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md },
+  finHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md },
+  finTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.sm },
+  quoteTag: { backgroundColor: "#34C75920", paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: radius.pill },
+  quoteTagText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: "#248A3D" },
+  qLine: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 },
+  qLabel: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceSecondary, flex: 1 },
+  qValue: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface },
+  qBold: { fontFamily: font.bold, color: colors.onSurface },
+  qSep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginVertical: spacing.sm },
+  infoLine: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 5 },
+  infoText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface, flex: 1 },
 });

@@ -21,10 +21,12 @@ export const DEFAULT_STATUSES: StatusDef[] = [
 
 export const CORE_STATUS_KEYS = DEFAULT_STATUSES.map((s) => s.key);
 
-// 12 selectable colors
+// Selectable colors palette
 export const COLOR_PALETTE = [
-  "#FF9500", "#34C759", "#32ADE6", "#8E8E93", "#FF3B30", "#AF52DE",
-  "#FF2D55", "#5856D6", "#00C7BE", "#FFCC00", "#A2845E", "#1C1C1E",
+  "#FF9500", "#FF6B00", "#FFCC00", "#FFD60A", "#34C759", "#30D158",
+  "#00C7BE", "#63E6BE", "#32ADE6", "#0A84FF", "#0055FF", "#5856D6",
+  "#5E5CE6", "#AF52DE", "#BF5AF2", "#FF2D55", "#FF375F", "#FF3B30",
+  "#D70015", "#A2845E", "#AC8E68", "#8E8E93", "#48484A", "#1C1C1E",
 ];
 
 type PrefsState = {

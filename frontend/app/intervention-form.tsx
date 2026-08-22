@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Switch } from "react-native";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
-import { api } from "@/src/api";
+import { api, uploadFile, fileUrl } from "@/src/api";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import DateField from "@/src/components/DateField";
 import { INTERVENTION_TYPES } from "@/src/interventionTypes";
@@ -31,6 +33,10 @@ export default function InterventionForm() {
   });
   const [intervenants, setIntervenants] = useState<string[]>([]);
   const [customName, setCustomName] = useState("");
+  const [cautionAmount, setCautionAmount] = useState("");
+  const [cautionDebited, setCautionDebited] = useState(false);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -54,6 +60,9 @@ export default function InterventionForm() {
                 ? iv.intervenants
                 : (iv.intervenant ? [iv.intervenant] : [])
             );
+            setCautionAmount(iv.caution_amount ? String(iv.caution_amount) : "");
+            setCautionDebited(!!iv.caution_debited);
+            setPhotos(iv.photos || []);
           }
         } else if (pr.length && !propParam) {
           setForm((f) => ({ ...f, property_id: pr[0].id }));
@@ -66,10 +75,37 @@ export default function InterventionForm() {
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const valid = form.property_id && form.date;
 
+  async function pickPhotos() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      quality: 0.6,
+    });
+    if (result.canceled) return;
+    setUploading(true);
+    for (const asset of result.assets) {
+      try {
+        const name = asset.fileName || `etat_${Date.now()}.jpg`;
+        const path = await uploadFile(asset.uri, name, asset.mimeType || "image/jpeg");
+        setPhotos((p) => [...p, path]);
+      } catch {}
+    }
+    setUploading(false);
+  }
+
   async function save(markDone = false) {
     if (!valid || saving) return;
     setSaving(true);
-    const payload = { ...form, intervenants, done: markDone };
+    const payload = {
+      ...form,
+      intervenants,
+      caution_amount: parseFloat(cautionAmount) || 0,
+      caution_debited: cautionDebited,
+      photos,
+      done: markDone,
+    };
     try {
       if (editing) await api.put(`/interventions/${id}`, payload);
       else await api.post("/interventions", payload);
@@ -196,6 +232,36 @@ export default function InterventionForm() {
               ))}
             </View>
           )}
+          {form.kind === "caution" && (
+            <View style={styles.cautionBox}>
+              <Field label="Montant de la caution (€)" testID="caution-amount" value={cautionAmount} onChangeText={setCautionAmount} keyboardType="decimal-pad" placeholder="0" />
+              <View style={styles.switchRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.switchTitle}>Caution débitée</Text>
+                  <Text style={styles.switchSub}>Activez si vous retenez tout ou partie de la caution</Text>
+                </View>
+                <Switch testID="caution-debited" value={cautionDebited} onValueChange={setCautionDebited} trackColor={{ true: colors.error, false: colors.surfaceTertiary }} />
+              </View>
+              {cautionDebited && (
+                <>
+                  <Text style={styles.label}>Photos de l'état des lieux</Text>
+                  <View style={styles.photoGrid}>
+                    {photos.map((p, i) => (
+                      <View key={p} style={styles.photoWrap}>
+                        <Image source={{ uri: fileUrl(p) }} style={styles.photo} contentFit="cover" />
+                        <Pressable testID={`remove-photo-${i}`} onPress={() => setPhotos((ph) => ph.filter((x) => x !== p))} style={styles.photoDel}>
+                          <Ionicons name="close-circle" size={20} color="#fff" />
+                        </Pressable>
+                      </View>
+                    ))}
+                    <Pressable testID="add-photo" onPress={pickPhotos} style={styles.addPhoto} disabled={uploading}>
+                      {uploading ? <ActivityIndicator color={colors.brandPrimary} /> : <Ionicons name="camera-outline" size={26} color={colors.onSurfaceSecondary} />}
+                    </Pressable>
+                  </View>
+                </>
+              )}
+            </View>
+          )}
           <Field label="Description" testID="intervention-description" value={form.description} onChangeText={(v) => set("description", v)} placeholder="Détail de l'intervention..." multiline style={styles.textarea} />
           <Field label="Motif si non exécutée (optionnel)" testID="intervention-reason" value={form.not_done_reason} onChangeText={(v) => set("not_done_reason", v)} placeholder="Ex: accès impossible, reporté..." multiline style={styles.textarea} />
 
@@ -284,6 +350,15 @@ const styles = StyleSheet.create({
   selectedWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.md },
   selectedChip: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.md, paddingVertical: 7, borderRadius: radius.pill },
   selectedChipText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  cautionBox: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md },
+  switchRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.md },
+  switchTitle: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  switchSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  photoWrap: { width: 84, height: 84, borderRadius: radius.md, overflow: "hidden" },
+  photo: { width: "100%", height: "100%" },
+  photoDel: { position: "absolute", top: 2, right: 2, backgroundColor: "rgba(0,0,0,0.4)", borderRadius: 12 },
+  addPhoto: { width: 84, height: 84, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, borderStyle: "dashed", alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
   textarea: { minHeight: 90, textAlignVertical: "top", paddingTop: 12 },
   hint: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
 });

@@ -4,6 +4,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import re
+import json
 import html as htmllib
 import asyncio
 import logging
@@ -96,13 +97,16 @@ class ReservationIn(BaseModel):
 
 class InterventionIn(BaseModel):
     property_id: str
-    kind: str = "menage"  # menage | intervention
+    kind: str = "menage"  # menage | intervention | remise_cles | caution
     date: str  # YYYY-MM-DD
     description: str = ""
     intervenant: str = ""
     intervenants: List[str] = []
     done: bool = False
     not_done_reason: str = ""
+    caution_amount: float = 0
+    caution_debited: bool = False
+    photos: List[str] = []
     auto: bool = False
 
 
@@ -250,6 +254,50 @@ async def delete_property(property_id: str, user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 # Reservations
 # ---------------------------------------------------------------------------
+DEFAULT_STATUS_COLORS = {
+    "demande": "#FF9500", "confirmee": "#34C759", "arrivee": "#32ADE6",
+    "depart": "#8E8E93", "annulee": "#FF3B30",
+}
+
+
+async def status_color_map(uid: str):
+    doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
+    m = {s["key"]: s["color"] for s in _build_statuses(doc)}
+    for k, v in DEFAULT_STATUS_COLORS.items():
+        m.setdefault(k, v)
+    return m
+
+
+def compute_display(r: dict, cmap: dict):
+    """Attach display_status/display_color driven by dates (arrivée/départ) + markers."""
+    status = r.get("status")
+    today = date.today()
+
+    def p(d):
+        try:
+            return date.fromisoformat(d)
+        except Exception:
+            return None
+
+    ci, co = p(r.get("check_in")), p(r.get("check_out"))
+    if status == "annulee":
+        ds, color = "annulee", cmap.get("annulee")
+    elif ci and co:
+        if today < ci:
+            ds = status
+            color = r.get("marker_color") or cmap.get(status)
+        elif today < co:
+            ds, color = "arrivee", cmap.get("arrivee")
+        else:
+            ds, color = "depart", cmap.get("depart")
+    else:
+        ds = status
+        color = r.get("marker_color") or cmap.get(status)
+    r["display_status"] = ds
+    r["display_color"] = color
+    return r
+
+
 @api_router.get("/reservations")
 async def list_reservations(status: Optional[str] = None, property_id: Optional[str] = None, user=Depends(get_current_user)):
     query = {"user_id": user["user_id"]}
@@ -258,6 +306,9 @@ async def list_reservations(status: Optional[str] = None, property_id: Optional[
     if property_id:
         query["property_id"] = property_id
     items = await db.reservations.find(query, {"_id": 0}).sort("check_in", 1).to_list(1000)
+    cmap = await status_color_map(user["user_id"])
+    for it in items:
+        compute_display(it, cmap)
     return items
 
 
@@ -577,6 +628,7 @@ async def dashboard(user=Depends(get_current_user)):
     interventions = await db.interventions.find({"user_id": uid}, {"_id": 0}).sort("date", 1).to_list(1000)
 
     prop_map = {p["id"]: p for p in props}
+    cmap = await status_color_map(uid)
 
     def parse(d):
         try:
@@ -596,7 +648,7 @@ async def dashboard(user=Depends(get_current_user)):
         ci = parse(r.get("check_in"))
         co = parse(r.get("check_out"))
         pname = prop_map.get(r["property_id"], {}).get("name", "Logement")
-        r_view = {**r, "property_name": pname}
+        r_view = compute_display({**r, "property_name": pname}, cmap)
         if r.get("check_in") == today_str:
             arrivals_today.append(r_view)
         if r.get("check_out") == today_str:
@@ -1053,16 +1105,50 @@ async def channel_sync(user=Depends(get_current_user)):
         lodgify_key = str(b.get("id"))
         thread_uid = b.get("thread_uid")
         notes = strip_html(b.get("notes") or "")
+        subt = b.get("subtotals") or {}
+        quote = b.get("quote") or {}
+        policy = quote.get("policy") or {}
+        conf_code = ""
+        try:
+            st = json.loads(b.get("source_text") or "{}")
+            conf_code = st.get("confirmationCode") or ""
+        except Exception:
+            conf_code = ""
+        ci_obj = b.get("check_in") or {}
+        co_obj = b.get("check_out") or {}
+        finance = {
+            "currency": b.get("currency_code") or "EUR",
+            "total": float(b.get("total_amount") or 0),
+            "paid": float(b.get("amount_paid") or 0),
+            "due": float(b.get("amount_due") or 0),
+            "stay": float(subt.get("stay") or 0),
+            "fees": float(subt.get("fees") or 0),
+            "taxes": float(subt.get("taxes") or 0),
+            "addons": float(subt.get("addons") or 0),
+            "promotions": float(subt.get("promotions") or 0),
+            "vat": float(subt.get("vat") or 0),
+            "quote_status": quote.get("status") or "",
+            "policy_payments": policy.get("payments") or "",
+            "policy_cancellation": policy.get("cancellation") or "",
+            "damage_deposit": policy.get("damage_deposit") or "",
+        }
         payload = {
             "user_id": uid,
             "property_id": prop["id"],
             "guest_name": gname,
             "guest_email": gemail,
+            "guest_phone": (guest_obj.get("phone") or "").replace("N/A from Airbnb", "").strip(),
+            "language": b.get("language") or "",
+            "confirmation_code": conf_code,
             "platform": src,
             "check_in": check_in,
             "check_out": check_out,
+            "checkin_time": ci_obj.get("time") or "",
+            "checkout_time": co_obj.get("time") or "",
+            "lodgify_created_at": b.get("created_at") or "",
             "guests": guests,
             "total_price": float(b.get("total_amount") or 0),
+            "finance": finance,
             "status": status,
             "notes": notes,
             "source": "lodgify",
@@ -1507,6 +1593,89 @@ async def run_automations_for_user(uid: str):
 async def automations_run(user=Depends(get_current_user)):
     sent = await run_automations_for_user(user["user_id"])
     return {"sent": sent}
+
+
+# ---------------------------------------------------------------------------
+# Object storage (photos état des lieux) — Emergent managed
+# ---------------------------------------------------------------------------
+import requests as _requests
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
+from fastapi import UploadFile, File
+
+_STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
+_STORAGE_URL = _STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
+_EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
+_APP_NAME = "staypilot"
+_storage_key = None
+
+
+def _init_storage():
+    global _storage_key
+    if _storage_key:
+        return _storage_key
+    resp = _requests.post(f"{_STORAGE_URL}/init", json={"emergent_key": _EMERGENT_KEY}, timeout=30)
+    resp.raise_for_status()
+    _storage_key = resp.json()["storage_key"]
+    return _storage_key
+
+
+def _put_object(path: str, data: bytes, content_type: str):
+    global _storage_key
+    key = _init_storage()
+    resp = _requests.put(f"{_STORAGE_URL}/objects/{path}",
+                         headers={"X-Storage-Key": key, "Content-Type": content_type}, data=data, timeout=120)
+    if resp.status_code == 503:
+        _storage_key = None
+        key = _init_storage()
+        resp = _requests.put(f"{_STORAGE_URL}/objects/{path}",
+                             headers={"X-Storage-Key": key, "Content-Type": content_type}, data=data, timeout=120)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _get_object(path: str):
+    key = _init_storage()
+    resp = _requests.get(f"{_STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
+    resp.raise_for_status()
+    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
+
+
+@api_router.post("/upload")
+async def upload_file(file: UploadFile = File(...), user=Depends(get_current_user)):
+    ext = (file.filename or "photo.jpg").rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "webp", "heic"):
+        ext = "jpg"
+    path = f"{_APP_NAME}/uploads/{user['user_id']}/{uuid.uuid4().hex}.{ext}"
+    data = await file.read()
+    ct = file.content_type or "image/jpeg"
+    try:
+        result = await run_in_threadpool(_put_object, path, data, ct)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Upload échoué: {e}")
+    await db.uploads.insert_one({
+        "user_id": user["user_id"], "path": result["path"],
+        "created_at": now_utc().isoformat(),
+    })
+    return {"path": result["path"]}
+
+
+@api_router.get("/files/{path:path}")
+async def get_file(path: str, token: Optional[str] = None, authorization: Optional[str] = Header(None)):
+    tok = token
+    if not tok and authorization and authorization.startswith("Bearer "):
+        tok = authorization[7:]
+    session = await db.user_sessions.find_one({"session_token": tok}) if tok else None
+    if not session:
+        raise HTTPException(status_code=401, detail="Non autorisé")
+    owned = await db.uploads.find_one({"user_id": session["user_id"], "path": path})
+    if not owned:
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
+    try:
+        content, ct = await run_in_threadpool(_get_object, path)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
+    return Response(content=content, media_type=ct)
 
 
 # ---------------------------------------------------------------------------

@@ -283,7 +283,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                     const endOffset = Math.min(daysInMonth, co.diff(monthStart, "day"));
                     const nights = endOffset - startOffset;
                     if (nights <= 0) return null;
-                    const color = r.marker_color || statusColors[r.status] || "#8E8E93";
+                    const color = r.display_color || r.marker_color || statusColors[r.status] || "#8E8E93";
                     return (
                       <Pressable
                         key={r.id}
@@ -377,7 +377,7 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, p
           const dayIvs = ivsForDay(dayStr);
           const isToday = dayStr === todayStr;
           const isSel = dayStr === selectedDay;
-          const firstColor = res.length ? (res[0].marker_color || statusColors[res[0].status]) : null;
+          const firstColor = res.length ? (res[0].display_color || res[0].marker_color || statusColors[res[0].status]) : null;
           const uniqueStatuses = Array.from(new Set(res.map((r: any) => r.status))) as string[];
           return (
             <Pressable

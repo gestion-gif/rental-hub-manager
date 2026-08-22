@@ -10,7 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.rentalhubmanager.p4jvi7"
+      "bundleIdentifier": "com.emergent.rentalhubmanager.p4jvi7",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Ajouter des photos de l'état des lieux"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +21,10 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.rentalhubmanager.p4jvi7"
+      "package": "com.emergent.rentalhubmanager.p4jvi7",
+      "permissions": [
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "bundler": "metro",
