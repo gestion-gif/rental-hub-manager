@@ -126,3 +126,27 @@ export function roleName(role: string): string {
 export function languageName(lang: string): string {
   return LANGUAGES.find((l) => l.id === lang)?.name || lang;
 }
+
+// --- Enforcement helpers (owner sees everything; members are gated by permissions) ---
+export function userCan(user: any, perm: string): boolean {
+  if (!user || user.role !== "member") return true;
+  return (user.permissions || []).includes(perm);
+}
+
+export function canSeeRevenue(user: any): boolean {
+  return userCan(user, "view_revenue_charts");
+}
+
+export function canSeeGuestName(user: any): boolean {
+  return userCan(user, "view_guest_name");
+}
+
+export function canSeePrices(user: any): boolean {
+  if (!user || user.role !== "member") return true;
+  const p = user.permissions || [];
+  return p.includes("view_booking_amount") && !p.includes("hide_booking_prices");
+}
+
+export function guestLabel(user: any, name?: string): string {
+  return canSeeGuestName(user) ? (name || "") : "Voyageur";
+}

@@ -22,6 +22,7 @@ import { MenuButton } from "@/src/components/MenuButton";
 import StatusBadge from "@/src/components/StatusBadge";
 import { getInterventionType } from "@/src/interventionTypes";
 import { InterventionIcon } from "@/src/components/InterventionIcon";
+import { canSeeRevenue, guestLabel } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 type Dash = {
@@ -127,12 +128,14 @@ export default function Dashboard() {
                 icon="pie-chart"
                 tint={colors.info}
               />
-              <StatCard
-                label="Revenus du mois"
-                value={`${data?.revenue_month ?? 0} €`}
-                icon="cash"
-                tint={colors.success}
-              />
+              {canSeeRevenue(user) && (
+                <StatCard
+                  label="Revenus du mois"
+                  value={`${data?.revenue_month ?? 0} €`}
+                  icon="cash"
+                  tint={colors.success}
+                />
+              )}
               <StatCard
                 label="Logements"
                 value={`${data?.total_properties ?? 0}`}
@@ -157,7 +160,7 @@ export default function Dashboard() {
             >
               {data?.arrivals_today?.length ? (
                 data.arrivals_today.map((r) => (
-                  <StayCard key={r.id} r={r} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
+                  <StayCard key={r.id} r={{ ...r, guest_name: guestLabel(user, r.guest_name) }} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
                 ))
               ) : (
                 <EmptyRow text="Aucune arrivée aujourd'hui" />
@@ -187,7 +190,7 @@ export default function Dashboard() {
             >
               {data?.current_stays?.length ? (
                 data.current_stays.map((r) => (
-                  <StayCard key={r.id} r={r} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
+                  <StayCard key={r.id} r={{ ...r, guest_name: guestLabel(user, r.guest_name) }} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
                 ))
               ) : (
                 <EmptyRow text="Aucun séjour en cours" />
@@ -202,7 +205,7 @@ export default function Dashboard() {
             >
               {data?.departures_today?.length ? (
                 data.departures_today.map((r) => (
-                  <StayCard key={r.id} r={r} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
+                  <StayCard key={r.id} r={{ ...r, guest_name: guestLabel(user, r.guest_name) }} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
                 ))
               ) : (
                 <EmptyRow text="Aucun départ aujourd'hui" />

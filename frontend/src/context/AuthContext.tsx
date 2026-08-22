@@ -19,6 +19,10 @@ type User = {
   email: string;
   name: string;
   picture?: string;
+  role?: string;
+  member_role?: string;
+  permissions?: string[];
+  allowed_property_ids?: string[] | null;
 };
 
 type AuthState = {
@@ -154,14 +158,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await api.post("/auth/login", { email, password });
     setToken(data.session_token);
     await storage.secureSet(TOKEN_KEY, data.session_token);
-    setUser(data.user);
+    // Fetch the full profile (permissions, allowed properties) for UI enforcement
+    try {
+      setUser(await api.get("/auth/me"));
+    } catch {
+      setUser(data.user);
+    }
   }
 
   async function acceptInvite(token: string, password: string) {
     const data = await api.post("/auth/accept-invite", { token, password });
     setToken(data.session_token);
     await storage.secureSet(TOKEN_KEY, data.session_token);
-    setUser(data.user);
+    try {
+      setUser(await api.get("/auth/me"));
+    } catch {
+      setUser(data.user);
+    }
   }
 
   return (

@@ -18,6 +18,8 @@ import * as WebBrowser from "expo-web-browser";
 import { api } from "@/src/api";
 import { storage } from "@/src/utils/storage";
 import { usePreferences } from "@/src/context/PreferencesContext";
+import { useAuth } from "@/src/context/AuthContext";
+import { canSeePrices } from "@/src/permissions";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import DateField from "@/src/components/DateField";
 import { PlatformLogo } from "@/src/components/PlatformLogo";
@@ -33,6 +35,8 @@ export default function ReservationForm() {
   const params = useLocalSearchParams<{ property?: string; check_in?: string; check_out?: string }>();
   const editing = !!id;
   const { statuses } = usePreferences();
+  const { user } = useAuth();
+  const showPrices = canSeePrices(user);
 
   const [props, setProps] = useState<any[]>([]);
   const [detail, setDetail] = useState<any>(null);
@@ -248,7 +252,7 @@ export default function ReservationForm() {
           bottomOffset={20}
           showsVerticalScrollIndicator={false}
         >
-          {detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} onAddPayment={addPayment} onDeletePayment={deletePayment} onSetCommission={saveCommission} onCheckout={startCheckout} paying={paying} payMsg={payMsg} />}
+          {showPrices && detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} onAddPayment={addPayment} onDeletePayment={deletePayment} onSetCommission={saveCommission} onCheckout={startCheckout} paying={paying} payMsg={payMsg} />}
           <Text style={styles.label}>Logement</Text>
           <ChipRow
             items={props.map((p) => ({ key: p.id, label: p.name }))}
@@ -291,9 +295,11 @@ export default function ReservationForm() {
             <View style={{ flex: 1 }}>
               <Field label="Voyageurs" testID="guests" value={form.guests} onChangeText={(v) => set("guests", v)} keyboardType="number-pad" />
             </View>
-            <View style={{ flex: 1 }}>
-              <Field label="Prix total (€)" testID="total-price" value={form.total_price} onChangeText={(v) => set("total_price", v)} keyboardType="decimal-pad" placeholder="0" />
-            </View>
+            {showPrices && (
+              <View style={{ flex: 1 }}>
+                <Field label="Prix total (€)" testID="total-price" value={form.total_price} onChangeText={(v) => set("total_price", v)} keyboardType="decimal-pad" placeholder="0" />
+              </View>
+            )}
           </View>
           <Field label="Notes" testID="notes" value={form.notes} onChangeText={(v) => set("notes", v)} placeholder="Informations complémentaires" multiline />
 

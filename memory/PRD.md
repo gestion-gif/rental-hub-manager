@@ -130,3 +130,13 @@
 - **Auth mot de passe** (pwdlib/argon2) coexistant avec Google OAuth : POST /api/auth/accept-invite {token,password>=8} → pose password_hash, active le compte, renvoie session_token+user. POST /api/auth/login {email,password} → session membre. Erreurs génériques (401), invitations expirées → 400, pw court → 422.
 - **Frontend** : formulaire utilisateur avec section « Accès aux logements » (MultiPicker cases à cocher) + carte « Accès de l'utilisateur » (bouton d'invitation, badges Invitation envoyée / Compte actif). Écran de connexion étendu (email + mot de passe en plus de Google). Nouvel écran `/accept-invite` (création du mot de passe). AuthContext : loginWithPassword + acceptInvite.
 - Vérifié : email envoyé (delivered@resend.dev), accept-invite→login→membre ne voit que Villa A (owner voit Villa A+B). 163/163 pytest verts.
+
+## Ajout Application des autorisations à l'écran + Filtre intervenant calendrier (2026-06)
+- **Rôle Administrateur = accès complet** au compte parrain (correctif : un admin sans logement attribué voyait un compte vide).
+- **Application des autorisations (frontend + backend)** :
+  - `view_revenue_charts` : masque la carte « Revenus du mois » (dashboard), le lien « Statistiques » (drawer), et bloque GET /api/analytics/revenue (403) + dashboard.revenue_month=None côté backend pour les membres non autorisés (un intervenant ne voit AUCUN revenu).
+  - `view_guest_name` : masque le nom du voyageur (→ « Voyageur ») dans la liste Réservations, le dashboard et le calendrier.
+  - `view_booking_amount` + `hide_booking_prices` : masque le prix (liste Réservations) et toute la carte financière + le champ Prix total (fiche réservation).
+  - Helpers : `src/permissions.ts` (userCan/canSeeRevenue/canSeeGuestName/canSeePrices/guestLabel) ; backend `_can(user, perm)`. `/auth/me` renvoie role+permissions (owner => tout autorisé). loginWithPassword/acceptInvite rechargent /auth/me.
+- **Filtre par intervenant (calendrier/planning)** : sélecteur « Filtrer par intervenant » (propriétaire uniquement) listant les membres ayant des logements attribués ; sélectionner un intervenant restreint la réglette/mois à ses logements. Combinable avec le filtre logement.
+- Vérifié : intervenant → analytics 403, dashboard revenue_month=None, ne voit que ses logements. 28/28 tests membres verts.

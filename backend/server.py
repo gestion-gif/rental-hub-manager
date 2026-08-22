@@ -203,6 +203,13 @@ def _prop_scope(user, field="id"):
     return {field: {"$in": ids}}
 
 
+def _can(user, perm: str) -> bool:
+    """Owners can do everything; members are gated by their granted permissions."""
+    if user.get("role") != "member":
+        return True
+    return perm in (user.get("permissions") or [])
+
+
 # ---------------------------------------------------------------------------
 # Auth routes
 # ---------------------------------------------------------------------------
@@ -1037,7 +1044,7 @@ async def dashboard(user=Depends(get_current_user)):
 
     return {
         "occupancy_rate": occupancy,
-        "revenue_month": round(revenue_month),
+        "revenue_month": round(revenue_month) if _can(user, "view_revenue_charts") else None,
         "total_properties": len(props),
         "upcoming_count": upcoming,
         "current_stays": current_stays,
@@ -1049,6 +1056,8 @@ async def dashboard(user=Depends(get_current_user)):
 
 @api_router.get("/analytics/revenue")
 async def analytics_revenue(year: Optional[int] = None, user=Depends(get_current_user)):
+    if not _can(user, "view_revenue_charts"):
+        raise HTTPException(status_code=403, detail="Accès aux revenus non autorisé")
     uid = user["user_id"]
     y = year or date.today().year
     props = await db.properties.find({"user_id": uid, **_prop_scope(user)}, {"_id": 0}).to_list(500)

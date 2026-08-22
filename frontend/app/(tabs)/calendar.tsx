@@ -21,12 +21,15 @@ import { MenuButton } from "@/src/components/MenuButton";
 import StatusBadge from "@/src/components/StatusBadge";
 import { PlatformLogo } from "@/src/components/PlatformLogo";
 import { usePreferences } from "@/src/context/PreferencesContext";
+import { useAuth } from "@/src/context/AuthContext";
+import { canSeePrices, guestLabel } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 export default function CalendarScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { statuses } = usePreferences();
+  const { user } = useAuth();
   const FILTERS = useMemo(
     () => [{ key: "all", label: "Toutes" }, ...statuses.map((s) => ({ key: s.key, label: s.label }))],
     [statuses],
@@ -132,7 +135,7 @@ export default function CalendarScreen() {
               <View style={styles.cardTop}>
                 <View style={styles.guestRow}>
                   <PlatformLogo platform={item.platform} size={20} />
-                  <Text style={styles.guest} numberOfLines={1}>{item.guest_name}</Text>
+                  <Text style={styles.guest} numberOfLines={1}>{guestLabel(user, item.guest_name)}</Text>
                 </View>
                 <StatusBadge status={item.display_status || item.status} />
               </View>
@@ -143,9 +146,11 @@ export default function CalendarScreen() {
                 <Ionicons name="arrow-forward" size={13} color={colors.onSurfaceTertiary} />
                 <Ionicons name="log-out-outline" size={15} color={colors.onSurfaceTertiary} />
                 <Text style={styles.dateText}>{dayjs(item.check_out).format("DD MMM")}</Text>
-                <View style={styles.priceTag}>
-                  <Text style={styles.priceText}>{item.total_price} €</Text>
-                </View>
+                {canSeePrices(user) && (
+                  <View style={styles.priceTag}>
+                    <Text style={styles.priceText}>{item.total_price} €</Text>
+                  </View>
+                )}
               </View>
             </Pressable>
           )}

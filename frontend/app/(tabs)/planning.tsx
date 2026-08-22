@@ -18,11 +18,14 @@ import "dayjs/locale/fr";
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
 import { usePreferences } from "@/src/context/PreferencesContext";
+import { useAuth } from "@/src/context/AuthContext";
+import { guestLabel } from "@/src/permissions";
 import StatusBadge, { tint } from "@/src/components/StatusBadge";
 import { INTERVENTION_TYPES, getInterventionType } from "@/src/interventionTypes";
 import { InterventionIcon } from "@/src/components/InterventionIcon";
 import { PlatformLogo } from "@/src/components/PlatformLogo";
 import { PropertyPicker } from "@/src/components/PropertyPicker";
+import { Picker } from "@/src/components/Picker";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 dayjs.locale("fr");
@@ -39,11 +42,15 @@ export default function Planning() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { statusColors, statuses } = usePreferences();
+  const { user } = useAuth();
+  const isOwner = user?.role !== "member";
   const [props, setProps] = useState<any[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
   const [interventions, setInterventions] = useState<any[]>([]);
+  const [members, setMembers] = useState<any[]>([]);
   const [mode, setMode] = useState<"timeline" | "month">("timeline");
   const [selectedProp, setSelectedProp] = useState<string>("all");
+  const [selectedMember, setSelectedMember] = useState<string>("all");
   const [anchor, setAnchor] = useState(dayjs().startOf("month"));
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
@@ -57,8 +64,14 @@ export default function Planning() {
       setProps(pr);
       setReservations(res.filter((r: any) => r.status !== "annulee"));
       setInterventions(ivs.filter((iv: any) => !iv.done));
+      if (isOwner) {
+        try {
+          const ms = await api.get("/members");
+          setMembers((ms || []).filter((m: any) => (m.property_ids || []).length > 0));
+        } catch {}
+      }
     } catch {}
-  }, []);
+  }, [isOwner]);
 
   useFocusEffect(
     useCallback(() => {
@@ -72,15 +85,13 @@ export default function Planning() {
     return m;
   }, [props]);
 
-  const rows = selectedProp === "all" ? props : props.filter((p) => p.id === selectedProp);
-  const filtered =
-    selectedProp === "all"
-      ? reservations
-      : reservations.filter((r) => r.property_id === selectedProp);
-  const filteredIvs =
-    selectedProp === "all"
-      ? interventions
-      : interventions.filter((iv) => iv.property_id === selectedProp);
+  const activeMember = members.find((m) => m.id === selectedMember);
+  const memberPropIds: string[] | null = activeMember ? (activeMember.property_ids || []) : null;
+  const inScope = (pid: string) =>
+    (selectedProp === "all" || pid === selectedProp) && (!memberPropIds || memberPropIds.includes(pid));
+  const rows = props.filter((p) => inScope(p.id));
+  const filtered = reservations.filter((r) => inScope(r.property_id));
+  const filteredIvs = interventions.filter((iv) => inScope(iv.property_id));
 
   const monthStart = anchor.startOf("month");
   const daysInMonth = anchor.daysInMonth();
@@ -128,6 +139,25 @@ export default function Planning() {
         <View style={styles.pickerWrap}>
           <PropertyPicker value={selectedProp} items={props} onSelect={setSelectedProp} testID="planning-prop-picker" />
         </View>
+
+        {isOwner && members.length > 0 && (
+          <View style={styles.pickerWrap}>
+            <Picker
+              testID="planning-member-picker"
+              title="Filtrer par intervenant"
+              icon="person-outline"
+              value={selectedMember}
+              items={[
+                { id: "all", name: "Tous les intervenants" },
+                ...members.map((m) => ({
+                  id: m.id,
+                  name: `${[m.first_name, m.last_name].filter(Boolean).join(" ") || m.email} · ${(m.property_ids || []).length} logement${(m.property_ids || []).length > 1 ? "s" : ""}`,
+                })),
+              ]}
+              onSelect={setSelectedMember}
+            />
+          </View>
+        )}
 
         <View style={styles.monthNav}>
           <View style={styles.navGroup}>
@@ -341,7 +371,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                         ]}
                       >
                         <PlatformLogo platform={r.platform} size={14} />
-                        <Text style={styles.barText} numberOfLines={1}>{r.guest_name}</Text>
+                        <Text style={styles.barText} numberOfLines={1}>{guestLabel(user, r.guest_name)}</Text>
                       </Pressable>
                     );
                   })}
@@ -469,7 +499,7 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, p
               {selRes.map((r: any) => (
                 <Pressable key={r.id} testID={`day-res-${r.id}`} onPress={() => onRes(r.id)} style={styles.detailCard}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.detailGuest}>{r.guest_name}</Text>
+                    <Text style={styles.detailGuest}>{guestLabel(user, r.guest_name)}</Text>
                     <Text style={styles.detailProp}>{propMap[r.property_id]?.name || "Logement"}</Text>
                   </View>
                   <StatusBadge status={r.status} />
