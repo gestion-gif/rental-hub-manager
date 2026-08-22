@@ -358,6 +358,46 @@ agent_communication:
     -agent: "main"
     -message: "Iteration 12. Tester UNIQUEMENT le backend: nouveau CRUD /api/members. Auth: insérer users + user_sessions (user_id de TEST isolé ex test_iter12) dans Mongo, header Authorization: Bearer <token>. TESTS: 1) POST /api/members {first_name:'Marie', last_name:'Dupont', email:'m@x.com', role:'manager', language:'fr', permissions:['edit_property','view_guest_name'], active:true} -> renvoie id, tous les champs. 2) GET /api/members -> liste triée par first_name, contient le membre. 3) GET /api/members/{id} -> le membre; id inconnu -> 404. 4) PUT /api/members/{id} {...modifié role:'admin'} -> mis à jour; id inconnu -> 404. 5) DELETE /api/members/{id} -> {ok:true}, puis GET liste ne le contient plus. 6) Isolation: un membre créé par user A ne doit pas apparaître pour user B. NE PAS tester le frontend."
 
+## Iteration 14 — Assistant IA: brouillons à valider + notifications, refonte helpers.py
+backend:
+  - task: "Notifications (brouillons IA à valider)"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "GET /api/notifications et GET /api/notifications/count listent/comptent les conversations avec ai_draft présent et ai_draft_validated != true, scopées par user_id + _prop_scope. _can_inbox gate (rôles cleaning/intervenant/owner -> count 0). POST /api/inbox/{thread}/reply pose ai_draft_validated=true et $unset ai_draft/ai_draft_msg_id/ai_draft_at."
+  - task: "Génération de brouillon IA (inbox thread + generate-draft)"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "GET /api/inbox/{thread} génère un brouillon (Claude Sonnet 4.6) si le dernier message vient du voyageur et le stocke sur la conversation (ai_draft). POST /api/inbox/{thread}/generate-draft régénère. Boucle de fond _ai_draft_loop (30 min) pré-génère pour les conversations non lues. DÉPEND de Lodgify (compte réel) — NON testable sans clé Lodgify réelle. Ne PAS déclencher d'envoi réel."
+  - task: "Refactor helpers.py (extraction fonctions pures)"
+    implemented: true
+    working: true
+    file: "backend/helpers.py, backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "Fonctions pures + constantes extraites dans helpers.py (crypto, statuts/paiements/commissions defaults, compute_display, recompute_payment, marker_color_for, parse_ical, _build_ics). server.py les importe. 176/176 pytest verts après extraction."
+
+agent_communication:
+    -agent: "main"
+    -message: "Iteration 14. Tester UNIQUEMENT le backend. Auth owner: insérer users + user_sessions (user_id isolé ex test_iter14) dans Mongo, header Bearer. TESTS NOTIFICATIONS (sans Lodgify): 1) Insérer 2 conversations pour l'owner: convA {thread_uid:'ta', guest_name:'Alice', property_name:'Villa A', source:'Airbnb', ai_draft:'Bonjour Alice...', ai_draft_validated:false, ai_draft_at:'2026-06-01T00:00:00'} et convB {thread_uid:'tb', ..., ai_draft_validated:true} (déjà validé). GET /api/notifications -> count=1, items ne contient QUE convA. GET /api/notifications/count -> {count:1}. 2) Créer un member role='cleaning' + session membre kind:member -> GET /api/notifications -> {count:0, items:[]} (gate _can_inbox). 3) Isolation: une conversation d'un autre user ne doit pas apparaître. NE PAS tester GET /api/inbox/{thread}, POST generate-draft ni reply (dépendent d'une connexion Lodgify réelle et pourraient envoyer un vrai message). NE PAS toucher au vrai compte connecté. Nettoyer les données de test insérées. Le refactor helpers.py est déjà validé par les 176 pytest — vérifier juste qu'aucun endpoint existant clé (GET /properties, /reservations, /preferences, /dashboard) ne régresse pour l'owner de test."
+
 ## Iteration 13 — Accès logements membre + Invitation email + Auth mot de passe
 backend:
   - task: "Member property access + data scoping"

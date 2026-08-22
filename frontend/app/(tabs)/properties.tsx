@@ -15,6 +15,8 @@ import { useRouter, useFocusEffect } from "expo-router";
 
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
+import { useAuth } from "@/src/context/AuthContext";
+import { canModify } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const FALLBACK =
@@ -23,6 +25,7 @@ const FALLBACK =
 export default function Properties() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useAuth();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -100,13 +103,15 @@ export default function Properties() {
         />
       )}
 
-      <Pressable
-        testID="add-property-fab"
-        onPress={() => router.push("/property-form")}
-        style={[styles.fab, { bottom: insets.bottom + 24 }]}
-      >
-        <Ionicons name="add" size={28} color={colors.onBrandPrimary} />
-      </Pressable>
+      {canModify(user) && (
+        <Pressable
+          testID="add-property-fab"
+          onPress={() => router.push("/property-form")}
+          style={[styles.fab, { bottom: insets.bottom + 24 }]}
+        >
+          <Ionicons name="add" size={28} color={colors.onBrandPrimary} />
+        </Pressable>
+      )}
     </View>
   );
 }

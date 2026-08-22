@@ -8,6 +8,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { api, uploadFile, fileUrl } from "@/src/api";
+import { useAuth } from "@/src/context/AuthContext";
+import { canModify } from "@/src/permissions";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import DateField from "@/src/components/DateField";
 import { INTERVENTION_TYPES } from "@/src/interventionTypes";
@@ -17,6 +19,7 @@ import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 export default function InterventionForm() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useAuth();
   const { id, date: dateParam, property: propParam } = useLocalSearchParams<{ id?: string; date?: string; property?: string }>();
   const editing = !!id;
 
@@ -271,9 +274,9 @@ export default function InterventionForm() {
             label={editing ? "Enregistrer / Reporter" : "Ajouter au calendrier"}
             onPress={() => save(false)}
             loading={saving}
-            disabled={!valid}
+            disabled={!valid || !canModify(user)}
           />
-          {editing && (
+          {editing && canModify(user) && (
             <PrimaryButton
               testID="validate-intervention"
               label="Valider (retirer du calendrier)"
@@ -283,7 +286,7 @@ export default function InterventionForm() {
               icon={<Ionicons name="checkmark-circle" size={18} color={colors.onSurface} />}
             />
           )}
-          {editing && (
+          {editing && canModify(user) && (
             <PrimaryButton
               testID="delete-intervention"
               label="Supprimer"

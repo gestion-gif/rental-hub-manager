@@ -19,7 +19,7 @@ import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import { useAuth } from "@/src/context/AuthContext";
-import { guestLabel } from "@/src/permissions";
+import { guestLabel, canModify } from "@/src/permissions";
 import StatusBadge, { tint } from "@/src/components/StatusBadge";
 import { INTERVENTION_TYPES, getInterventionType } from "@/src/interventionTypes";
 import { InterventionIcon } from "@/src/components/InterventionIcon";
@@ -225,7 +225,7 @@ export default function Planning() {
         />
       )}
 
-      {props.length > 0 && (
+      {props.length > 0 && canModify(user) && (
         <Pressable
           testID="add-intervention-fab"
           onPress={() => {

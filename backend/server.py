@@ -20,32 +20,21 @@ from emergentintegrations.payments.stripe.checkout import StripeCheckout, Checko
 
 import secrets
 from hashlib import sha256
-from pwdlib import PasswordHash
 
 from lodgify import (
     LODGIFY_STATUS_MAP, source_label, strip_html,
     LodgifyAdapter, map_lodgify_property,
 )
 from emailer import send_email, build_invite_email
-
-_pwd = PasswordHash.recommended()
-_DUMMY_HASH = _pwd.hash("not-a-real-password")
-
-
-def hash_password(p: str) -> str:
-    return _pwd.hash(p)
-
-
-def verify_password(p: str, stored: Optional[str]) -> bool:
-    return _pwd.verify(p, stored or _DUMMY_HASH)
-
-
-def norm_email(v: str) -> str:
-    return (v or "").strip().lower()
-
-
-def hash_token(raw: str) -> str:
-    return sha256(raw.encode("utf-8")).hexdigest()
+from helpers import (
+    now_utc, hash_password, verify_password, norm_email, hash_token,
+    DEFAULT_STATUSES, DEFAULT_STATUS_COLORS, CORE_STATUS_KEYS,
+    DEFAULT_COMMISSION_RATES, DEFAULT_PAYMENT_METHODS,
+    _build_payment_methods, _build_commission_rates, _build_statuses,
+    compute_display, recompute_payment, marker_color_for,
+    _unfold_ical, _parse_ical_date, parse_ical, _BLOCK_SUMMARIES,
+    _ics_date, _ics_escape, _build_ics,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -69,10 +58,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
-def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
-
-
 class SessionRequest(BaseModel):
     session_id: str
 
@@ -333,64 +318,12 @@ async def delete_property(property_id: str, user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 # Reservations
 # ---------------------------------------------------------------------------
-DEFAULT_STATUS_COLORS = {
-    "demande": "#FF9500", "confirmee": "#34C759", "arrivee": "#32ADE6",
-    "depart": "#8E8E93", "annulee": "#FF3B30",
-}
-
-
 async def status_color_map(uid: str):
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     m = {s["key"]: s["color"] for s in _build_statuses(doc)}
     for k, v in DEFAULT_STATUS_COLORS.items():
         m.setdefault(k, v)
     return m
-
-
-def compute_display(r: dict, cmap: dict):
-    """Attach display_status/display_color driven by dates (arrivée/départ) + markers."""
-    status = r.get("status")
-    today = date.today()
-
-    def p(d):
-        try:
-            return date.fromisoformat(d)
-        except Exception:
-            return None
-
-    ci, co = p(r.get("check_in")), p(r.get("check_out"))
-    if status == "annulee":
-        ds, color = "annulee", cmap.get("annulee")
-    elif ci and co:
-        if today < ci:
-            ds = status
-            color = r.get("marker_color") or cmap.get(status)
-        elif today < co:
-            ds, color = "arrivee", cmap.get("arrivee")
-        else:
-            ds, color = "depart", cmap.get("depart")
-    else:
-        ds = status
-        color = r.get("marker_color") or cmap.get(status)
-    r["display_status"] = ds
-    r["display_color"] = color
-    return r
-
-
-def recompute_payment(r: dict):
-    """Recompute finance.paid/due from acomptes (payments) + manual full-paid flag."""
-    fin = dict(r.get("finance") or {})
-    total = float(fin.get("total") or r.get("total_price") or 0)
-    payments = r.get("payments") or []
-    s = sum(float(p.get("amount") or 0) for p in payments)
-    lod = float(fin.get("_lodgify_paid") or 0)
-    paid = total if r.get("paid_manual") else max(lod, s)
-    if total:
-        paid = min(paid, total)
-    fin["paid"] = round(paid, 2)
-    fin["due"] = round(max(0.0, total - paid), 2)
-    r["finance"] = fin
-    return total > 0 and paid + 0.01 >= total
 
 
 @api_router.get("/reservations")
@@ -802,58 +735,6 @@ async def delete_intervention(intervention_id: str, user=Depends(get_current_use
 # ---------------------------------------------------------------------------
 # iCal synchronization (import reservations from Airbnb/Booking .ics feeds)
 # ---------------------------------------------------------------------------
-def _unfold_ical(text: str):
-    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    out = []
-    for ln in lines:
-        if ln[:1] in (" ", "\t") and out:
-            out[-1] += ln[1:]
-        else:
-            out.append(ln)
-    return out
-
-
-def _parse_ical_date(val: str):
-    m = re.search(r"(\d{8})", val)
-    if not m:
-        return None
-    s = m.group(1)
-    return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
-
-
-def parse_ical(text: str):
-    events = []
-    cur = None
-    for ln in _unfold_ical(text):
-        stripped = ln.strip()
-        if stripped == "BEGIN:VEVENT":
-            cur = {}
-        elif stripped == "END:VEVENT":
-            if cur is not None:
-                events.append(cur)
-            cur = None
-        elif cur is not None and ":" in ln:
-            key, val = ln.split(":", 1)
-            key = key.split(";")[0].upper()
-            if key == "DTSTART":
-                cur["start"] = _parse_ical_date(val)
-            elif key == "DTEND":
-                cur["end"] = _parse_ical_date(val)
-            elif key == "SUMMARY":
-                cur["summary"] = val.strip()
-            elif key == "DESCRIPTION":
-                cur["description"] = val.strip().replace("\\n", "\n").replace("\\,", ",")
-            elif key == "UID":
-                cur["uid"] = val.strip()
-    return events
-
-
-_BLOCK_SUMMARIES = {
-    "reserved", "not available", "closed", "blocked", "unavailable",
-    "airbnb (not available)", "closed - not available", "busy",
-}
-
-
 async def run_ical_sync(user_id: str, property_id: str):
     """Coeur de la synchro iCal (import). Persiste le statut par lien sur le logement.
     Renvoie un récap ou None si le logement est introuvable."""
@@ -1044,44 +925,6 @@ async def get_ical_export(property_id: str, user=Depends(get_current_user)):
             {"id": property_id, "user_id": user["user_id"]},
             {"$set": {"ical_export_token": token}})
     return {"token": token, "path": f"/api/ical/{property_id}/{token}.ics"}
-
-
-def _ics_date(d: str) -> str:
-    return (d or "").replace("-", "")
-
-
-def _ics_escape(s: str) -> str:
-    return (s or "").replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;").replace("\n", "\\n")
-
-
-def _build_ics(prop: dict, reservations: list) -> str:
-    now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//StayPilot//Channel Manager//FR",
-        "CALSCALE:GREGORIAN",
-        "METHOD:PUBLISH",
-        f"X-WR-CALNAME:{_ics_escape(prop.get('name', 'Logement'))}",
-    ]
-    for r in reservations:
-        ci, co = _ics_date(r.get("check_in")), _ics_date(r.get("check_out"))
-        if not ci or not co:
-            continue
-        uid = r.get("ical_uid") or f"{r.get('id')}@staypilot"
-        lines += [
-            "BEGIN:VEVENT",
-            f"UID:{_ics_escape(uid)}",
-            f"DTSTAMP:{now}",
-            f"DTSTART;VALUE=DATE:{ci}",
-            f"DTEND;VALUE=DATE:{co}",
-            "SUMMARY:Réservé (StayPilot)",
-            "STATUS:CONFIRMED",
-            "TRANSP:OPAQUE",
-            "END:VEVENT",
-        ]
-    lines.append("END:VCALENDAR")
-    return "\r\n".join(lines) + "\r\n"
 
 
 @api_router.get("/ical/{property_id}/{token}.ics")
@@ -1279,6 +1122,46 @@ async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_
 
 
 
+class DoneIn(BaseModel):
+    done: bool = True
+
+
+@api_router.patch("/interventions/{intervention_id}/done")
+async def set_intervention_done(intervention_id: str, payload: DoneIn, user=Depends(get_current_user)):
+    """Marquer une tâche (ménage, intervention, remise de clés) comme faite.
+    Autorisé au personnel de terrain. La caution N'EST PAS gérée ici."""
+    iv = await db.interventions.find_one(
+        {"id": intervention_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not iv or (user.get("allowed_property_ids") is not None
+                  and iv.get("property_id") not in user["allowed_property_ids"]):
+        raise HTTPException(status_code=404, detail="Intervention introuvable")
+    if iv.get("kind") == "caution":
+        raise HTTPException(status_code=403, detail="La caution ne peut pas être modifiée ici")
+    await db.interventions.update_one(
+        {"id": intervention_id, "user_id": user["user_id"]},
+        {"$set": {"done": payload.done}})
+    return {"id": intervention_id, "done": payload.done}
+
+
+class CautionActionIn(BaseModel):
+    debited: bool
+    done: bool = True
+
+
+@api_router.patch("/interventions/{intervention_id}/caution")
+async def set_caution_state(intervention_id: str, payload: CautionActionIn, user=Depends(get_current_user)):
+    """Marquer une caution comme encaissée (debited=true) ou rendue (debited=false)."""
+    iv = await db.interventions.find_one(
+        {"id": intervention_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not iv or (user.get("allowed_property_ids") is not None
+                  and iv.get("property_id") not in user["allowed_property_ids"]):
+        raise HTTPException(status_code=404, detail="Intervention introuvable")
+    await db.interventions.update_one(
+        {"id": intervention_id, "user_id": user["user_id"]},
+        {"$set": {"caution_debited": payload.debited, "done": payload.done}})
+    return {"id": intervention_id, "caution_debited": payload.debited, "done": payload.done}
+
+
 @api_router.get("/analytics/revenue")
 async def analytics_revenue(year: Optional[int] = None, user=Depends(get_current_user)):
     if not _can(user, "view_revenue_charts"):
@@ -1399,9 +1282,16 @@ async def ai_pricing(payload: PricingRequest, user=Depends(get_current_user)):
     )
     chat = make_chat(system, f"pricing_{user['user_id']}")
     period = payload.period or "les prochaines semaines"
+    seasons = prop.get("seasons") or []
+    seasons_txt = ""
+    if seasons:
+        seasons_txt = "Saisons déjà configurées: " + "; ".join(
+            f"{s.get('name')} ({s.get('start_date')}→{s.get('end_date')}): {s.get('price')}€/nuit" for s in seasons
+        ) + ".\n"
     prompt = (
         f"Logement: {prop.get('name')} à {prop.get('location')}, {prop.get('bedrooms')} chambres, "
         f"capacité {prop.get('capacity')}. Prix de base actuel: {prop.get('base_price')}€/nuit.\n"
+        f"{seasons_txt}"
         f"Donne une recommandation de tarification pour {period}. "
         f"Sois concret avec des chiffres et 3-4 conseils maximum."
     )
@@ -1412,50 +1302,11 @@ async def ai_pricing(payload: PricingRequest, user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 # Preferences (customizable statuses + colors)
 # ---------------------------------------------------------------------------
-DEFAULT_STATUSES = [
-    {"key": "demande", "label": "Demande", "color": "#FF9500"},
-    {"key": "confirmee", "label": "Confirmée", "color": "#34C759"},
-    {"key": "arrivee", "label": "Arrivée", "color": "#32ADE6"},
-    {"key": "depart", "label": "Départ", "color": "#8E8E93"},
-    {"key": "annulee", "label": "Annulée", "color": "#FF3B30"},
-]
-DEFAULT_STATUS_COLORS = {s["key"]: s["color"] for s in DEFAULT_STATUSES}
-CORE_STATUS_KEYS = {s["key"] for s in DEFAULT_STATUSES}
-
-
 class PreferencesIn(BaseModel):
     status_colors: Optional[dict] = None
     statuses: Optional[list] = None
     commission_rates: Optional[dict] = None
     payment_methods: Optional[dict] = None
-
-
-DEFAULT_COMMISSION_RATES = {
-    "Airbnb": 15.5, "Booking.com": 15.0, "Vrbo": 8.0, "Direct": 0.0, "Site web": 0.0,
-}
-
-# Passerelles/méthodes de paiement. Stripe & paiements manuels actifs par défaut.
-DEFAULT_PAYMENT_METHODS = {
-    "stripe": True,
-    "paypal": False,
-    "manual": True,
-}
-
-
-def _build_payment_methods(doc):
-    return {**DEFAULT_PAYMENT_METHODS, **((doc or {}).get("payment_methods") or {})}
-
-
-def _build_commission_rates(doc):
-    return {**DEFAULT_COMMISSION_RATES, **((doc or {}).get("commission_rates") or {})}
-
-
-def _build_statuses(doc):
-    """Return the full statuses list for a preferences doc, migrating legacy status_colors."""
-    if doc and isinstance(doc.get("statuses"), list) and doc["statuses"]:
-        return doc["statuses"]
-    colors = (doc or {}).get("status_colors") or {}
-    return [{**s, "color": colors.get(s["key"], s["color"])} for s in DEFAULT_STATUSES]
 
 
 @api_router.get("/preferences")
@@ -1842,17 +1693,8 @@ async def inbox_unread_count(user=Depends(get_current_user)):
     return {"count": n}
 
 
-@api_router.get("/inbox/{thread_uid}")
-async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
-    if not _can_inbox(user):
-        raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
-    adapter, _ = await get_channel_adapter(user["user_id"])
-    if not adapter:
-        raise HTTPException(status_code=400, detail="Channel manager non connecté")
-    conv = await db.conversations.find_one(
-        {"user_id": user["user_id"], "thread_uid": thread_uid}, {"_id": 0})
-    async with httpx.AsyncClient(timeout=30) as http:
-        thread = await adapter.get_thread(http, thread_uid)
+def _normalize_msgs(thread: dict) -> list:
+    """Convert a Lodgify thread into a sorted list of normalized messages."""
     msgs = []
     for m in (thread.get("messages") or []):
         msgs.append({
@@ -1863,8 +1705,66 @@ async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
             "mine": m.get("type") == "Owner",
         })
     msgs.sort(key=lambda x: x["date"] or "")
+    return msgs
+
+
+async def _make_guest_draft(uid: str, thread_uid: str, last_guest_text: str, prop: Optional[dict]) -> str:
+    """Génère un BROUILLON de réponse au voyageur (Claude Sonnet 4.6), à valider par l'hôte."""
+    ctx = ""
+    if prop:
+        ctx = (f"Logement: {prop.get('name')} à {prop.get('location', '')}, "
+               f"{prop.get('bedrooms', 0)} chambres, capacité {prop.get('capacity', 0)} personnes.")
+    system = (
+        "Tu es l'assistant d'un hôte de location saisonnière. "
+        "Tu rédiges un BROUILLON de réponse au voyageur, court, professionnel et chaleureux, en français. "
+        "Le brouillon sera relu et validé par l'hôte avant envoi. "
+        "Réponds uniquement avec le message prêt à valider, sans préambule."
+    )
+    chat = make_chat(system, f"draft_{uid}_{thread_uid}")
+    prompt = f"{ctx}\nMessage du voyageur : \"{last_guest_text}\"\nRédige un brouillon de réponse."
+    return (await chat.send_message(UserMessage(text=prompt))).strip()
+
+
+async def _store_draft(uid: str, thread_uid: str, msg_id: str, draft: str):
     await db.conversations.update_one(
-        {"user_id": user["user_id"], "thread_uid": thread_uid},
+        {"user_id": uid, "thread_uid": thread_uid},
+        {"$set": {"ai_draft": draft, "ai_draft_at": now_utc().isoformat(),
+                  "ai_draft_msg_id": msg_id, "ai_draft_validated": False}})
+
+
+@api_router.get("/inbox/{thread_uid}")
+async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
+    if not _can_inbox(user):
+        raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
+    adapter, _ = await get_channel_adapter(user["user_id"])
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channel manager non connecté")
+    uid = user["user_id"]
+    conv = await db.conversations.find_one(
+        {"user_id": uid, "thread_uid": thread_uid}, {"_id": 0})
+    async with httpx.AsyncClient(timeout=30) as http:
+        thread = await adapter.get_thread(http, thread_uid)
+    msgs = _normalize_msgs(thread)
+
+    # Brouillon IA : proposé uniquement quand le dernier message vient du voyageur
+    ai_draft = None
+    if msgs and not msgs[-1].get("mine"):
+        last = msgs[-1]
+        if (conv and conv.get("ai_draft") and conv.get("ai_draft_msg_id") == last["id"]
+                and not conv.get("ai_draft_validated")):
+            ai_draft = conv["ai_draft"]
+        else:
+            prop = await db.properties.find_one(
+                {"id": (conv or {}).get("property_id"), "user_id": uid}, {"_id": 0})
+            try:
+                ai_draft = await _make_guest_draft(uid, thread_uid, last["text"], prop)
+                await _store_draft(uid, thread_uid, last["id"], ai_draft)
+            except Exception:
+                logger.exception("draft generation failed")
+                ai_draft = None
+
+    await db.conversations.update_one(
+        {"user_id": uid, "thread_uid": thread_uid},
         {"$set": {"unread": False}})
     return {
         "thread_uid": thread_uid,
@@ -1872,7 +1772,59 @@ async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
         "property_name": (conv or {}).get("property_name"),
         "source": (conv or {}).get("source"),
         "messages": msgs,
+        "ai_draft": ai_draft,
     }
+
+
+@api_router.post("/inbox/{thread_uid}/generate-draft")
+async def generate_draft(thread_uid: str, user=Depends(get_current_user)):
+    """Génère (ou régénère) un brouillon de réponse IA pour une conversation."""
+    if not _can_inbox(user):
+        raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
+    adapter, _ = await get_channel_adapter(user["user_id"])
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channel manager non connecté")
+    uid = user["user_id"]
+    conv = await db.conversations.find_one(
+        {"user_id": uid, "thread_uid": thread_uid}, {"_id": 0})
+    async with httpx.AsyncClient(timeout=30) as http:
+        thread = await adapter.get_thread(http, thread_uid)
+    msgs = _normalize_msgs(thread)
+    last_guest = next((m for m in reversed(msgs) if not m.get("mine")), None)
+    if not last_guest:
+        raise HTTPException(status_code=400, detail="Aucun message voyageur auquel répondre")
+    prop = await db.properties.find_one(
+        {"id": (conv or {}).get("property_id"), "user_id": uid}, {"_id": 0})
+    draft = await _make_guest_draft(uid, thread_uid, last_guest["text"], prop)
+    await _store_draft(uid, thread_uid, last_guest["id"], draft)
+    return {"ai_draft": draft}
+
+
+@api_router.get("/notifications")
+async def notifications(user=Depends(get_current_user)):
+    """Réponses IA prêtes à valider (brouillons non encore validés)."""
+    if not _can_inbox(user):
+        return {"count": 0, "items": []}
+    convs = await db.conversations.find(
+        {"user_id": user["user_id"], "ai_draft": {"$nin": [None, ""]},
+         "ai_draft_validated": {"$ne": True}, **_prop_scope(user, "property_id")},
+        {"_id": 0}).sort("ai_draft_at", -1).to_list(200)
+    items = [{
+        "thread_uid": c["thread_uid"], "guest_name": c.get("guest_name"),
+        "property_name": c.get("property_name"), "source": c.get("source"),
+        "ai_draft": c.get("ai_draft"), "ai_draft_at": c.get("ai_draft_at"),
+    } for c in convs]
+    return {"count": len(items), "items": items}
+
+
+@api_router.get("/notifications/count")
+async def notifications_count(user=Depends(get_current_user)):
+    if not _can_inbox(user):
+        return {"count": 0}
+    n = await db.conversations.count_documents(
+        {"user_id": user["user_id"], "ai_draft": {"$nin": [None, ""]},
+         "ai_draft_validated": {"$ne": True}, **_prop_scope(user, "property_id")})
+    return {"count": n}
 
 
 class ReplyIn(BaseModel):
@@ -1896,9 +1848,11 @@ async def inbox_reply(thread_uid: str, payload: ReplyIn, user=Depends(get_curren
         raise HTTPException(status_code=404, detail="Réservation liée introuvable pour cette conversation")
     async with httpx.AsyncClient(timeout=30) as http:
         await adapter.send_message(http, res["lodgify_id"], payload.message.strip(), payload.subject)
+    # Une fois envoyé, le brouillon IA est validé/consommé
     await db.conversations.update_one(
         {"user_id": user["user_id"], "thread_uid": thread_uid},
-        {"$set": {"last_activity": now_utc().isoformat()}})
+        {"$set": {"last_activity": now_utc().isoformat(), "ai_draft_validated": True},
+         "$unset": {"ai_draft": "", "ai_draft_msg_id": "", "ai_draft_at": ""}})
     return {
         "ok": True,
         "message": {
@@ -1909,6 +1863,53 @@ async def inbox_reply(thread_uid: str, payload: ReplyIn, user=Depends(get_curren
             "mine": True,
         },
     }
+
+
+async def _generate_drafts_for_user(uid: str) -> int:
+    """Pré-génère les brouillons IA pour les conversations non lues (notifications)."""
+    adapter, _ = await get_channel_adapter(uid)
+    if not adapter:
+        return 0
+    convs = await db.conversations.find(
+        {"user_id": uid, "unread": True}, {"_id": 0}).sort("last_activity", -1).to_list(30)
+    count = 0
+    async with httpx.AsyncClient(timeout=30) as http:
+        for conv in convs[:15]:
+            try:
+                thread = await adapter.get_thread(http, conv["thread_uid"])
+            except Exception:
+                continue
+            msgs = _normalize_msgs(thread)
+            if not msgs or msgs[-1].get("mine"):
+                continue
+            last = msgs[-1]
+            if conv.get("ai_draft") and conv.get("ai_draft_msg_id") == last["id"]:
+                continue
+            prop = await db.properties.find_one(
+                {"id": conv.get("property_id"), "user_id": uid}, {"_id": 0})
+            try:
+                draft = await _make_guest_draft(uid, conv["thread_uid"], last["text"], prop)
+            except Exception:
+                continue
+            await _store_draft(uid, conv["thread_uid"], last["id"], draft)
+            count += 1
+    return count
+
+
+async def _ai_draft_loop():
+    """Boucle de fond : pré-génère les brouillons IA pour les nouveaux messages voyageurs."""
+    await asyncio.sleep(90)
+    while True:
+        try:
+            uids = await db.channel_settings.distinct("user_id")
+            for uid in uids:
+                try:
+                    await _generate_drafts_for_user(uid)
+                except Exception:
+                    logger.exception("ai draft error for %s", uid)
+        except Exception:
+            logger.exception("ai draft loop error")
+        await asyncio.sleep(1800)  # toutes les 30 min
 
 
 # ---------------------------------------------------------------------------
@@ -2306,16 +2307,6 @@ async def get_templates(uid: str):
     return docs
 
 
-def marker_color_for(markers, tmap):
-    best_order, best_color = -1, None
-    for k in (markers or []):
-        t = tmap.get(k)
-        if t and t.get("order", 100) > best_order:
-            best_order = t["order"]
-            best_color = t["color"]
-    return best_color
-
-
 @api_router.get("/message-templates")
 async def list_templates(user=Depends(get_current_user)):
     return await get_templates(user["user_id"])
@@ -2506,6 +2497,33 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def enforce_write_permissions(request, call_next):
+    """Seuls le compte principal (Google) et les membres Administrateur peuvent modifier.
+    Le personnel de terrain (nettoyage/intervenant) peut uniquement marquer une tâche faite."""
+    method = request.method
+    path = request.url.path
+    if method in ("POST", "PUT", "PATCH", "DELETE") and path.startswith("/api") and path != "/api/auth/logout":
+        auth = request.headers.get("authorization", "")
+        token = auth[7:].strip() if auth[:7].lower() == "bearer " else None
+        if token:
+            session = await db.user_sessions.find_one({"session_token": token})
+            if session and session.get("kind") == "member":
+                member = await db.members.find_one({"id": session.get("member_id")})
+                role = (member or {}).get("role", "member")
+                if role != "admin":
+                    is_field = role in ("cleaning", "intervenant")
+                    allowed = is_field and path.startswith("/api/interventions/") and path.endswith("/done")
+                    if not allowed:
+                        from starlette.responses import JSONResponse
+                        return JSONResponse(
+                            status_code=403,
+                            content={"detail": "Modification réservée à l'administrateur et au compte principal."})
+    return await call_next(request)
+
+
+
+
 @app.on_event("startup")
 async def startup():
     await db.users.create_index("email", unique=True)
@@ -2518,6 +2536,7 @@ async def startup():
     await db.interventions.create_index("user_id")
     asyncio.create_task(automation_scheduler())
     asyncio.create_task(_ical_auto_sync_loop())
+    asyncio.create_task(_ai_draft_loop())
 
 
 async def automation_scheduler():

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, RefreshControl } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, RefreshControl, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -9,7 +9,7 @@ dayjs.locale("fr");
 
 import { api } from "@/src/api";
 import { useAuth } from "@/src/context/AuthContext";
-import { guestLabel } from "@/src/permissions";
+import { guestLabel, canModify } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 export default function CleaningSchedule() {
@@ -20,6 +20,7 @@ export default function CleaningSchedule() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [busy, setBusy] = useState<string>("");
 
   const load = useCallback(async () => {
     try {
@@ -32,6 +33,48 @@ export default function CleaningSchedule() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  async function setCaution(id: string, debited: boolean) {
+    if (busy) return;
+    setBusy(id);
+    try {
+      await api.patch(`/interventions/${id}/caution`, { debited, done: true });
+      setData((d: any) => ({
+        ...d,
+        cautions: (d.cautions || []).map((c: any) => c.id === id ? { ...c, caution_debited: debited, done: true } : c),
+      }));
+    } catch {
+      Alert.alert("Erreur", "Action impossible.");
+    }
+    setBusy("");
+  }
+
+  async function toggleDone(item: any, listKey: string) {
+    if (busy) return;
+    setBusy(item.id);
+    try {
+      await api.patch(`/interventions/${item.id}/done`, { done: !item.done });
+      setData((d: any) => ({
+        ...d,
+        [listKey]: (d[listKey] || []).map((x: any) => x.id === item.id ? { ...x, done: !item.done } : x),
+      }));
+    } catch {
+      Alert.alert("Erreur", "Action impossible.");
+    }
+    setBusy("");
+  }
+
+  const TaskCard = ({ item, kind, listKey }: any) => (
+    <Pressable testID={`${kind}-${item.id}`} onPress={() => toggleDone(item, listKey)} disabled={busy === item.id} style={[styles.card, item.done && styles.cardDone]}>
+      <View style={styles.cardRow}>
+        <Ionicons name={item.done ? "checkmark-circle" : "ellipse-outline"} size={22} color={item.done ? colors.success : colors.onSurfaceTertiary} />
+        <Text style={[styles.prop, item.done && styles.propDone]} numberOfLines={1}>{item.property_name}</Text>
+      </View>
+      <Text style={styles.sub} numberOfLines={2}>
+        {item.done ? "Terminé — appuyez pour rouvrir" : "À faire — appuyez pour valider"}{item.description ? ` · ${item.description}` : ""}{item.intervenant ? ` · ${item.intervenant}` : ""}
+      </Text>
+    </Pressable>
+  );
+
   const isToday = anchor.isSame(dayjs(), "day");
 
   const SectionHead = ({ icon, title, count, top }: any) => (
@@ -42,26 +85,13 @@ export default function CleaningSchedule() {
     </View>
   );
 
-  const TaskCard = ({ item, kind }: any) => (
-    <Pressable testID={`${kind}-${item.id}`} onPress={() => router.push(`/intervention-form?id=${item.id}`)} style={[styles.card, item.done && styles.cardDone]}>
-      <View style={styles.cardRow}>
-        <Ionicons name={item.done ? "checkmark-circle" : "ellipse-outline"} size={20} color={item.done ? colors.success : colors.onSurfaceTertiary} />
-        <Text style={[styles.prop, item.done && styles.propDone]} numberOfLines={1}>{item.property_name}</Text>
-        <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} />
-      </View>
-      <Text style={styles.sub} numberOfLines={2}>
-        {item.done ? "Terminé" : "À faire"}{item.description ? ` · ${item.description}` : ""}{item.intervenant ? ` · ${item.intervenant}` : ""}
-      </Text>
-    </Pressable>
-  );
-
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <Pressable testID="cleaning-back" onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
         </Pressable>
-        <Text style={styles.title}>Ménage du jour</Text>
+        <Text style={styles.title}>À faire aujourd'hui</Text>
         <View style={{ width: 34 }} />
       </View>
 
@@ -126,31 +156,55 @@ export default function CleaningSchedule() {
 
           {/* Ménages */}
           <SectionHead icon="sparkles-outline" title="Ménages à faire" count={data?.cleanings?.length || 0} top />
-          {data?.cleanings?.length ? data.cleanings.map((c: any) => <TaskCard key={c.id} item={c} kind="cleaning" />)
+          {data?.cleanings?.length ? data.cleanings.map((c: any) => <TaskCard key={c.id} item={c} kind="cleaning" listKey="cleanings" />)
             : <Text style={styles.empty}>Aucun ménage prévu ce jour.</Text>}
 
           {/* Interventions */}
           <SectionHead icon="construct-outline" title="Interventions" count={data?.interventions?.length || 0} top />
-          {data?.interventions?.length ? data.interventions.map((c: any) => <TaskCard key={c.id} item={c} kind="intervention" />)
+          {data?.interventions?.length ? data.interventions.map((c: any) => <TaskCard key={c.id} item={c} kind="intervention" listKey="interventions" />)
             : <Text style={styles.empty}>Aucune intervention ce jour.</Text>}
 
           {/* Remises de clés */}
           <SectionHead icon="key-outline" title="Remises de clés" count={data?.key_handovers?.length || 0} top />
-          {data?.key_handovers?.length ? data.key_handovers.map((c: any) => <TaskCard key={c.id} item={c} kind="key" />)
+          {data?.key_handovers?.length ? data.key_handovers.map((c: any) => <TaskCard key={c.id} item={c} kind="key" listKey="key_handovers" />)
             : <Text style={styles.empty}>Aucune remise de clés ce jour.</Text>}
 
           {/* Cautions à encaisser */}
           <SectionHead icon="cash-outline" title="Cautions à encaisser" count={data?.cautions?.length || 0} top />
           {data?.cautions?.length ? data.cautions.map((c: any) => (
-            <Pressable key={c.id} testID={`caution-${c.id}`} onPress={() => router.push(`/intervention-form?id=${c.id}`)} style={[styles.card, c.caution_debited && styles.cardDone]}>
-              <View style={styles.cardRow}>
-                <Ionicons name={c.caution_debited ? "checkmark-circle" : "ellipse-outline"} size={20} color={c.caution_debited ? colors.success : colors.onSurfaceTertiary} />
-                <Text style={[styles.prop, c.caution_debited && styles.propDone]} numberOfLines={1}>{c.property_name}</Text>
+            <View key={c.id} testID={`caution-${c.id}`} style={[styles.card, c.done && styles.cardDone]}>
+              <Pressable style={styles.cardRow} onPress={() => router.push(`/intervention-form?id=${c.id}`)}>
+                <Ionicons name={c.done ? "checkmark-circle" : "ellipse-outline"} size={20} color={c.done ? colors.success : colors.onSurfaceTertiary} />
+                <Text style={[styles.prop, c.done && styles.propDone]} numberOfLines={1}>{c.property_name}</Text>
                 {!!c.caution_amount && <View style={styles.timeTag}><Text style={styles.timeTxt}>{c.caution_amount} €</Text></View>}
                 <Ionicons name="chevron-forward" size={16} color={colors.onSurfaceTertiary} />
+              </Pressable>
+              <Text style={styles.sub}>
+                {c.done ? (c.caution_debited ? "Encaissée" : "Rendue") : "À vérifier"}{c.intervenant ? ` · ${c.intervenant}` : ""}
+              </Text>
+              {canModify(user) && (
+              <View style={styles.cautionActions}>
+                <Pressable
+                  testID={`caution-debit-${c.id}`}
+                  disabled={busy === c.id}
+                  onPress={() => setCaution(c.id, true)}
+                  style={[styles.cautionBtn, c.done && c.caution_debited ? styles.cautionBtnActive : styles.cautionBtnDebit]}
+                >
+                  <Ionicons name="download-outline" size={15} color={c.done && c.caution_debited ? colors.onBrandPrimary : "#FF9500"} />
+                  <Text style={[styles.cautionBtnText, { color: c.done && c.caution_debited ? colors.onBrandPrimary : "#FF9500" }]}>Encaisser</Text>
+                </Pressable>
+                <Pressable
+                  testID={`caution-return-${c.id}`}
+                  disabled={busy === c.id}
+                  onPress={() => setCaution(c.id, false)}
+                  style={[styles.cautionBtn, c.done && !c.caution_debited ? styles.cautionBtnActive : styles.cautionBtnReturn]}
+                >
+                  <Ionicons name="checkmark-done-outline" size={15} color={c.done && !c.caution_debited ? colors.onBrandPrimary : colors.success} />
+                  <Text style={[styles.cautionBtnText, { color: c.done && !c.caution_debited ? colors.onBrandPrimary : colors.success }]}>Rendre</Text>
+                </Pressable>
               </View>
-              <Text style={styles.sub}>{c.caution_debited ? "Encaissée / vérifiée" : "À vérifier"}{c.intervenant ? ` · ${c.intervenant}` : ""}</Text>
-            </Pressable>
+              )}
+            </View>
           )) : <Text style={styles.empty}>Aucune caution à encaisser ce jour.</Text>}
         </ScrollView>
       )}
@@ -183,5 +237,11 @@ const styles = StyleSheet.create({
   depOk: { backgroundColor: "#E7F8EC" },
   depWarn: { backgroundColor: "#FFF4E5" },
   depText: { fontFamily: font.semibold, fontSize: fontSize.sm },
+  cautionActions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md, marginLeft: 28 },
+  cautionBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: radius.md, paddingVertical: 10, borderWidth: 1 },
+  cautionBtnDebit: { backgroundColor: "#FFF4E5", borderColor: "#FFE0B2" },
+  cautionBtnReturn: { backgroundColor: "#E7F8EC", borderColor: "#C8EED2" },
+  cautionBtnActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  cautionBtnText: { fontFamily: font.semibold, fontSize: fontSize.sm },
   empty: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, paddingVertical: spacing.md },
 });

@@ -166,7 +166,16 @@ export function canSeeInbox(user: any): boolean {
   return !memberRoleIn(user, ["cleaning", "intervenant", "owner"]);
 }
 export function canSeeSettings(user: any): boolean {
-  return !memberRoleIn(user, ["cleaning", "intervenant", "owner"]);
+  // Paramètres = modifications : réservé au compte principal et aux administrateurs.
+  return canModify(user);
+}
+// Seuls le compte principal (Google) et les membres Administrateur peuvent modifier.
+export function canModify(user: any): boolean {
+  if (!user || user.role !== "member") return true; // compte principal
+  return memberRole(user) === "admin";
+}
+export function isFieldStaff(user: any): boolean {
+  return user?.role === "member" && ["cleaning", "intervenant"].includes(memberRole(user));
 }
 // Intervenant + Personnel de nettoyage : pas de taux d'occupation ni séjours en cours.
 export function canSeeOccupancy(user: any): boolean {

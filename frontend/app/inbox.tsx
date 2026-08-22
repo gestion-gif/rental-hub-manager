@@ -82,6 +82,12 @@ export default function Inbox() {
                   <View style={styles.sourceTag}><Text style={styles.sourceText}>{item.source}</Text></View>
                 </View>
                 <Text style={[styles.prop, item.unread && styles.propUnread]} numberOfLines={1}>{item.property_name}</Text>
+                {!!item.ai_draft && !item.ai_draft_validated && (
+                  <View style={styles.draftTag}>
+                    <Ionicons name="sparkles" size={11} color={colors.brandPrimary} />
+                    <Text style={styles.draftTagText}>Brouillon IA prêt</Text>
+                  </View>
+                )}
                 <Text style={styles.dates}>
                   {item.arrival ? dayjs(item.arrival).format("DD MMM YYYY") : ""}
                   {item.departure ? ` → ${dayjs(item.departure).format("DD MMM YYYY")}` : ""}
@@ -116,6 +122,8 @@ const styles = StyleSheet.create({
   dates: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
   sourceTag: { backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.sm },
   sourceText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  draftTag: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 3, marginTop: 4, backgroundColor: colors.brandPrimary + "14", paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill },
+  draftTagText: { fontFamily: font.semibold, fontSize: 11, color: colors.brandPrimary },
   empty: { alignItems: "center", paddingTop: 80, paddingHorizontal: spacing.xl, gap: spacing.sm },
   emptyTitle: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, marginTop: spacing.sm },
   emptyText: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, textAlign: "center", lineHeight: 20 },

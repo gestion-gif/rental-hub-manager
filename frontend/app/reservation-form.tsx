@@ -19,7 +19,7 @@ import { api } from "@/src/api";
 import { storage } from "@/src/utils/storage";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import { useAuth } from "@/src/context/AuthContext";
-import { canSeePrices } from "@/src/permissions";
+import { canSeePrices, canModify } from "@/src/permissions";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import DateField from "@/src/components/DateField";
 import { PlatformLogo } from "@/src/components/PlatformLogo";
@@ -303,13 +303,15 @@ export default function ReservationForm() {
           </View>
           <Field label="Notes" testID="notes" value={form.notes} onChangeText={(v) => set("notes", v)} placeholder="Informations complémentaires" multiline />
 
-          <PrimaryButton
-            testID="save-reservation"
-            label={editing ? "Enregistrer" : "Créer la réservation"}
-            onPress={save}
-            loading={saving}
-            disabled={!valid}
-          />
+          {canModify(user) && (
+            <PrimaryButton
+              testID="save-reservation"
+              label={editing ? "Enregistrer" : "Créer la réservation"}
+              onPress={save}
+              loading={saving}
+              disabled={!valid}
+            />
+          )}
           {editing && (
             <PrimaryButton
               testID="delete-reservation"

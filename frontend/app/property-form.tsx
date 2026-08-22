@@ -6,6 +6,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { api } from "@/src/api";
+import { useAuth } from "@/src/context/AuthContext";
+import { canModify } from "@/src/permissions";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import { PropertyPicker } from "@/src/components/PropertyPicker";
 import { ROOM_OPTIONS, AMENITY_OPTIONS } from "@/src/propertyOptions";
@@ -14,6 +16,7 @@ import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 export default function PropertyForm() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useAuth();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const editing = !!id;
 
@@ -214,14 +217,16 @@ export default function PropertyForm() {
         <SectionLabel text="Équipements" />
         <ChipSelect options={AMENITY_OPTIONS} selected={amenities} onToggle={(v: string) => toggle(amenities, setAmenities, v)} prefix="amenity" />
 
-        <PrimaryButton
-          testID="save-property"
-          label={editing ? "Enregistrer" : "Ajouter le logement"}
-          onPress={save}
-          loading={saving}
-          disabled={!valid}
-          style={{ marginTop: spacing.lg }}
-        />
+        {canModify(user) && (
+          <PrimaryButton
+            testID="save-property"
+            label={editing ? "Enregistrer" : "Ajouter le logement"}
+            onPress={save}
+            loading={saving}
+            disabled={!valid}
+            style={{ marginTop: spacing.lg }}
+          />
+        )}
       </KeyboardAwareScrollView>
     </View>
   );

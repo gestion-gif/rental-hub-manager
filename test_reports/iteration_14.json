@@ -1,0 +1,20 @@
+{
+  "summary": "Backend-only tests for the new AI drafts + Notifications feature and helpers.py refactor regression. Wrote /app/backend/tests/test_notifications.py (9 tests, 100% passing). Seeded two owners, one 'cleaning' member session, and 4 conversations directly in Mongo; NO Lodgify endpoints were called. All expected behaviors verified: filter (ai_draft present AND ai_draft_validated != true), correct count, cleaning-member gate returns {count:0,items:[]}, multi-user isolation (owner2 does not see owner1's drafts), 401 without token. Refactor regression: GET /api/properties, /api/reservations, /api/preferences (statuses/status_colors/commission_rates/payment_methods keys + core status keys), /api/dashboard (shape + revenue_month for owner) all pass. Test data cleaned up via teardown (verified in Mongo).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_notifications.py",
+    "/app/test_reports/pytest/pytest_iter14_notifications.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 2560 lines — still large; consider further module splits (inbox / notifications / channel / stripe / analytics) in a follow-up. helpers.py extraction is clean.",
+    "GET /api/notifications and /api/notifications/count apply _prop_scope('property_id') on conversations. Verified working for owner (unrestricted). Note: conversations synced from Lodgify must have property_id set for member-scoped roles that DO have inbox access; not in scope for this test but worth watching."
+  ],
+  "updated_files": ["/app/backend/tests/test_notifications.py"],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "not tested (backend-only per request)"},
+  "seed_data_creation": "Inserted directly into Mongo and removed at teardown: 2 users (user_TEST_*), 3 user_sessions (owner1, owner2, cleaning member), 1 member (mbr_TEST_* role=cleaning bound to owner1), 1 property (prop_TEST_*), 4 conversations (TEST_thread_A/B/C/D). Verified post-run: 0 test conversations/members/properties/sessions remain; the pre-existing 1 stale user 'user_TEST_prefiso_*' is from a previous iteration, not this run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: pytest /app/backend/tests/test_notifications.py -v. The suite is fully self-contained (module-scoped fixture seeds + cleans Mongo). Auth uses direct user_sessions insertion; no OAuth call needed. Do NOT test /api/inbox/{thread}, /api/inbox/{thread}/generate-draft or /api/inbox/{thread}/reply — those hit a live Lodgify account and could send a real message to a real guest."
+}

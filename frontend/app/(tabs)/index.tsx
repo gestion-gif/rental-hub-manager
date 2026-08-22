@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [ivOpen, setIvOpen] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [drafts, setDrafts] = useState(0);
   const [arrOpen, setArrOpen] = useState(false);
   const [stayOpen, setStayOpen] = useState(false);
   const [depOpen, setDepOpen] = useState(false);
@@ -57,6 +58,7 @@ export default function Dashboard() {
       ]);
       setData(d);
       setUnread(u?.count || 0);
+      api.get("/notifications/count").then((n) => setDrafts(n?.count || 0)).catch(() => {});
     } catch {}
     setLoading(false);
     setRefreshing(false);
@@ -155,6 +157,30 @@ export default function Dashboard() {
                 onPress={() => router.push("/(tabs)/planning")}
               />
             </View>
+
+            {canSeeInbox(user) && drafts > 0 && (
+              <Pressable testID="dash-drafts-banner" onPress={() => router.push("/inbox")} style={styles.draftBanner}>
+                <View style={styles.draftBannerIcon}>
+                  <Ionicons name="sparkles" size={20} color={colors.onBrandPrimary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.draftBannerTitle}>{drafts} réponse{drafts > 1 ? "s" : ""} IA à valider</Text>
+                  <Text style={styles.draftBannerSub}>Des brouillons sont prêts dans la boîte de réception</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.brandPrimary} />
+              </Pressable>
+            )}
+
+            <Pressable testID="dash-today-shortcut" onPress={() => router.push("/cleaning")} style={styles.todayCard}>
+              <View style={styles.todayIcon}>
+                <Ionicons name="today-outline" size={22} color={colors.onBrandPrimary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.todayTitle}>À faire aujourd'hui</Text>
+                <Text style={styles.todaySub}>Départs, ménages, interventions, remises de clés & cautions</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.onSurfaceTertiary} />
+            </Pressable>
 
             <CollapsibleSection
               title="Arrivées du jour"
@@ -385,6 +411,48 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.md,
   },
+  todayCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginTop: spacing.lg,
+  },
+  draftBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    backgroundColor: colors.brandPrimary + "12",
+    borderWidth: 1,
+    borderColor: colors.brandPrimary + "40",
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginTop: spacing.lg,
+  },
+  draftBannerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  draftBannerTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
+  draftBannerSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  todayIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  todayTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
+  todaySub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
   statCard: {
     width: "47.5%",
     backgroundColor: colors.surface,

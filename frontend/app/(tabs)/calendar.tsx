@@ -22,7 +22,7 @@ import StatusBadge from "@/src/components/StatusBadge";
 import { PlatformLogo } from "@/src/components/PlatformLogo";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import { useAuth } from "@/src/context/AuthContext";
-import { canSeePrices, guestLabel } from "@/src/permissions";
+import { canModify, canSeePrices, guestLabel } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 export default function CalendarScreen() {
@@ -157,13 +157,15 @@ export default function CalendarScreen() {
         />
       )}
 
-      <Pressable
-        testID="add-reservation-fab"
-        onPress={() => router.push("/reservation-form")}
-        style={[styles.fab, { bottom: insets.bottom + 76 }]}
-      >
-        <Ionicons name="add" size={28} color={colors.onBrandPrimary} />
-      </Pressable>
+      {canModify(user) && (
+        <Pressable
+          testID="add-reservation-fab"
+          onPress={() => router.push("/reservation-form")}
+          style={[styles.fab, { bottom: insets.bottom + 76 }]}
+        >
+          <Ionicons name="add" size={28} color={colors.onBrandPrimary} />
+        </Pressable>
+      )}
     </View>
   );
 }
