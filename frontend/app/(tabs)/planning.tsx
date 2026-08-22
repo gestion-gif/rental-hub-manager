@@ -242,6 +242,7 @@ export default function Planning() {
 }
 
 function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, onBar, onIv, onCreate, bottomPad }: any) {
+  const { user } = useAuth();
   const [sel, setSel] = useState<{ propId: string; a: number; b: number } | null>(null);
   const dragRef = useRef<{ propId: string; a: number; b: number } | null>(null);
 
@@ -417,6 +418,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
 }
 
 function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, propMap, statusColors, single, selectedDay, setSelectedDay, todayStr, onRes, onIv, bottomPad }: any) {
+  const { user } = useAuth();
   const offset = (monthStart.day() + 6) % 7; // Monday start
   const cells: (any | null)[] = [
     ...Array(offset).fill(null),
