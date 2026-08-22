@@ -218,3 +218,8 @@
 - **Dépenses par logement/mois** : collection statement_expenses + CRUD /api/statement-expenses (label, montant, charge_to owner|concierge). Ajout/suppression depuis l'écran (owner/admin).
 - **Backend** : PropertyIn.management_fee_pct ajouté ; GET /api/owner-statement?month=YYYY-MM&property_id= ; scoping _prop_scope. Champ « Frais de gestion (%) » ajouté au formulaire logement. Partage/copie du relevé (Share natif / presse-papier web).
 - Vérifié par curl : Owner 275 = 500−100−45−80, Conciergerie 220 = 100+120 ; 185/185 pytest verts ; app compile.
+
+## Sign in with Apple (2026-06)
+- **Backend** : POST /api/auth/apple ({identity_token, name, email}) vérifie l'identity token Apple (RS256 via JWKS appleid.apple.com, issuer + audience contrôlés), upsert user par `apple_sub` (lié au compte email existant si même email), crée une session 7j compatible user_sessions, renvoie {session_token, user}. Env `APPLE_AUDIENCES` (bundle id + host.exp.Exponent). PyJWT + cryptography présents. Vérifié : token invalide → 401.
+- **Frontend** : bouton natif `AppleAuthenticationButton` sur l'écran de connexion, affiché uniquement sur iOS (isAvailableAsync). `loginWithApple` ajouté à AuthContext (stocke le session_token en SecureStore, charge /auth/me). app.json `ios.usesAppleSignIn: true`. expo-apple-authentication installé.
+- **Limite native** : Sign in with Apple ne fonctionne PAS sur le web, Android, ni le simulateur iOS — uniquement sur un vrai iPhone (Expo Go iOS ou build). Doc: /app/auth_testing.md. 185/185 pytest verts.

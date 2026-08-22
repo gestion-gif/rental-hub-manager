@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable, Alert } from "react-native";
+import { View, Text, StyleSheet, Pressable, Alert, Platform } from "react-native";
 import { Image } from "expo-image";
+import * as AppleAuthentication from "expo-apple-authentication";
 import { LinearGradient } from "expo-linear-gradient";
 import { AntDesign } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,17 +14,40 @@ import { PrimaryButton, Field } from "@/src/components/ui";
 import { colors, font, fontSize, spacing, HERO_IMAGE } from "@/src/theme";
 
 export default function Login() {
-  const { signIn, signingIn, user, loginWithPassword } = useAuth();
+  const { signIn, signingIn, user, loginWithPassword, loginWithApple } = useAuth();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [showEmail, setShowEmail] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(false);
 
   useEffect(() => {
     if (user) router.replace("/(tabs)");
   }, [user]);
+
+  useEffect(() => {
+    if (Platform.OS === "ios") {
+      AppleAuthentication.isAvailableAsync().then(setAppleAvailable).catch(() => {});
+    }
+  }, []);
+
+  async function onApple() {
+    try {
+      const cred = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      const name = [cred.fullName?.givenName, cred.fullName?.familyName].filter(Boolean).join(" ");
+      await loginWithApple(cred.identityToken || "", name, cred.email || "");
+    } catch (e: any) {
+      if (e?.code === "ERR_REQUEST_CANCELED") return;
+      Alert.alert("Connexion Apple", "Échec de la connexion avec Apple. Réessayez.");
+    }
+  }
 
   async function onEmailLogin() {
     if (loggingIn) return;
@@ -75,6 +99,16 @@ export default function Login() {
           icon={<AntDesign name="google" size={18} color={colors.onSurface} />}
         />
 
+        {appleAvailable && (
+          <AppleAuthentication.AppleAuthenticationButton
+            buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+            cornerRadius={999}
+            style={styles.appleBtn}
+            onPress={onApple}
+          />
+        )}
+
         {!showEmail ? (
           <Pressable testID="show-email-login" onPress={() => setShowEmail(true)} style={styles.linkBtn}>
             <Text style={styles.linkText}>Se connecter avec un email et un mot de passe</Text>
@@ -120,6 +154,7 @@ const styles = StyleSheet.create({
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.lg },
   logoWrap: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.92)", borderRadius: 16, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, marginBottom: spacing.lg },
   logoImg: { width: 224, height: 58 },
+  appleBtn: { width: "100%", height: 52, marginTop: spacing.md },
   logoBox: {
     width: 40,
     height: 40,

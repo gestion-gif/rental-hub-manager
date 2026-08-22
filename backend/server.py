@@ -254,6 +254,62 @@ async def create_session(payload: SessionRequest):
     }
 
 
+import jwt as _jwt
+from jwt import PyJWKClient as _PyJWKClient
+
+APPLE_AUDIENCES = [a.strip() for a in os.environ.get("APPLE_AUDIENCES", "").split(",") if a.strip()]
+_apple_jwk_client = _PyJWKClient("https://appleid.apple.com/auth/keys")
+
+
+class AppleAuthIn(BaseModel):
+    identity_token: str
+    name: str = ""
+    email: str = ""
+
+
+@api_router.post("/auth/apple")
+async def auth_apple(payload: AppleAuthIn):
+    """Sign in with Apple : vérifie l'identity token auprès des clés publiques Apple."""
+    try:
+        signing_key = _apple_jwk_client.get_signing_key_from_jwt(payload.identity_token)
+        claims = _jwt.decode(
+            payload.identity_token, signing_key.key, algorithms=["RS256"],
+            audience=APPLE_AUDIENCES, issuer="https://appleid.apple.com")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Token Apple invalide: {str(e)[:100]}")
+    sub = claims.get("sub")
+    if not sub:
+        raise HTTPException(status_code=401, detail="Token Apple sans identifiant")
+    email = (claims.get("email") or payload.email or "").strip().lower()
+
+    existing = await db.users.find_one({"apple_sub": sub})
+    if not existing and email:
+        existing = await db.users.find_one({"email": email})
+    if existing:
+        user_id = existing["user_id"]
+        upd = {"apple_sub": sub}
+        if payload.name and not existing.get("name"):
+            upd["name"] = payload.name
+        if email and not existing.get("email"):
+            upd["email"] = email
+        await db.users.update_one({"user_id": user_id}, {"$set": upd})
+    else:
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        await db.users.insert_one({
+            "user_id": user_id, "apple_sub": sub, "email": email,
+            "name": payload.name or "Utilisateur Apple", "picture": "",
+            "created_at": now_utc().isoformat(),
+        })
+
+    session_token = secrets.token_urlsafe(32)
+    await db.user_sessions.insert_one({
+        "session_token": session_token, "user_id": user_id,
+        "created_at": now_utc(), "expires_at": now_utc() + timedelta(days=7),
+    })
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return {"session_token": session_token, "user": user}
+
+
 @api_router.get("/auth/me")
 async def get_me(user=Depends(get_current_user)):
     return user
