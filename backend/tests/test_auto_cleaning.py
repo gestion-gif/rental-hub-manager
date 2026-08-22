@@ -246,17 +246,23 @@ class TestAutoCleaningOnUpdate:
 
 
 # ---------------------------- Auto-cleaning on iCal sync --------------------
-_ICS_BODY = (
-    "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
-    "BEGIN:VEVENT\r\nUID:auto-clean-1@t\r\n"
-    "DTSTART;VALUE=DATE:20260410\r\nDTEND;VALUE=DATE:20260415\r\n"
-    "SUMMARY:Reserved\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-)
+def _ics_body_future():
+    """Build an ICS body with DTEND ~30 days in the future so it survives the past-ménage purge."""
+    today = date.today()
+    start = today + timedelta(days=25)
+    end = today + timedelta(days=30)
+    return (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+        "BEGIN:VEVENT\r\nUID:auto-clean-1@t\r\n"
+        f"DTSTART;VALUE=DATE:{start.strftime('%Y%m%d')}\r\nDTEND;VALUE=DATE:{end.strftime('%Y%m%d')}\r\n"
+        "SUMMARY:Reserved\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    ), end.isoformat()
 
 
 class TestAutoCleaningIcalSync:
     def test_sync_creates_auto_menage_on_event_checkout(self, api_client, ics_server):
-        _ICS_STORE["ac.ics"] = {"body": _ICS_BODY}
+        body, expected_date = _ics_body_future()
+        _ICS_STORE["ac.ics"] = {"body": body}
         p = api_client.post(f"{BASE_URL}/api/properties", json={
             "name": "TEST_SyncAC",
             "ical_links": [{"platform": "Airbnb", "url": f"{ics_server}/ac.ics"}],
@@ -264,12 +270,12 @@ class TestAutoCleaningIcalSync:
         try:
             r = api_client.post(f"{BASE_URL}/api/properties/{p['id']}/sync")
             assert r.status_code == 200, r.text
-            hits = _auto_menage(_list_ivs(api_client, p["id"]), "2026-04-15")
-            assert len(hits) == 1, f"iCal sync should create auto menage on 2026-04-15, got {hits}"
+            hits = _auto_menage(_list_ivs(api_client, p["id"]), expected_date)
+            assert len(hits) == 1, f"iCal sync should create auto menage on {expected_date}, got {hits}"
             assert hits[0]["kind"] == "menage"
             assert hits[0]["auto"] is True
         finally:
             api_client.delete(f"{BASE_URL}/api/properties/{p['id']}")
             # residual auto-cleaning cleanup
-            for x in _auto_menage(_list_ivs(api_client, p["id"]), "2026-04-15"):
+            for x in _auto_menage(_list_ivs(api_client, p["id"]), expected_date):
                 api_client.delete(f"{BASE_URL}/api/interventions/{x['id']}")

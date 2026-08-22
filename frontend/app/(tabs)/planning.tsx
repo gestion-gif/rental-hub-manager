@@ -19,6 +19,7 @@ import { usePreferences } from "@/src/context/PreferencesContext";
 import StatusBadge, { tint } from "@/src/components/StatusBadge";
 import { INTERVENTION_TYPES, getInterventionType } from "@/src/interventionTypes";
 import { InterventionIcon } from "@/src/components/InterventionIcon";
+import { PlatformLogo } from "@/src/components/PlatformLogo";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 dayjs.locale("fr");
@@ -280,10 +281,13 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                   {rowRes.map((r: any) => {
                     const ci = dayjs(r.check_in);
                     const co = dayjs(r.check_out);
-                    const startOffset = Math.max(0, ci.diff(monthStart, "day"));
-                    const endOffset = Math.min(daysInMonth, co.diff(monthStart, "day"));
-                    const nights = endOffset - startOffset;
-                    if (nights <= 0) return null;
+                    const rawStart = ci.diff(monthStart, "day");
+                    const rawEnd = co.diff(monthStart, "day");
+                    // Barre du milieu de la case d'arrivée au milieu de la case de départ
+                    const leftPos = rawStart < 0 ? 0 : rawStart * DAY_W + DAY_W / 2;
+                    const rightPos = rawEnd >= daysInMonth ? daysInMonth * DAY_W : rawEnd * DAY_W + DAY_W / 2;
+                    const w = rightPos - leftPos;
+                    if (w <= 0) return null;
                     const color = r.display_color || r.marker_color || statusColors[r.status] || "#8E8E93";
                     return (
                       <Pressable
@@ -293,12 +297,13 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                         style={[
                           styles.bar,
                           {
-                            left: startOffset * DAY_W + 2,
-                            width: Math.max(nights * DAY_W - 4, 22),
+                            left: leftPos + 1,
+                            width: Math.max(w - 2, 18),
                             backgroundColor: color,
                           },
                         ]}
                       >
+                        <PlatformLogo platform={r.platform} size={14} />
                         <Text style={styles.barText} numberOfLines={1}>{r.guest_name}</Text>
                       </Pressable>
                     );
@@ -510,9 +515,9 @@ const styles = StyleSheet.create({
   gridCell: { width: DAY_W, height: ROW_H, borderRightWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
   bar: {
     position: "absolute", top: 10, height: ROW_H - 20, borderRadius: 7,
-    paddingHorizontal: 6, justifyContent: "center",
+    paddingHorizontal: 5, flexDirection: "row", alignItems: "center", gap: 4,
   },
-  barText: { fontFamily: font.semibold, fontSize: 12, color: "#fff" },
+  barText: { fontFamily: font.semibold, fontSize: 12, color: "#fff", flexShrink: 1 },
   legend: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md, padding: spacing.lg },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   legendDot: { width: 10, height: 10, borderRadius: 999 },

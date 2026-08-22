@@ -6,6 +6,7 @@ import {
   Pressable,
   ScrollView,
   ActivityIndicator,
+  TextInput,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,6 +17,7 @@ import { api } from "@/src/api";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import DateField from "@/src/components/DateField";
+import { PlatformLogo } from "@/src/components/PlatformLogo";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const PLATFORMS = ["Direct", "Airbnb", "Booking.com", "Vrbo"];
@@ -111,6 +113,27 @@ export default function ReservationForm() {
     } catch {}
   }
 
+  async function addPayment(amount: number) {
+    try {
+      const updated = await api.post(`/reservations/${id}/payments`, { amount });
+      setDetail(updated);
+    } catch {}
+  }
+
+  async function deletePayment(pid: string) {
+    try {
+      const updated = await api.del(`/reservations/${id}/payments/${pid}`);
+      setDetail(updated);
+    } catch {}
+  }
+
+  async function saveCommission(amount: number) {
+    try {
+      const updated = await api.patch(`/reservations/${id}/commission`, { amount });
+      setDetail(updated);
+    } catch {}
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -138,7 +161,7 @@ export default function ReservationForm() {
           bottomOffset={20}
           showsVerticalScrollIndicator={false}
         >
-          {detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} />}
+          {detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} onAddPayment={addPayment} onDeletePayment={deletePayment} onSetCommission={saveCommission} />}
           <Text style={styles.label}>Logement</Text>
           <ChipRow
             items={props.map((p) => ({ key: p.id, label: p.name }))}
@@ -209,10 +232,21 @@ export default function ReservationForm() {
   );
 }
 
-function FinanceCard({ detail, isPaid, onTogglePaid }: any) {
+function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayment, onSetCommission }: any) {
   const f = detail.finance || {};
   const cur = f.currency || "EUR";
+  const { commissionRates } = usePreferences();
+  const [acompte, setAcompte] = useState("");
   const money = (n: number) => `${(n || 0).toFixed(2)} ${cur === "EUR" ? "€" : cur}`;
+
+  const rate = (commissionRates?.[detail.platform] ?? 0) / 100;
+  const base = f.total || detail.total_price || f.stay || 0;
+  const estimated = Math.round(base * rate * 100) / 100;
+  const hasCommission = typeof f.commission === "number" && f.commission > 0;
+  const commission = hasCommission ? f.commission : estimated;
+  const net = Math.max(0, (f.total || detail.total_price || 0) - commission);
+  const [comm, setComm] = useState(hasCommission ? String(f.commission) : (estimated ? String(estimated) : ""));
+
   const Line = ({ label, value, bold }: any) => (
     <View style={styles.qLine}>
       <Text style={[styles.qLabel, bold && styles.qBold]}>{label}</Text>
@@ -236,6 +270,42 @@ function FinanceCard({ detail, isPaid, onTogglePaid }: any) {
         </Text>
       </Pressable>
 
+      {/* Acomptes / paiements partiels */}
+      <View style={styles.finCard}>
+        <Text style={styles.finTitle}>Acomptes</Text>
+        {(detail.payments || []).length === 0 && <Text style={styles.hintSub}>Aucun acompte enregistré.</Text>}
+        {(detail.payments || []).map((p: any) => (
+          <View key={p.id} style={styles.acompteRow}>
+            <Ionicons name="cash-outline" size={16} color={colors.success} />
+            <Text style={styles.acompteVal}>{money(p.amount)}</Text>
+            <Text style={styles.acompteDate}>{p.date}</Text>
+            <Pressable testID={`del-payment-${p.id}`} onPress={() => onDeletePayment(p.id)} hitSlop={6}>
+              <Ionicons name="close-circle" size={18} color={colors.onSurfaceTertiary} />
+            </Pressable>
+          </View>
+        ))}
+        <View style={styles.acompteAdd}>
+          <View style={styles.acompteInputWrap}>
+            <TextInput
+              testID="acompte-input"
+              value={acompte}
+              onChangeText={setAcompte}
+              placeholder="Montant de l'acompte"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              keyboardType="decimal-pad"
+              style={styles.acompteInput}
+            />
+          </View>
+          <Pressable
+            testID="add-payment"
+            onPress={() => { const a = parseFloat(acompte.replace(",", ".")); if (a > 0) { onAddPayment(a); setAcompte(""); } }}
+            style={styles.acompteBtn}
+          >
+            <Ionicons name="add" size={20} color={colors.onBrandPrimary} />
+          </Pressable>
+        </View>
+      </View>
+
       {/* Devis */}
       <View style={styles.finCard}>
         <View style={styles.finHead}>
@@ -249,6 +319,43 @@ function FinanceCard({ detail, isPaid, onTogglePaid }: any) {
         {f.promotions > 0 && <Line label="Promotions" value={`-${money(f.promotions)}`} />}
         <View style={styles.qSep} />
         <Line label="Total" value={money(f.total)} bold />
+      </View>
+
+      {/* Commission plateforme + revenu net */}
+      <View style={styles.finCard}>
+        <View style={styles.finHead}>
+          <Text style={styles.finTitle}>Commission plateforme</Text>
+          <View style={styles.commTag}>
+            <PlatformLogo platform={detail.platform} size={16} />
+            <Text style={styles.commTagText}>{detail.platform || "Direct"}</Text>
+          </View>
+        </View>
+        {!hasCommission && rate > 0 && (
+          <Text style={styles.commHint}>Estimation à {Math.round(rate * 100)}% — ajustez le montant réel ci-dessous.</Text>
+        )}
+        <View style={styles.acompteAdd}>
+          <View style={styles.acompteInputWrap}>
+            <TextInput
+              testID="commission-input"
+              value={comm}
+              onChangeText={setComm}
+              placeholder="Montant de la commission"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              keyboardType="decimal-pad"
+              style={styles.acompteInput}
+            />
+          </View>
+          <Pressable
+            testID="save-commission"
+            onPress={() => { const a = parseFloat((comm || "0").replace(",", ".")) || 0; onSetCommission(a); }}
+            style={styles.acompteBtn}
+          >
+            <Ionicons name="checkmark" size={20} color={colors.onBrandPrimary} />
+          </Pressable>
+        </View>
+        <View style={styles.qSep} />
+        <Line label="Commission" value={`-${money(commission)}`} />
+        <Line label="Revenu net" value={money(net)} bold />
       </View>
 
       {/* Politique + infos invité */}
@@ -344,11 +451,21 @@ const styles = StyleSheet.create({
   paidBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingVertical: 12, marginBottom: spacing.md },
   paidBtnOn: { backgroundColor: "#30D158" },
   paidBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  acompteRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 6 },
+  acompteVal: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  acompteDate: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, flex: 1 },
+  acompteAdd: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm },
+  acompteInputWrap: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.md },
+  acompteInput: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurface, paddingVertical: 11 },
+  acompteBtn: { width: 44, height: 44, borderRadius: radius.md, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
   finCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md },
   finHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md },
   finTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.sm },
   quoteTag: { backgroundColor: "#34C75920", paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: radius.pill },
   quoteTagText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: "#248A3D" },
+  commTag: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: radius.pill },
+  commTagText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurface },
+  commHint: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginBottom: spacing.sm },
   qLine: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 },
   qLabel: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceSecondary, flex: 1 },
   qValue: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface },

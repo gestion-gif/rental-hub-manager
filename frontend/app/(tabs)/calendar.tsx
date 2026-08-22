@@ -19,6 +19,7 @@ dayjs.locale("fr");
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
 import StatusBadge from "@/src/components/StatusBadge";
+import { PlatformLogo } from "@/src/components/PlatformLogo";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
@@ -58,7 +59,11 @@ export default function CalendarScreen() {
   );
 
   const filtered = useMemo(
-    () => (filter === "all" ? items : items.filter((i) => i.status === filter)),
+    () => {
+      // Masquer les réservations dont le séjour est terminé (statut « Départ »)
+      const active = items.filter((i) => (i.display_status || i.status) !== "depart");
+      return filter === "all" ? active : active.filter((i) => i.status === filter);
+    },
     [items, filter],
   );
 
@@ -125,7 +130,10 @@ export default function CalendarScreen() {
               style={styles.card}
             >
               <View style={styles.cardTop}>
-                <Text style={styles.guest}>{item.guest_name}</Text>
+                <View style={styles.guestRow}>
+                  <PlatformLogo platform={item.platform} size={20} />
+                  <Text style={styles.guest} numberOfLines={1}>{item.guest_name}</Text>
+                </View>
                 <StatusBadge status={item.display_status || item.status} />
               </View>
               <Text style={styles.prop}>{props[item.property_id]?.name || "Logement"}</Text>
@@ -189,7 +197,8 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     marginBottom: spacing.md,
   },
-  cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.sm },
+  guestRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flex: 1 },
   guest: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, flex: 1 },
   prop: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, marginTop: 2 },
   dateRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: spacing.md },

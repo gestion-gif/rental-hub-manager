@@ -238,3 +238,48 @@ frontend:
 agent_communication:
     -agent: "main"
     -message: "Iteration 9. Tester UNIQUEMENT le backend: /api/staff (CRUD), /api/owners (CRUD + /summary avec calcul revenus), préservation owner_id/lodgify_id sur PUT /api/properties, et VALIDATION de POST /api/inbox/{thread}/reply (message vide->400, thread inconnu->404). NE JAMAIS tester l'envoi réel de message (part au vrai voyageur Airbnb/Booking). Auth: insérer users + user_sessions dans Mongo (user_id de TEST distinct) et header Bearer. Ne pas tester le frontend."
+
+## Iteration 10 — Bugs (noms voyageur, ménages passés, encaissement) + acomptes + logos
+backend:
+  - task: "Purge ménages passés"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "GET /api/interventions et /api/dashboard suppriment (delete_many) les kind=menage avec date<today. ensure_cleaning ignore les départs passés. Testé: 22 supprimés, insert stale supprimé au GET."
+  - task: "Encaissement manuel: dû->payé sans save + acomptes"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "PATCH /api/reservations/{id}/paid met finance.paid=total, due=0 (immédiat). POST /api/reservations/{id}/payments (acompte) et DELETE .../payments/{pid} recalculent finance via recompute_payment (paid=max(lodgify,sum(acomptes)) ou total si paid_manual). Marqueur 'paid' posé si soldé. Préservé en synchro (_lodgify_paid)."
+  - task: "Nom voyageur Airbnb/direct"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "Sync: si guest.name vide/N/A, récupère le nom via le fil de discussion (get_thread guest_name). Toutes les résa actuelles/futures ont le vrai nom. 4 résa 2025 passées restent 'Voyageur Airbnb' car Lodgify ne fournit AUCUN nom (masqué) - limite API, non corrigeable."
+
+frontend:
+  - task: "Logos plateforme calendrier + acomptes UI + icônes interventions"
+    implemented: true
+    working: "NA"
+    file: "frontend various"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "PlatformLogo (Airbnb/Booking/Vrbo/Direct) sur réglette + liste résa. Acomptes dans reservation-form. Palette 24 couleurs. Icônes MCI par type intervention. Non testable auto (Google OAuth)."
+
+agent_communication:
+    -agent: "main"
+    -message: "Iteration 10. Tester UNIQUEMENT backend. Créer user+session de TEST (user_id isolé, ex test_iter10) dans users/user_sessions, header Bearer. TESTS: 1) Insérer une réservation de test (source='lodgify', finance={total:500,_lodgify_paid:0,paid:0,due:500}, check_in/out futurs) puis PATCH /api/reservations/{id}/paid {paid:true} -> finance.paid=500, due=0, markers contient 'paid'; {paid:false} -> due=500, paid=0, plus de 'paid'. 2) POST /api/reservations/{id}/payments {amount:200} -> finance.paid=200, due=300, pas encore 'paid'; ajouter {amount:300} -> paid=500,due=0,marker 'paid'; DELETE un acompte -> recalcul. 3) Insérer intervention kind='menage' date passée + date future, GET /api/interventions -> la passée disparait, la future reste. 4) GET /api/reservations renvoie display_status/display_color. NE PAS tester envoi message Lodgify ni /channel/sync (données réelles)."

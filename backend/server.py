@@ -298,6 +298,22 @@ def compute_display(r: dict, cmap: dict):
     return r
 
 
+def recompute_payment(r: dict):
+    """Recompute finance.paid/due from acomptes (payments) + manual full-paid flag."""
+    fin = dict(r.get("finance") or {})
+    total = float(fin.get("total") or r.get("total_price") or 0)
+    payments = r.get("payments") or []
+    s = sum(float(p.get("amount") or 0) for p in payments)
+    lod = float(fin.get("_lodgify_paid") or 0)
+    paid = total if r.get("paid_manual") else max(lod, s)
+    if total:
+        paid = min(paid, total)
+    fin["paid"] = round(paid, 2)
+    fin["due"] = round(max(0.0, total - paid), 2)
+    r["finance"] = fin
+    return total > 0 and paid + 0.01 >= total
+
+
 @api_router.get("/reservations")
 async def list_reservations(status: Optional[str] = None, property_id: Optional[str] = None, user=Depends(get_current_user)):
     query = {"user_id": user["user_id"]}
@@ -316,6 +332,12 @@ async def ensure_cleaning(user_id: str, property_id: str, checkout_date: Optiona
     """Auto-create a ménage intervention on the guest departure day (idempotent)."""
     if not checkout_date or status == "annulee":
         return
+    # Do not create cleaning tasks for past departures
+    try:
+        if date.fromisoformat(checkout_date) < date.today():
+            return
+    except Exception:
+        pass
     exists = await db.interventions.find_one({
         "user_id": user_id,
         "property_id": property_id,
@@ -393,16 +415,91 @@ async def set_reservation_paid(reservation_id: str, body: dict, user=Depends(get
     r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
     if not r:
         raise HTTPException(status_code=404, detail="Reservation not found")
+    r["paid_manual"] = paid
+    fully = recompute_payment(r)
     markers = set(r.get("markers") or [])
-    if paid:
+    if paid or fully:
         markers.add("paid")
     else:
         markers.discard("paid")
     tmap = {t["marker_key"]: t for t in await get_templates(uid)}
     await db.reservations.update_one(
         {"id": reservation_id, "user_id": uid},
-        {"$set": {"paid_manual": paid, "markers": list(markers),
+        {"$set": {"paid_manual": paid, "finance": r["finance"], "markers": list(markers),
                   "marker_color": marker_color_for(list(markers), tmap)}})
+    item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    compute_display(item, await status_color_map(uid))
+    return item
+
+
+@api_router.post("/reservations/{reservation_id}/payments")
+async def add_payment(reservation_id: str, body: dict, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    amount = float(body.get("amount") or 0)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Montant invalide")
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    payments = r.get("payments") or []
+    payments.append({
+        "id": str(uuid.uuid4()),
+        "amount": round(amount, 2),
+        "date": body.get("date") or date.today().isoformat(),
+        "note": body.get("note", ""),
+    })
+    r["payments"] = payments
+    fully = recompute_payment(r)
+    markers = set(r.get("markers") or [])
+    if fully:
+        markers.add("paid")
+    tmap = {t["marker_key"]: t for t in await get_templates(uid)}
+    await db.reservations.update_one(
+        {"id": reservation_id, "user_id": uid},
+        {"$set": {"payments": payments, "finance": r["finance"], "markers": list(markers),
+                  "marker_color": marker_color_for(list(markers), tmap)}})
+    item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    compute_display(item, await status_color_map(uid))
+    return item
+
+
+@api_router.delete("/reservations/{reservation_id}/payments/{payment_id}")
+async def delete_payment(reservation_id: str, payment_id: str, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    payments = [p for p in (r.get("payments") or []) if p.get("id") != payment_id]
+    r["payments"] = payments
+    fully = recompute_payment(r)
+    markers = set(r.get("markers") or [])
+    if fully or r.get("paid_manual"):
+        markers.add("paid")
+    else:
+        markers.discard("paid")
+    tmap = {t["marker_key"]: t for t in await get_templates(uid)}
+    await db.reservations.update_one(
+        {"id": reservation_id, "user_id": uid},
+        {"$set": {"payments": payments, "finance": r["finance"], "markers": list(markers),
+                  "marker_color": marker_color_for(list(markers), tmap)}})
+    item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    compute_display(item, await status_color_map(uid))
+    return item
+
+
+@api_router.patch("/reservations/{reservation_id}/commission")
+async def set_commission(reservation_id: str, body: dict, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    amount = float(body.get("amount") or 0)
+    if amount < 0:
+        raise HTTPException(status_code=400, detail="Montant invalide")
+    fin = dict(r.get("finance") or {})
+    fin["commission"] = round(amount, 2)
+    await db.reservations.update_one(
+        {"id": reservation_id, "user_id": uid}, {"$set": {"finance": fin}})
     item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     compute_display(item, await status_color_map(uid))
     return item
@@ -422,6 +519,10 @@ async def list_interventions(property_id: Optional[str] = None, user=Depends(get
     query = {"user_id": user["user_id"]}
     if property_id:
         query["property_id"] = property_id
+    # Purge past ménages (cleaning tasks before today) and exclude them from results
+    today_iso = date.today().isoformat()
+    await db.interventions.delete_many(
+        {"user_id": user["user_id"], "kind": "menage", "date": {"$lt": today_iso}})
     items = await db.interventions.find(query, {"_id": 0}).sort("date", 1).to_list(1000)
     return items
 
@@ -647,6 +748,8 @@ async def dashboard(user=Depends(get_current_user)):
 
     props = await db.properties.find({"user_id": uid}, {"_id": 0}).to_list(500)
     reservations = await db.reservations.find({"user_id": uid}, {"_id": 0}).to_list(2000)
+    await db.interventions.delete_many(
+        {"user_id": uid, "kind": "menage", "date": {"$lt": today_str}})
     interventions = await db.interventions.find({"user_id": uid}, {"_id": 0}).sort("date", 1).to_list(1000)
 
     prop_map = {p["id"]: p for p in props}
@@ -793,6 +896,16 @@ CORE_STATUS_KEYS = {s["key"] for s in DEFAULT_STATUSES}
 class PreferencesIn(BaseModel):
     status_colors: Optional[dict] = None
     statuses: Optional[list] = None
+    commission_rates: Optional[dict] = None
+
+
+DEFAULT_COMMISSION_RATES = {
+    "Airbnb": 15.5, "Booking.com": 15.0, "Vrbo": 8.0, "Direct": 0.0, "Site web": 0.0,
+}
+
+
+def _build_commission_rates(doc):
+    return {**DEFAULT_COMMISSION_RATES, **((doc or {}).get("commission_rates") or {})}
 
 
 def _build_statuses(doc):
@@ -810,39 +923,56 @@ async def get_preferences(user=Depends(get_current_user)):
     return {
         "statuses": statuses,
         "status_colors": {s["key"]: s["color"] for s in statuses},
+        "commission_rates": _build_commission_rates(doc),
     }
 
 
 @api_router.put("/preferences")
 async def update_preferences(payload: PreferencesIn, user=Depends(get_current_user)):
-    if payload.statuses is not None:
-        cleaned = []
-        seen = set()
-        for s in payload.statuses:
-            key = str(s.get("key") or "").strip()
-            label = str(s.get("label") or "").strip()
-            color = str(s.get("color") or "#8E8E93").strip()
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            cleaned.append({"key": key, "label": label or key, "color": color})
-        # Always keep the core statuses so existing reservations stay valid
-        for d in DEFAULT_STATUSES:
-            if d["key"] not in seen:
-                cleaned.append(d)
-                seen.add(d["key"])
-        statuses = cleaned
-    else:
-        colors = {**DEFAULT_STATUS_COLORS, **(payload.status_colors or {})}
-        statuses = [{**s, "color": colors.get(s["key"], s["color"])} for s in DEFAULT_STATUSES]
+    uid = user["user_id"]
+    set_doc = {"user_id": uid}
 
-    await db.preferences.update_one(
-        {"user_id": user["user_id"]},
-        {"$set": {"user_id": user["user_id"], "statuses": statuses,
-                  "status_colors": {s["key"]: s["color"] for s in statuses}}},
-        upsert=True,
-    )
-    return {"statuses": statuses, "status_colors": {s["key"]: s["color"] for s in statuses}}
+    if payload.statuses is not None or payload.status_colors is not None:
+        if payload.statuses is not None:
+            cleaned = []
+            seen = set()
+            for s in payload.statuses:
+                key = str(s.get("key") or "").strip()
+                label = str(s.get("label") or "").strip()
+                color = str(s.get("color") or "#8E8E93").strip()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                cleaned.append({"key": key, "label": label or key, "color": color})
+            # Always keep the core statuses so existing reservations stay valid
+            for d in DEFAULT_STATUSES:
+                if d["key"] not in seen:
+                    cleaned.append(d)
+                    seen.add(d["key"])
+            statuses = cleaned
+        else:
+            colors = {**DEFAULT_STATUS_COLORS, **(payload.status_colors or {})}
+            statuses = [{**s, "color": colors.get(s["key"], s["color"])} for s in DEFAULT_STATUSES]
+        set_doc["statuses"] = statuses
+        set_doc["status_colors"] = {s["key"]: s["color"] for s in statuses}
+
+    if payload.commission_rates is not None:
+        rates = {}
+        for k, v in payload.commission_rates.items():
+            try:
+                rates[str(k)] = max(0.0, min(100.0, float(v)))
+            except Exception:
+                continue
+        set_doc["commission_rates"] = {**DEFAULT_COMMISSION_RATES, **rates}
+
+    await db.preferences.update_one({"user_id": uid}, {"$set": set_doc}, upsert=True)
+    doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
+    statuses = _build_statuses(doc)
+    return {
+        "statuses": statuses,
+        "status_colors": {s["key"]: s["color"] for s in statuses},
+        "commission_rates": _build_commission_rates(doc),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1113,7 +1243,19 @@ async def channel_sync(user=Depends(get_current_user)):
         guest_obj = b.get("guest") or {}
         gname = (guest_obj.get("name") or "").strip()
         if not gname or gname.upper().startswith("N/A"):
-            gname = f"Voyageur {src}"
+            # Lodgify masks the name on some Airbnb/direct bookings: try the message thread
+            real = ""
+            tuid0 = b.get("thread_uid")
+            if tuid0:
+                try:
+                    async with httpx.AsyncClient(timeout=15) as h0:
+                        th0 = await adapter.get_thread(h0, tuid0)
+                    real = (th0.get("guest_name") or "").strip()
+                    if real.upper().startswith("N/A"):
+                        real = ""
+                except Exception:
+                    real = ""
+            gname = real or f"Voyageur {src}"
         gemail = (guest_obj.get("email") or "").strip()
         if gemail.upper().startswith("N/A"):
             gemail = ""
@@ -1142,12 +1284,14 @@ async def channel_sync(user=Depends(get_current_user)):
             "currency": b.get("currency_code") or "EUR",
             "total": float(b.get("total_amount") or 0),
             "paid": float(b.get("amount_paid") or 0),
+            "_lodgify_paid": float(b.get("amount_paid") or 0),
             "due": float(b.get("amount_due") or 0),
             "stay": float(subt.get("stay") or 0),
             "fees": float(subt.get("fees") or 0),
             "taxes": float(subt.get("taxes") or 0),
             "addons": float(subt.get("addons") or 0),
             "promotions": float(subt.get("promotions") or 0),
+            "commission": float(subt.get("commission") or b.get("total_commission") or b.get("commission") or 0),
             "vat": float(subt.get("vat") or 0),
             "quote_status": quote.get("status") or "",
             "policy_payments": policy.get("payments") or "",
@@ -1179,17 +1323,18 @@ async def channel_sync(user=Depends(get_current_user)):
         }
         q = {"user_id": uid, "lodgify_id": lodgify_key}
         existing = await db.reservations.find_one(q)
-        # Markers: preserve message markers already set, recompute the "paid" marker
+        # Préserver une commission saisie manuellement d'une synchro à l'autre
+        prev_fin = (existing or {}).get("finance") or {}
+        if not finance.get("commission") and prev_fin.get("commission"):
+            finance["commission"] = prev_fin["commission"]
+        # Markers + payment state: preserve manual payments/acomptes across syncs
         markers = set((existing or {}).get("markers") or [])
         markers.discard("paid")
-        total_amt = float(b.get("total_amount") or 0)
-        amount_paid = float(b.get("amount_paid") or 0)
-        amount_due = b.get("amount_due")
-        paid_manual = bool((existing or {}).get("paid_manual"))
-        is_paid = paid_manual or (total_amt > 0 and ((amount_due is not None and float(amount_due) <= 0) or amount_paid >= total_amt))
-        if is_paid and status != "annulee":
+        payload["paid_manual"] = bool((existing or {}).get("paid_manual"))
+        payload["payments"] = (existing or {}).get("payments") or []
+        fully = recompute_payment(payload)
+        if fully and status != "annulee":
             markers.add("paid")
-        payload["paid_manual"] = paid_manual
         payload["markers"] = list(markers)
         payload["marker_color"] = marker_color_for(list(markers), tmap)
         if existing:

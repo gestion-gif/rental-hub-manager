@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="12" time="1.928" timestamp="2026-08-22T13:17:08.419315+00:00" hostname="agent-env-03ff9660-7f11-4fba-ab9b-1022dbdbf04b"><testcase classname="tests.test_payments_purge.TestPatchPaid" name="test_mark_paid_true" time="0.274" /><testcase classname="tests.test_payments_purge.TestPayments" name="test_first_acompte_partial" time="0.376" /><testcase classname="tests.test_payments_purge.TestPatchPaid" name="test_mark_paid_false_no_payments" time="0.146" /><testcase classname="tests.test_payments_purge.TestPayments" name="test_second_acompte_settles" time="0.102" /><testcase classname="tests.test_payments_purge.TestReservationDisplay" name="test_display_fields_present" time="0.074" /><testcase classname="tests.test_payments_purge.TestPayments" name="test_amount_zero_400" time="0.126" /><testcase classname="tests.test_payments_purge.TestReservationDisplay" name="test_display_annulee" time="0.002"><failure message="ValueError: The future belongs to a different loop than the one specified as the loop argument">backend/tests/test_payments_purge.py:310: in test_display_annulee
+    loop.run_until_complete(db.reservations.insert_one({
+/usr/local/lib/python3.11/asyncio/base_events.py:633: in run_until_complete
+    future = tasks.ensure_future(future, loop=self)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/asyncio/tasks.py:659: in ensure_future
+    return _ensure_future(coro_or_future, loop=loop)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/asyncio/tasks.py:665: in _ensure_future
+    raise ValueError('The future belongs to a different loop than '
+E   ValueError: The future belongs to a different loop than the one specified as the loop argument</failure></testcase><testcase classname="tests.test_payments_purge.TestDeletePayment" name="test_delete_recomputes" time="0.100"><failure message="AssertionError: expected 2 payments, got []&#10;assert 0 == 2&#10; +  where 0 = len([])">backend/tests/test_payments_purge.py:208: in test_delete_recomputes
+    assert len(payments) == 2, f"expected 2 payments, got {payments}"
+E   AssertionError: expected 2 payments, got []
+E   assert 0 == 2
+E    +  where 0 = len([])</failure></testcase><testcase classname="tests.test_payments_purge.TestPayments" name="test_amount_negative_400" time="0.104" /><testcase classname="tests.test_payments_purge.TestDashboardPurge" name="test_dashboard_purges_past_menage" time="0.002"><failure message="ValueError: The future belongs to a different loop than the one specified as the loop argument">backend/tests/test_payments_purge.py:256: in test_dashboard_purges_past_menage
+    loop.run_until_complete(db.interventions.insert_one({
+/usr/local/lib/python3.11/asyncio/base_events.py:633: in run_until_complete
+    future = tasks.ensure_future(future, loop=self)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/asyncio/tasks.py:659: in ensure_future
+    return _ensure_future(coro_or_future, loop=loop)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/asyncio/tasks.py:665: in _ensure_future
+    raise ValueError('The future belongs to a different loop than '
+E   ValueError: The future belongs to a different loop than the one specified as the loop argument</failure></testcase><testcase classname="tests.test_payments_purge.TestAuth401" name="test_no_auth_returns_401" time="0.366" /><testcase classname="tests.test_payments_purge.TestInterventionsPurge" name="test_past_menage_purged_others_kept" time="0.142" /></testsuite></testsuites>

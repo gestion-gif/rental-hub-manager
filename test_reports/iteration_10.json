@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 10 backend validation — validation manuelle d'encaissement (PATCH /paid), acomptes (POST/DELETE /payments), purge auto des ménages passés (GET /interventions + GET /dashboard), et statut/couleur automatique (display_status/display_color sur GET /reservations). New file /app/backend/tests/test_payments_purge.py adds 12 tests grouped in 7 classes (all green in ~2.4s). Full regression: 128/128 pytest green (was 116/116 in iteration 9; +12 new tests + fix of 1 pre-existing test with stale hardcoded 2026-04-15 date now in the past). Server code untouched — no bugs found in iteration 10 features. Verified: (1) PATCH /api/reservations/{id}/paid {paid:true} sets finance.paid=finance.total (500), finance.due=0, adds marker 'paid', marker_color populated, and paid_manual=true; {paid:false} without acomptes reverts to finance.paid=0, due=total (500), removes 'paid', paid_manual=false. (2) POST /api/reservations/{id}/payments {amount:200} → finance.paid=200 / due=300 / no 'paid' marker; a 2nd payment of 300 → finance.paid=500 / due=0 / 'paid' marker added + payments array has 2 entries. (3) POST /payments with amount=0 or -50 returns 400 'Montant invalide'. (4) DELETE /api/reservations/{id}/payments/{payment_id} recalcule paid=200/due=300 après suppression du 2e acompte et retire 'paid'. (5) GET /api/interventions supprime physiquement du DB les ménages date<today (verified via DB round-trip), tout en conservant les ménages date>=today AND les autres kind (intervention/caution/remise_cles) même passés. (6) GET /api/dashboard applique la même purge (re-inserted a past ménage dated 2024-06-01 → after /dashboard call, DB find_one returns None). (7) GET /api/reservations renvoie display_status='confirmee' + display_color pour une résa future confirmée, et display_status='annulee' pour une résa annulée (test crée directement en DB). (8) 401 sans Authorization vérifié sur les 6 endpoints d'iteration 10 (GET /reservations, PATCH /paid, POST/DELETE /payments, GET /interventions, GET /dashboard). NE PAS appeler /api/channel/sync ni /inbox/reply — respect intégral de la consigne (0 appel réel).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_payments_purge.py",
+    "/app/backend/tests/test_auto_cleaning.py",
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/test_ical_sync.py",
+    "/app/backend/tests/test_lodgify_channel.py",
+    "/app/backend/tests/test_staff_owners.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No blocking backend issues. Optional main-agent frontend self-test behind Google OAuth: (a) Ouvrir une réservation dûe → tap 'Marquer payée' → vérifier badge vert 'Payée' + pastille 'due 0€'; retap → repasse à 'dû'; (b) même réservation → ajouter un acompte 200€ → vérifier 'paid 200 / due 300' + pas de marker paid; ajouter 300€ → paid=500, due=0, marker 'paid' visible; (c) supprimer le 2e acompte → paid 200, due 300, marker retiré; (d) Calendrier/Dashboard → vérifier qu'un ménage à date passée n'apparaît plus après refresh (purge auto)."
+  ],
+  "critical_code_review_comments": [
+    "recompute_payment (server.py:301-314) : paid = total if paid_manual else max(lodgify_paid, sum(payments)). Correct behaviour when user first paie manuellement (paid_manual=true → paid=total), puis toggle off — paid retombe au max(_lodgify_paid, sum(acomptes)) donc à 0 si pas d'acomptes ni Lodgify. Verified by test_mark_paid_false_no_payments.",
+    "set_reservation_paid (server.py:411-432) : garde le marker 'paid' si (paid or fully). Note: après un {paid:false} sur une résa entièrement payée par acomptes (paid=total via payments), recompute renvoie fully=True, donc le marker 'paid' est CONSERVÉ. C'est cohérent avec la sémantique (les acomptes soldent la résa) — pas un bug.",
+    "add_payment / delete_payment (server.py:435-487) : réutilisent tmap = get_templates pour recalculer marker_color à chaque écriture. Bon, mais get_templates fait potentiellement une insertion par défaut à la première lecture. Non bloquant.",
+    "list_interventions (server.py:499-509) : delete_many past ménages BEFORE find. Bon effet 'garbage-collect on read'. Attention: si beaucoup d'utilisateurs, chaque GET /interventions déclenche un delete_many indexé sur (user_id, kind, date). Ajouter un index composite {user_id:1, kind:1, date:1} pour éviter les scans si la collection grossit.",
+    "dashboard (server.py:733-734) : purge identique appliquée avant le find. Cohérent.",
+    "compute_display (server.py:271-298) : si check_in/check_out non parseables, fallback ds=status + color=marker_color OR cmap[status]. Bon défaut. Si check_out passé, display='depart' avec cmap['depart']=#8E8E93 (gris) — attendu.",
+    "add_payment : le nouveau payment se voit assigner un uuid côté serveur (bien, empêche collision côté client). Le champ date est body.date OR today().isoformat() — accepte donc n'importe quel string sans validation ISO. Non bloquant mais un futur `Field(regex=...)` serait plus sûr.",
+    "Petit bug potentiel dans set_reservation_paid path {paid:false} — si le body contient d'autres payments qui soldent la résa, on garde 'paid'. C'est LE comportement attendu (fully=True), mais l'UX du bouton 'Marquer non payée' peut surprendre. À documenter côté frontend."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_payments_purge.py (new — 12 tests: TestPatchPaid (2), TestPayments (4), TestDeletePayment (1), TestInterventionsPurge (1), TestDashboardPurge (1), TestReservationDisplay (2), TestAuth401 (1) )",
+    "/app/backend/tests/test_auto_cleaning.py (fixed — remplacé DTSTART/DTEND hardcodés 20260410/20260415 (aujourd'hui déjà passé côté conteneur = 2026-08-22) par des dates dynamiques today+25/today+30, sinon la nouvelle purge iteration 10 supprime le ménage attendu par le test)"
+  ],
+  "success_rate": {"backend": "100% (128/128 total, 12/12 iteration 10, 1 pre-existing test fixed)", "frontend": "not tested (backend-only per E1)"},
+  "seed_data_creation": "Module-scoped fixture 'seed' in test_payments_purge.py creates: 1 user user_TEST_iter10_* + session_token (7 days) + 1 property + 1 reservation (total=500€, check_in=2026-12-01, check_out=2026-12-05, status=confirmee, source=lodgify, empty markers/payments) + 6 interventions (past ménage 2025-01-01, future ménage today+30, past intervention/caution/remise_cles 2025-01-01, today ménage). Teardown wipes reservations/properties/interventions/user_sessions/users for that user_id. NO calls to /api/channel/sync or /api/inbox/{...}/reply were made — respected the agent_to_agent_context_note constraint (no real Lodgify traffic, no real messages sent).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend now has 128 tests across 6 files: test_backend.py (44), test_ical_sync.py (14), test_auto_cleaning.py (9, one date-dynamic), test_lodgify_channel.py (20), test_staff_owners.py (29), test_payments_purge.py (12). Full run ~27s. Container clock is currently 2026-08-22 — any future test using hardcoded 2026-Q1 dates for 'future' scenarios will fail against the new past-ménage purge; use today+timedelta(...) instead. Helper _run_mongo() in test_payments_purge.py handles the Motor 'future belongs to different loop' issue when running under pytest-xdist parallel workers (creates fresh AsyncIOMotorClient per call in a fresh loop). NEVER call POST /api/channel/sync or POST /api/inbox/{thread_uid}/reply against real credentials — production Lodgify API would be hit and real guest messages would be sent.",
+  "rca_of_issue": "N/A — feature validation iteration. All 7 items from the review request verified passing. One pre-existing test (test_auto_cleaning::test_sync_creates_auto_menage_on_event_checkout) failed due to hardcoded 2026-04-15 date now being in the past given container clock 2026-08-22 — root cause: interaction between old test data and new iteration 10 purge (ensure_cleaning skips past dates AND list_interventions purges past ménages). Fixed by making the ICS DTSTART/DTEND relative to date.today(). This is a test-only fix, no server code change."
+}
