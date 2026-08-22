@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 11 backend validation — Finance initialization on manual reservations, PUT-driven finance sync, PATCH commission (positive/negative), GET/PUT preferences (commission_rates must NOT wipe custom statuses), Stripe checkout creation for payment (no-amount → uses finance.due) and deposit (with amount, amount=0 rejected), GET /api/checkout/status (kind/amount/status/payment_status; unknown session → 404), and GET /api/analytics/revenue?year=2026 (structure + monthly split). New file /app/backend/tests/test_finance_stripe_analytics.py adds 20 tests grouped in 7 classes — ALL PASSING. Full regression: 148/148 pytest green in 30s (was 128 in iteration 10, +20 new tests, zero server-code changes required). NO calls made to /api/channel/sync nor /api/inbox/{tid}/reply — strict respect of the agent_to_agent_context_note. Stripe: verified session creation returns url + session_id with 'cs_' prefix (test key sk_test_emergent), and GET /checkout/status/{session_id} returns the {kind, amount, status, payment_status} shape without error; a full card-payment flow is NOT automatable and was NOT attempted.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_finance_stripe_analytics.py",
+    "/app/backend/tests/test_payments_purge.py",
+    "/app/backend/tests/test_auto_cleaning.py",
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/test_ical_sync.py",
+    "/app/backend/tests/test_lodgify_channel.py",
+    "/app/backend/tests/test_staff_owners.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_iter11.xml",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No blocking backend issue found. Optional main-agent frontend self-tests behind Google OAuth: (a) Créer une réservation manuelle 500€ → vérifier badge 'dû 500€ / payé 0€' visible; (b) Éditer la même résa, changer total à 800 → 'dû 800€'; (c) Écran commission — saisir 50 → afficher; saisir -10 → toast d'erreur; (d) Écran préférences — définir un statut custom (ex 'VIP'), puis modifier UNIQUEMENT une commission (ex Airbnb 12) → vérifier que le statut 'VIP' est TOUJOURS présent après refresh; (e) Bouton 'Encaisser via Stripe' → doit ouvrir l'URL Stripe (test mode) — ne pas saisir de vraie carte; (f) Écran analytics 2026 avec 2 résas juillet+août → vérifier barres correctes (juillet 500€, août 600€, total 1100€)."
+  ],
+  "critical_code_review_comments": [
+    "update_preferences (server.py:1164-1209) : le branch commission_rates ne touche pas set_doc['statuses'] ni set_doc['status_colors'] → $set upsert ne peut pas effacer ces champs. Comportement correct et vérifié par test_put_commission_rates_only_preserves_custom_statuses.",
+    "create_checkout (server.py:544-594) : pour kind=payment, amount = payload.amount OR (due if due>0 else total). Pour kind=deposit, amount = payload.amount (0 par défaut si absent) → rejeté par le check amount<=0. Attention: si un client envoie kind=deposit sans amount ou avec amount=null, la fonction rejette bien avec 400 (vérifié). Bon.",
+    "create_checkout : `success_url = f'{origin}/reservation-form?id={rid}&stripe=success'` — hardcode le chemin `/reservation-form` — ok tant que l'écran Expo existe à ce path (à confirmer par le main agent côté frontend).",
+    "checkout_status (server.py:635-651) : idempotent — appelle _apply_stripe_payment seulement si payment_status='paid' AND not tx.processed. Bon garde-fou anti-double-comptage.",
+    "analytics_revenue (server.py:988-1062) : la répartition prorata (price/total_nights) sur chaque nuit est correcte quand la résa est intra-année. Vérifié: juillet 500 (5 nuits @ 100€) et août 600 (5 nuits @ 120€) → totaux 1100€. Attention: pour une résa qui chevauche 31 déc → 1er jan, seul le côté de l'année demandée est comptabilisé, ce qui est le comportement voulu.",
+    "PATCH /reservations/{id}/commission (server.py:505-520) : amount<0 → 400. amount négatif via float() OK. amount = None ou clé absente → devient 0 (accepté). Non bloquant — peut-être ajouter une validation Pydantic si le main agent souhaite restreindre.",
+    "PUT /reservations/{id} (server.py:382-402) : pour source != 'lodgify' réaligne finance.total sur total_price. Le champ 'source' n'existe pas sur les résas manuelles (jamais setté au POST) → item.get('source') retourne None → branch prise, finance.total mis à jour. Vérifié fonctionnel."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_finance_stripe_analytics.py (NEW — 20 tests dans 7 classes: TestFinanceInit (2), TestFinanceUpdateOnPUT (1), TestCommission (3), TestPreferences (3), TestStripeCheckout (5), TestAnalytics (2), TestAuth401 (4). Utilise la fixture 'sample_property' locale + conftest.api_client/test_user. Nettoyage complet via api_client.delete dans les 'finally'.)"
+  ],
+  "success_rate": {"backend": "100% (148/148 total, 20/20 iteration 11)", "frontend": "not tested (backend only per E1)"},
+  "seed_data_creation": "Aucun seed permanent. Chaque test crée un 'sample_property' (TEST_iter11_Property, Nice, 4 pers, 2 chb) et des réservations éphémères via l'API (guest_name=TEST_Voyageur), toutes supprimées en teardown/finally. Le fixture 'test_user' de conftest.py (user_TEST_<uuid>@staypilot.test + session_token valide 7 jours) est également nettoyé en fin de session. Zéro donnée résiduelle vérifiée.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend now has 148 tests across 7 files: test_backend.py (44), test_ical_sync.py (14), test_auto_cleaning.py (9), test_lodgify_channel.py (20), test_staff_owners.py (29), test_payments_purge.py (12), test_finance_stripe_analytics.py (20). Full run ~30s parallel (2 workers via pytest-xdist). Container clock is 2026 — safe to use 2026-07 / 2026-08 dates for future scenarios. Stripe test key sk_test_emergent is configured in backend/.env and works via the emergentintegrations proxy — create_checkout_session returns cs_<...> session ids as expected. NEVER complete a real card payment in tests (not automatable). NEVER call POST /api/channel/sync or POST /api/inbox/{tid}/reply (real Lodgify + real guests).",
+  "rca_of_issue": "N/A — pure feature validation iteration. All 10 items from the review request verified passing on the first run without server-code changes. The 'PUT preferences with commission_rates must not wipe statuses' bug (which was the highest-risk item in the request) was already correctly handled by the current update_preferences implementation (server.py:1164-1209): the commission_rates branch performs `set_doc['commission_rates'] = ...` without touching statuses/status_colors keys, so the Mongo $set upsert cannot delete previously-saved statuses. Verified by direct round-trip (PUT statuses with 'vip_test' custom → PUT commission_rates:{Airbnb:12.5} → GET preferences: 'vip_test' still present)."
+}

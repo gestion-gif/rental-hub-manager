@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
+  Linking,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -71,6 +72,7 @@ export default function PropertyDetail() {
       city: next.city || "",
       address_complement: next.address_complement || "",
       description: next.description || "",
+      welcome_book_url: next.welcome_book_url || "",
       rooms: next.rooms || [],
       amenities: next.amenities || [],
       seasons: next.seasons || [],
@@ -194,6 +196,21 @@ export default function PropertyDetail() {
             <>
               <Text style={styles.sectionTitle}>Descriptif</Text>
               <Text style={styles.description}>{prop.description}</Text>
+            </>
+          )}
+
+          {!!prop.welcome_book_url && (
+            <>
+              <Text style={styles.sectionTitle}>Livret d'accueil</Text>
+              <Pressable
+                testID="open-welcome-book"
+                onPress={() => Linking.openURL(prop.welcome_book_url)}
+                style={styles.welcomeBtn}
+              >
+                <Ionicons name="book-outline" size={18} color={colors.brandPrimary} />
+                <Text style={styles.welcomeText} numberOfLines={1}>{prop.welcome_book_url}</Text>
+                <Ionicons name="open-outline" size={16} color={colors.onSurfaceTertiary} />
+              </Pressable>
             </>
           )}
 
@@ -358,6 +375,8 @@ const styles = StyleSheet.create({
   infoLabel: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceTertiary, width: 96 },
   infoValue: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface, flex: 1 },
   description: { fontFamily: font.regular, fontSize: fontSize.lg, color: colors.onSurfaceSecondary, lineHeight: 23 },
+  welcomeBtn: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md },
+  welcomeText: { flex: 1, fontFamily: font.medium, fontSize: fontSize.base, color: colors.brandPrimary },
   tagWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   tag: {
     flexDirection: "row", alignItems: "center", gap: 5,

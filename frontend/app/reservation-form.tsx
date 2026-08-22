@@ -7,13 +7,16 @@ import {
   ScrollView,
   ActivityIndicator,
   TextInput,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import * as WebBrowser from "expo-web-browser";
 
 import { api } from "@/src/api";
+import { storage } from "@/src/utils/storage";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import DateField from "@/src/components/DateField";
@@ -26,6 +29,8 @@ export default function ReservationForm() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
+  const { stripe } = useLocalSearchParams<{ stripe?: string }>();
+  const params = useLocalSearchParams<{ property?: string; check_in?: string; check_out?: string }>();
   const editing = !!id;
   const { statuses } = usePreferences();
 
@@ -33,6 +38,8 @@ export default function ReservationForm() {
   const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [payMsg, setPayMsg] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     property_id: "",
@@ -71,7 +78,12 @@ export default function ReservationForm() {
             });
           }
         } else if (pr.length) {
-          setForm((f) => ({ ...f, property_id: pr[0].id }));
+          setForm((f) => ({
+            ...f,
+            property_id: params.property && pr.some((p: any) => p.id === params.property) ? params.property : pr[0].id,
+            check_in: params.check_in || f.check_in,
+            check_out: params.check_out || f.check_out,
+          }));
         }
       } catch {}
       setLoading(false);
@@ -134,6 +146,81 @@ export default function ReservationForm() {
     } catch {}
   }
 
+  async function refreshDetail() {
+    try {
+      const list = await api.get("/reservations");
+      const r = list.find((x: any) => x.id === id);
+      if (r) setDetail(r);
+    } catch {}
+  }
+
+  async function pollStatus(sessionId: string, attempts = 0): Promise<void> {
+    if (attempts > 8) {
+      setPayMsg("Paiement en attente de confirmation. Actualisez dans un instant.");
+      return;
+    }
+    try {
+      const s = await api.get(`/checkout/status/${sessionId}`);
+      if (s.payment_status === "paid") {
+        setPayMsg(s.kind === "deposit" ? "Caution encaissée ✓" : "Paiement reçu ✓");
+        await refreshDetail();
+        return;
+      }
+      if (s.status === "expired") {
+        setPayMsg("Session de paiement expirée.");
+        return;
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 2000));
+    return pollStatus(sessionId, attempts + 1);
+  }
+
+  const PENDING_KEY = "pending_stripe_session";
+
+  async function startCheckout(kind: "payment" | "deposit", amount?: number) {
+    if (paying) return;
+    setPaying(true);
+    setPayMsg(null);
+    try {
+      const origin =
+        Platform.OS === "web" ? window.location.origin : process.env.EXPO_PUBLIC_BACKEND_URL || "";
+      const { url, session_id } = await api.post(`/reservations/${id}/checkout`, {
+        kind,
+        amount,
+        origin_url: origin,
+      });
+      if (Platform.OS === "web") {
+        await storage.setItem(PENDING_KEY, session_id);
+        window.location.assign(url);
+        return;
+      }
+      await WebBrowser.openBrowserAsync(url);
+      setPayMsg("Vérification du paiement…");
+      await pollStatus(session_id);
+    } catch (e: any) {
+      setPayMsg(e?.message || "Erreur lors du paiement");
+    } finally {
+      setPaying(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!editing) return;
+    (async () => {
+      const pending = await storage.getItem(PENDING_KEY, "");
+      if (stripe === "success" && pending) {
+        setPaying(true);
+        setPayMsg("Vérification du paiement…");
+        await pollStatus(pending as string);
+        await storage.removeItem(PENDING_KEY);
+        setPaying(false);
+      } else if (stripe === "cancel") {
+        await storage.removeItem(PENDING_KEY);
+        setPayMsg("Paiement annulé.");
+      }
+    })();
+  }, [stripe, id]);
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -161,7 +248,7 @@ export default function ReservationForm() {
           bottomOffset={20}
           showsVerticalScrollIndicator={false}
         >
-          {detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} onAddPayment={addPayment} onDeletePayment={deletePayment} onSetCommission={saveCommission} />}
+          {detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} onAddPayment={addPayment} onDeletePayment={deletePayment} onSetCommission={saveCommission} onCheckout={startCheckout} paying={paying} payMsg={payMsg} />}
           <Text style={styles.label}>Logement</Text>
           <ChipRow
             items={props.map((p) => ({ key: p.id, label: p.name }))}
@@ -232,11 +319,12 @@ export default function ReservationForm() {
   );
 }
 
-function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayment, onSetCommission }: any) {
+function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayment, onSetCommission, onCheckout, paying, payMsg }: any) {
   const f = detail.finance || {};
   const cur = f.currency || "EUR";
   const { commissionRates } = usePreferences();
   const [acompte, setAcompte] = useState("");
+  const [caution, setCaution] = useState(f.deposit_amount ? String(f.deposit_amount) : "");
   const money = (n: number) => `${(n || 0).toFixed(2)} ${cur === "EUR" ? "€" : cur}`;
 
   const rate = (commissionRates?.[detail.platform] ?? 0) / 100;
@@ -269,6 +357,69 @@ function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayme
           {isPaid ? "Encaissement validé — appuyez pour annuler" : "Marquer l'encaissement comme reçu"}
         </Text>
       </Pressable>
+
+      {/* Paiement en ligne par carte (Stripe) */}
+      {f.due > 0 && (
+        <Pressable
+          testID="stripe-pay"
+          disabled={paying}
+          onPress={() => onCheckout("payment", f.due)}
+          style={[styles.stripeBtn, paying && { opacity: 0.6 }]}
+        >
+          {paying ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="card" size={18} color="#fff" />
+              <Text style={styles.stripeBtnText}>Payer {money(f.due)} par carte</Text>
+            </>
+          )}
+        </Pressable>
+      )}
+      {!!payMsg && (
+        <View style={styles.payMsg}>
+          <Ionicons name="information-circle-outline" size={16} color={colors.onSurfaceSecondary} />
+          <Text style={styles.payMsgText}>{payMsg}</Text>
+        </View>
+      )}
+
+      {/* Caution par carte */}
+      <View style={styles.finCard}>
+        <View style={styles.finHead}>
+          <Text style={styles.finTitle}>Caution</Text>
+          {f.deposit_collected && (
+            <View style={styles.quoteTag}><Text style={styles.quoteTagText}>Encaissée</Text></View>
+          )}
+        </View>
+        <Text style={styles.commHint}>
+          {f.deposit_collected
+            ? `Caution de ${money(f.deposit_amount)} encaissée. Le remboursement se fait manuellement dans Stripe.`
+            : "Encaissez une caution par carte. Elle sera remboursable manuellement depuis Stripe."}
+        </Text>
+        {!f.deposit_collected && (
+          <View style={styles.acompteAdd}>
+            <View style={styles.acompteInputWrap}>
+              <TextInput
+                testID="caution-input"
+                value={caution}
+                onChangeText={setCaution}
+                placeholder="Montant de la caution"
+                placeholderTextColor={colors.onSurfaceTertiary}
+                keyboardType="decimal-pad"
+                style={styles.acompteInput}
+              />
+            </View>
+            <Pressable
+              testID="stripe-deposit"
+              disabled={paying}
+              onPress={() => { const a = parseFloat((caution || "0").replace(",", ".")) || 0; if (a > 0) onCheckout("deposit", a); }}
+              style={[styles.acompteBtn, { backgroundColor: "#635BFF" }]}
+            >
+              <Ionicons name="card" size={18} color="#fff" />
+            </Pressable>
+          </View>
+        )}
+      </View>
 
       {/* Acomptes / paiements partiels */}
       <View style={styles.finCard}>
@@ -451,6 +602,10 @@ const styles = StyleSheet.create({
   paidBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingVertical: 12, marginBottom: spacing.md },
   paidBtnOn: { backgroundColor: "#30D158" },
   paidBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  stripeBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: "#635BFF", borderRadius: radius.md, paddingVertical: 13, marginBottom: spacing.md },
+  stripeBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: "#fff" },
+  payMsg: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
+  payMsgText: { flex: 1, fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
   acompteRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 6 },
   acompteVal: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
   acompteDate: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, flex: 1 },

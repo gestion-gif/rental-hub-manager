@@ -33,7 +33,7 @@ export default function OwnerDetail() {
   if (loading) return <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>;
   if (!data) return <View style={styles.center}><Text>Introuvable</Text></View>;
 
-  const { owner, properties, revenue_total, reservations_count, nights_total, per_month } = data;
+  const { owner, properties, revenue_total, reservations_count, nights_total, per_month, per_property } = data;
   const maxRev = Math.max(1, ...per_month.map((m: any) => m.revenue));
   const recent = per_month.slice(-6);
 
@@ -78,6 +78,37 @@ export default function OwnerDetail() {
               </View>
             ))}
           </View>
+        )}
+
+        <Text style={styles.sectionTitle}>Revenus par logement</Text>
+        {!per_property || per_property.length === 0 ? (
+          <Text style={styles.empty}>Aucun logement associé.</Text>
+        ) : (
+          per_property.map((pp: any) => {
+            const mx = Math.max(1, ...pp.per_month.map((m: any) => m.revenue));
+            return (
+              <View key={pp.id} style={styles.ppCard}>
+                <View style={styles.ppHead}>
+                  <Text style={styles.ppName} numberOfLines={1}>{pp.name}</Text>
+                  <Text style={styles.ppRev}>{pp.revenue_total} €</Text>
+                </View>
+                <Text style={styles.ppSub}>{pp.nights_total} nuitées</Text>
+                {pp.per_month.length === 0 ? (
+                  <Text style={styles.ppSub}>Aucun revenu.</Text>
+                ) : (
+                  pp.per_month.slice(-6).map((m: any) => (
+                    <View key={m.month} style={styles.ppMonthRow}>
+                      <Text style={styles.ppMonthLabel}>{dayjs(m.month + "-01").format("MMM YY")}</Text>
+                      <View style={styles.ppBarTrack}>
+                        <View style={[styles.ppBarFill, { width: `${Math.round((m.revenue / mx) * 100)}%` }]} />
+                      </View>
+                      <Text style={styles.ppMonthVal}>{m.revenue} €</Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            );
+          })
         )}
 
         <Text style={styles.sectionTitle}>Logements ({properties.length})</Text>
@@ -129,4 +160,14 @@ const styles = StyleSheet.create({
   barLabel: { fontFamily: font.medium, fontSize: 11, color: colors.onSurfaceTertiary, marginTop: 6 },
   propRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.lg, marginBottom: spacing.sm },
   propName: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, flex: 1 },
+  ppCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.sm },
+  ppHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  ppName: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, flex: 1 },
+  ppRev: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.brandPrimary },
+  ppSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2, marginBottom: spacing.sm },
+  ppMonthRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: 6 },
+  ppMonthLabel: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary, width: 58 },
+  ppBarTrack: { flex: 1, height: 8, backgroundColor: colors.surfaceSecondary, borderRadius: 4, overflow: "hidden" },
+  ppBarFill: { height: "100%", backgroundColor: colors.brandPrimary, borderRadius: 4, minWidth: 2 },
+  ppMonthVal: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurface, width: 62, textAlign: "right" },
 });

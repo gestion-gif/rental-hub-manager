@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { GestureDetector, Gesture } from "react-native-gesture-handler";
+import { runOnJS } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import dayjs from "dayjs";
@@ -20,6 +22,7 @@ import StatusBadge, { tint } from "@/src/components/StatusBadge";
 import { INTERVENTION_TYPES, getInterventionType } from "@/src/interventionTypes";
 import { InterventionIcon } from "@/src/components/InterventionIcon";
 import { PlatformLogo } from "@/src/components/PlatformLogo";
+import { PropertyPicker } from "@/src/components/PropertyPicker";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 dayjs.locale("fr");
@@ -122,18 +125,9 @@ export default function Planning() {
           ))}
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-          <PropChip label="Tous" active={selectedProp === "all"} onPress={() => setSelectedProp("all")} testID="prop-chip-all" />
-          {props.map((p) => (
-            <PropChip
-              key={p.id}
-              label={p.name}
-              active={selectedProp === p.id}
-              onPress={() => setSelectedProp(p.id)}
-              testID={`prop-chip-${p.id}`}
-            />
-          ))}
-        </ScrollView>
+        <View style={styles.pickerWrap}>
+          <PropertyPicker value={selectedProp} items={props} onSelect={setSelectedProp} testID="planning-prop-picker" />
+        </View>
 
         <View style={styles.monthNav}>
           <View style={styles.navGroup}>
@@ -178,6 +172,8 @@ export default function Planning() {
           todayStr={todayStr}
           onBar={(id: string) => router.push(`/reservation-form?id=${id}`)}
           onIv={(id: string) => router.push(`/intervention-form?id=${id}`)}
+          onCreate={(pid: string, ci: string, co: string) =>
+            router.push(`/reservation-form?property=${pid}&check_in=${ci}&check_out=${co}`)}
           bottomPad={insets.bottom + 90}
         />
       ) : (
@@ -215,23 +211,37 @@ export default function Planning() {
   );
 }
 
-function PropChip({ label, active, onPress, testID }: any) {
-  return (
-    <Pressable
-      testID={testID}
-      onPress={onPress}
-      style={[styles.chip, active && styles.chipActive]}
-    >
-      <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
+function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, onBar, onIv, onCreate, bottomPad }: any) {
+  const [sel, setSel] = useState<{ propId: string; a: number; b: number } | null>(null);
+  const dragRef = useRef<{ propId: string; a: number; b: number } | null>(null);
 
-function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, onBar, onIv, bottomPad }: any) {
+  const jsBegin = (propId: string, idx: number) => {
+    dragRef.current = { propId, a: idx, b: idx };
+    setSel(dragRef.current);
+  };
+  const jsUpdate = (idx: number) => {
+    if (!dragRef.current) return;
+    dragRef.current = { ...dragRef.current, b: idx };
+    setSel({ ...dragRef.current });
+  };
+  const jsEnd = () => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    setSel(null);
+    if (!d) return;
+    const lo = Math.min(d.a, d.b);
+    const hi = Math.max(d.a, d.b);
+    const ci = days[lo].format("YYYY-MM-DD");
+    const co = days[hi].add(1, "day").format("YYYY-MM-DD");
+    onCreate(d.propId, ci, co);
+  };
+
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: bottomPad }} showsVerticalScrollIndicator={false}>
+      <View style={styles.dragHint}>
+        <Ionicons name="hand-left-outline" size={13} color={colors.onSurfaceTertiary} />
+        <Text style={styles.dragHintText}>Maintenez puis glissez sur une ligne pour créer une réservation</Text>
+      </View>
       <View style={{ flexDirection: "row" }}>
         {/* Left fixed column */}
         <View style={{ width: LEFT_W }}>
@@ -262,8 +272,22 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
             {rows.map((p: any) => {
               const rowRes = filtered.filter((r: any) => r.property_id === p.id);
               const rowIvs = interventions.filter((iv: any) => iv.property_id === p.id);
+              const pan = Gesture.Pan()
+                .activateAfterLongPress(220)
+                .onBegin((e) => {
+                  const idx = Math.max(0, Math.min(daysInMonth - 1, Math.floor(e.x / DAY_W)));
+                  runOnJS(jsBegin)(p.id, idx);
+                })
+                .onUpdate((e) => {
+                  const idx = Math.max(0, Math.min(daysInMonth - 1, Math.floor(e.x / DAY_W)));
+                  runOnJS(jsUpdate)(idx);
+                })
+                .onEnd(() => {
+                  runOnJS(jsEnd)();
+                });
               return (
-                <View key={p.id} style={{ width: daysInMonth * DAY_W, height: ROW_H }}>
+                <GestureDetector key={p.id} gesture={pan}>
+                  <View style={{ width: daysInMonth * DAY_W, height: ROW_H }}>
                   {/* background cells */}
                   <View style={{ flexDirection: "row" }}>
                     {days.map((d: any) => {
@@ -277,6 +301,19 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                       );
                     })}
                   </View>
+                  {/* drag selection overlay */}
+                  {sel && sel.propId === p.id && (
+                    <View
+                      pointerEvents="none"
+                      style={[
+                        styles.selBar,
+                        {
+                          left: Math.min(sel.a, sel.b) * DAY_W,
+                          width: (Math.abs(sel.b - sel.a) + 1) * DAY_W,
+                        },
+                      ]}
+                    />
+                  )}
                   {/* bars */}
                   {rowRes.map((r: any) => {
                     const ci = dayjs(r.check_in);
@@ -324,7 +361,8 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                       </Pressable>
                     );
                   })}
-                </View>
+                  </View>
+                </GestureDetector>
               );
             })}
           </View>
@@ -484,6 +522,7 @@ const styles = StyleSheet.create({
   segText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
   segTextActive: { color: colors.onSurface, fontFamily: font.semibold },
   chipRow: { gap: spacing.sm, paddingRight: spacing.lg, alignItems: "center", height: 44 },
+  pickerWrap: { marginBottom: spacing.sm },
   chip: {
     height: 34, flexShrink: 0, maxWidth: 160, paddingHorizontal: spacing.md, borderRadius: radius.pill,
     backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center",
@@ -518,6 +557,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5, flexDirection: "row", alignItems: "center", gap: 4,
   },
   barText: { fontFamily: font.semibold, fontSize: 12, color: "#fff", flexShrink: 1 },
+  dragHint: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: 2 },
+  dragHintText: { fontFamily: font.regular, fontSize: 11, color: colors.onSurfaceTertiary },
+  selBar: { position: "absolute", top: 6, bottom: 6, borderRadius: 7, backgroundColor: "rgba(10,132,255,0.22)", borderWidth: 1.5, borderColor: "#0A84FF" },
   legend: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md, padding: spacing.lg },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   legendDot: { width: 10, height: 10, borderRadius: 999 },

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -26,6 +26,7 @@ export default function Properties() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [sortAZ, setSortAZ] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -37,6 +38,11 @@ export default function Properties() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  const displayed = useMemo(
+    () => (sortAZ ? [...items].sort((a, b) => (a.name || "").localeCompare(b.name || "", "fr")) : items),
+    [items, sortAZ],
+  );
+
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
@@ -44,21 +50,26 @@ export default function Properties() {
           <MenuButton />
           <Text style={styles.title}>Logements</Text>
         </View>
-        <Pressable testID="channel-manager-btn" onPress={() => router.push("/channel-manager")} style={styles.cmBtn}>
-          <Ionicons name="git-network-outline" size={16} color={colors.onSurface} />
-          <Text style={styles.cmBtnText}>Channel Manager</Text>
-        </Pressable>
+        <View style={styles.headerRight}>
+          <Pressable testID="sort-az" onPress={() => setSortAZ((v) => !v)} style={[styles.sortBtn, sortAZ && styles.sortBtnOn]}>
+            <Ionicons name="swap-vertical" size={15} color={sortAZ ? colors.onBrandPrimary : colors.onSurface} />
+            <Text style={[styles.sortBtnText, sortAZ && { color: colors.onBrandPrimary }]}>A→Z</Text>
+          </Pressable>
+          <Pressable testID="channel-manager-btn" onPress={() => router.push("/channel-manager")} style={styles.cmBtn}>
+            <Ionicons name="git-network-outline" size={16} color={colors.onSurface} />
+          </Pressable>
+        </View>
       </View>
       {loading ? (
         <ActivityIndicator style={{ marginTop: 60 }} color={colors.brandPrimary} />
       ) : (
         <FlatList
           testID="properties-list"
-          data={items}
+          data={displayed}
           keyExtractor={(i) => i.id}
-          numColumns={2}
-          columnWrapperStyle={{ gap: spacing.md }}
-          contentContainerStyle={{ padding: spacing.lg, paddingBottom: 40, gap: spacing.md }}
+          numColumns={5}
+          columnWrapperStyle={{ gap: spacing.sm }}
+          contentContainerStyle={{ padding: spacing.md, paddingBottom: 40, gap: spacing.sm }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -83,22 +94,7 @@ export default function Properties() {
                 style={styles.image}
                 contentFit="cover"
               />
-              <View style={styles.cardBody}>
-                <Text style={styles.propName} numberOfLines={1}>{item.name}</Text>
-                {!!item.location && (
-                  <View style={styles.locRow}>
-                    <Ionicons name="location-outline" size={12} color={colors.onSurfaceTertiary} />
-                    <Text style={styles.loc} numberOfLines={1}>{item.location}</Text>
-                  </View>
-                )}
-                <View style={styles.metaRow}>
-                  <Text style={styles.price}>{item.base_price} €</Text>
-                  <View style={styles.metaPill}>
-                    <Ionicons name="people-outline" size={12} color={colors.onSurfaceSecondary} />
-                    <Text style={styles.metaText}>{item.capacity}</Text>
-                  </View>
-                </View>
-              </View>
+              <Text style={styles.propName} numberOfLines={2}>{item.name}</Text>
             </Pressable>
           )}
         />
@@ -127,34 +123,31 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   title: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface },
+  sortBtn: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill },
+  sortBtnOn: { backgroundColor: colors.brandPrimary },
+  sortBtnText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurface },
   cmBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
     backgroundColor: colors.surfaceSecondary,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
+    padding: 9,
     borderRadius: radius.pill,
   },
   cmBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
   card: {
     flex: 1,
-    borderRadius: radius.lg,
+    maxWidth: "20%",
+    borderRadius: radius.md,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     overflow: "hidden",
   },
   image: { width: "100%", aspectRatio: 1 },
-  cardBody: { padding: spacing.md },
-  propName: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
-  locRow: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2 },
-  loc: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, flex: 1 },
-  metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.sm },
-  price: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
-  metaPill: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: colors.surfaceSecondary, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.sm },
-  metaText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  propName: { fontFamily: font.semibold, fontSize: 10, lineHeight: 12, color: colors.onSurface, paddingHorizontal: 3, paddingVertical: 4, textAlign: "center" },
   empty: { alignItems: "center", marginTop: 80, gap: spacing.sm },
   emptyText: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface },
   emptySub: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary },

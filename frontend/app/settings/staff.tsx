@@ -16,7 +16,7 @@ export default function StaffScreen() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const [form, setForm] = useState({ name: "", role: "", phone: "" });
+  const [form, setForm] = useState({ name: "", role: "", phone: "", email: "" });
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -25,8 +25,8 @@ export default function StaffScreen() {
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  function openNew() { setEditing(null); setForm({ name: "", role: "", phone: "" }); setModal(true); }
-  function openEdit(s: any) { setEditing(s); setForm({ name: s.name, role: s.role || "", phone: s.phone || "" }); setModal(true); }
+  function openNew() { setEditing(null); setForm({ name: "", role: "", phone: "", email: "" }); setModal(true); }
+  function openEdit(s: any) { setEditing(s); setForm({ name: s.name, role: s.role || "", phone: s.phone || "", email: s.email || "" }); setModal(true); }
 
   async function save() {
     if (!form.name.trim() || saving) return;
@@ -64,7 +64,7 @@ export default function StaffScreen() {
               <View style={styles.avatar}><Ionicons name="person" size={18} color={colors.onSurfaceSecondary} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowTitle}>{item.name}</Text>
-                {!!(item.role || item.phone) && <Text style={styles.rowSub}>{[item.role, item.phone].filter(Boolean).join(" · ")}</Text>}
+                {!!(item.role || item.phone || item.email) && <Text style={styles.rowSub}>{[item.role, item.phone, item.email].filter(Boolean).join(" · ")}</Text>}
               </View>
               <Pressable testID={`del-staff-${item.id}`} onPress={() => remove(item.id)} style={styles.trash}>
                 <Ionicons name="trash-outline" size={18} color={colors.error} />
@@ -89,6 +89,7 @@ export default function StaffScreen() {
               <Field label="Nom" testID="staff-name" value={form.name} onChangeText={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="Ex: Martine / Société Clean" />
               <Field label="Rôle (optionnel)" testID="staff-role" value={form.role} onChangeText={(v) => setForm((f) => ({ ...f, role: v }))} placeholder="Ménage, Technique, Jardinier..." />
               <Field label="Téléphone (optionnel)" testID="staff-phone" value={form.phone} onChangeText={(v) => setForm((f) => ({ ...f, phone: v }))} placeholder="06 12 34 56 78" keyboardType="phone-pad" />
+              <Field label="Email (optionnel)" testID="staff-email" value={form.email} onChangeText={(v) => setForm((f) => ({ ...f, email: v }))} placeholder="intervenant@email.com" keyboardType="email-address" autoCapitalize="none" />
               <PrimaryButton testID="save-staff" label={editing ? "Enregistrer" : "Ajouter"} onPress={save} loading={saving} disabled={!form.name.trim()} />
             </KeyboardAwareScrollView>
           </View>

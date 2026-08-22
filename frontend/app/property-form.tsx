@@ -34,6 +34,7 @@ export default function PropertyForm() {
     city: "",
     address_complement: "",
     description: "",
+    welcome_book_url: "",
   });
   const [rooms, setRooms] = useState<string[]>([]);
   const [amenities, setAmenities] = useState<string[]>([]);
@@ -64,6 +65,7 @@ export default function PropertyForm() {
           city: p.city || "",
           address_complement: p.address_complement || "",
           description: p.description || "",
+          welcome_book_url: p.welcome_book_url || "",
         });
         setRooms(p.rooms || []);
         setAmenities(p.amenities || []);
@@ -96,6 +98,7 @@ export default function PropertyForm() {
       city: form.city.trim(),
       address_complement: form.address_complement.trim(),
       description: form.description.trim(),
+      welcome_book_url: form.welcome_book_url.trim(),
       rooms,
       amenities,
       seasons: existing.current.seasons || [],
@@ -203,6 +206,17 @@ export default function PropertyForm() {
           placeholder="Décrivez le logement, l'ambiance, les points forts..."
           multiline
           style={styles.textarea}
+        />
+
+        <SectionLabel text="Livret d'accueil" />
+        <Field
+          label="Lien du livret d'accueil (envoyé aux voyageurs)"
+          testID="prop-welcome-book"
+          value={form.welcome_book_url}
+          onChangeText={(v) => set("welcome_book_url", v)}
+          placeholder="https://..."
+          autoCapitalize="none"
+          keyboardType="url"
         />
 
         <SectionLabel text="Pièces de l'hébergement" />

@@ -283,3 +283,46 @@ frontend:
 agent_communication:
     -agent: "main"
     -message: "Iteration 10. Tester UNIQUEMENT backend. Créer user+session de TEST (user_id isolé, ex test_iter10) dans users/user_sessions, header Bearer. TESTS: 1) Insérer une réservation de test (source='lodgify', finance={total:500,_lodgify_paid:0,paid:0,due:500}, check_in/out futurs) puis PATCH /api/reservations/{id}/paid {paid:true} -> finance.paid=500, due=0, markers contient 'paid'; {paid:false} -> due=500, paid=0, plus de 'paid'. 2) POST /api/reservations/{id}/payments {amount:200} -> finance.paid=200, due=300, pas encore 'paid'; ajouter {amount:300} -> paid=500,due=0,marker 'paid'; DELETE un acompte -> recalcul. 3) Insérer intervention kind='menage' date passée + date future, GET /api/interventions -> la passée disparait, la future reste. 4) GET /api/reservations renvoie display_status/display_color. NE PAS tester envoi message Lodgify ni /channel/sync (données réelles)."
+
+## Iteration 11 — Stripe (paiement + caution), Analytics revenus/occupation, Commissions, finance manuelle
+backend:
+  - task: "Commissions configurables (preferences.commission_rates) + PATCH commission réservation"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "GET/PUT /api/preferences étendu avec commission_rates (défauts Airbnb 15.5, Booking 15, Vrbo 8). PUT partiel: envoyer commission_rates seul ne réinitialise PAS les statuts. PATCH /api/reservations/{id}/commission {amount} -> finance.commission. Auto-testé curl OK."
+  - task: "Stripe checkout (Emergent managed) paiement + caution"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "POST /api/reservations/{id}/checkout {kind:payment|deposit, amount?, origin_url} -> {url, session_id} via emergentintegrations.payments.stripe.checkout. Montant serveur (payment=due, deposit=amount). amount<=0 -> 400. GET /api/checkout/status/{session_id} -> {status, payment_status, kind, amount}; 404 si inconnu; applique le paiement (acompte ou caution) de façon idempotente si payment_status=paid. Auto-testé création session (cs_test_...) OK. NE PAS compléter un vrai paiement carte (non automatisable)."
+  - task: "Analytics revenus & occupation par logement/mois"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "GET /api/analytics/revenue?year=YYYY -> {year, properties:[{id,name,monthly:[{month,revenue,nights,occupancy}]x12,total_revenue,avg_occupancy}], totals:{monthly,total_revenue,avg_occupancy}}. Revenu réparti au prorata des nuits par mois; occupation = nuits/jours_du_mois. Auto-testé OK."
+  - task: "Finance sur réservations manuelles (create/update)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: true
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "POST /api/reservations initialise finance={total,paid:0,due:total,currency:EUR} + payments:[]. PUT /api/reservations (source!=lodgify) resynchronise finance.total depuis total_price et recalcule due."
+
+agent_communication:
+    -agent: "main"
+    -message: "Iteration 11. Tester UNIQUEMENT le backend (frontend = Google OAuth non automatisable). Auth: insérer users + user_sessions (user_id de TEST isolé ex test_iter11) dans Mongo, header Authorization: Bearer <token>. À TESTER: 1) POST /api/reservations (manuelle) -> finance présente (total=due=total_price, paid=0). PUT en changeant total_price -> finance.total et due mis à jour. 2) PATCH /api/reservations/{id}/commission {amount:50} -> finance.commission=50. 3) GET/PUT /api/preferences avec commission_rates (PUT partiel commission_rates ne doit pas effacer statuses). 4) POST /api/reservations/{id}/checkout kind=payment (sans amount -> prend finance.due) et kind=deposit {amount:300, origin_url:'https://x'} -> renvoie url+session_id; amount invalide (deposit amount 0) -> 400. GET /api/checkout/status/{session_id} -> renvoie payment_status (unpaid/open attendu car pas de vrai paiement); session_id inconnu -> 404. NE PAS compléter un paiement carte réel. 5) GET /api/analytics/revenue?year=2026 avec 1 logement + 2 réservations -> structure properties/totals correcte, revenu réparti par mois. NE PAS tester /channel/sync ni l'envoi de messages Lodgify (données réelles)."

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Header
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Header, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -17,6 +17,7 @@ from datetime import datetime, timezone, timedelta, date
 
 import httpx
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -27,6 +28,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
+STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY')
 EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 
 app = FastAPI()
@@ -78,6 +80,7 @@ class PropertyIn(BaseModel):
     amenities: List[str] = []
     seasons: List[Season] = []
     ical_links: List[IcalLink] = []
+    welcome_book_url: str = ""
     lodgify_id: Optional[str] = None
     owner_id: Optional[str] = None
 
@@ -368,6 +371,9 @@ async def create_reservation(payload: ReservationIn, user=Depends(get_current_us
     doc["id"] = str(uuid.uuid4())
     doc["user_id"] = user["user_id"]
     doc["created_at"] = now_utc().isoformat()
+    total = float(doc.get("total_price") or 0)
+    doc["finance"] = {"total": total, "paid": 0.0, "due": total, "currency": "EUR"}
+    doc["payments"] = []
     await db.reservations.insert_one(doc)
     doc.pop("_id", None)
     await ensure_cleaning(user["user_id"], doc["property_id"], doc.get("check_out"), doc.get("status"))
@@ -383,6 +389,16 @@ async def update_reservation(reservation_id: str, payload: ReservationIn, user=D
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Reservation not found")
     item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    # Réservations manuelles : garder finance.total aligné sur le prix total
+    if item.get("source") != "lodgify":
+        fin = dict(item.get("finance") or {})
+        fin["total"] = float(item.get("total_price") or 0)
+        item["finance"] = fin
+        recompute_payment(item)
+        await db.reservations.update_one(
+            {"id": reservation_id, "user_id": user["user_id"]},
+            {"$set": {"finance": item["finance"]}})
+        item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     await ensure_cleaning(user["user_id"], item["property_id"], item.get("check_out"), item.get("status"))
     return item
 
@@ -509,6 +525,148 @@ async def set_commission(reservation_id: str, body: dict, user=Depends(get_curre
 async def delete_reservation(reservation_id: str, user=Depends(get_current_user)):
     await db.reservations.delete_one({"id": reservation_id, "user_id": user["user_id"]})
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Stripe payments (encaissement direct voyageur + caution) — Emergent managed
+# ---------------------------------------------------------------------------
+class CheckoutIn(BaseModel):
+    kind: str = "payment"          # "payment" (acompte/solde) | "deposit" (caution)
+    amount: Optional[float] = None
+    origin_url: str
+
+
+def stripe_client() -> StripeCheckout:
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=500, detail="Stripe non configuré")
+    return StripeCheckout(api_key=STRIPE_API_KEY)
+
+
+@api_router.post("/reservations/{reservation_id}/checkout")
+async def create_checkout(reservation_id: str, payload: CheckoutIn, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    fin = r.get("finance") or {}
+    # Montant défini côté serveur, jamais fourni librement par le client
+    if payload.kind == "deposit":
+        amount = float(payload.amount or 0)
+        label = "Caution"
+    else:
+        due = float(fin.get("due") or 0)
+        total = float(fin.get("total") or r.get("total_price") or 0)
+        default_amount = due if due > 0 else total
+        amount = float(payload.amount) if payload.amount else default_amount
+        label = "Paiement réservation"
+    amount = round(amount, 2)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Montant invalide")
+
+    currency = (fin.get("currency") or "EUR").lower()
+    origin = payload.origin_url.rstrip("/")
+    success_url = f"{origin}/reservation-form?id={reservation_id}&stripe=success"
+    cancel_url = f"{origin}/reservation-form?id={reservation_id}&stripe=cancel"
+
+    client = stripe_client()
+    req = CheckoutSessionRequest(
+        amount=amount,
+        currency=currency,
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata={"reservation_id": reservation_id, "user_id": uid, "kind": payload.kind},
+    )
+    session = await client.create_checkout_session(req)
+
+    await db.payment_transactions.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": uid,
+        "reservation_id": reservation_id,
+        "kind": payload.kind,
+        "session_id": session.session_id,
+        "amount": amount,
+        "currency": currency,
+        "label": label,
+        "payment_status": "initiated",
+        "status": "open",
+        "processed": False,
+        "created_at": now_utc().isoformat(),
+    })
+    return {"url": session.url, "session_id": session.session_id}
+
+
+async def _apply_stripe_payment(tx: dict):
+    """Enregistre l'effet d'un paiement Stripe réussi sur la réservation (idempotent)."""
+    if tx.get("processed"):
+        return
+    uid = tx["user_id"]
+    rid = tx["reservation_id"]
+    r = await db.reservations.find_one({"id": rid, "user_id": uid}, {"_id": 0})
+    if not r:
+        return
+    if tx["kind"] == "deposit":
+        fin = dict(r.get("finance") or {})
+        fin["deposit_collected"] = True
+        fin["deposit_amount"] = tx["amount"]
+        await db.reservations.update_one({"id": rid, "user_id": uid}, {"$set": {"finance": fin}})
+    else:
+        payments = r.get("payments") or []
+        payments.append({
+            "id": str(uuid.uuid4()),
+            "amount": round(float(tx["amount"]), 2),
+            "date": date.today().isoformat(),
+            "note": "Paiement Stripe",
+            "stripe_session": tx["session_id"],
+        })
+        r["payments"] = payments
+        fully = recompute_payment(r)
+        markers = set(r.get("markers") or [])
+        if fully or r.get("paid_manual"):
+            markers.add("paid")
+        tmap = {t["marker_key"]: t for t in await get_templates(uid)}
+        await db.reservations.update_one(
+            {"id": rid, "user_id": uid},
+            {"$set": {"payments": payments, "finance": r["finance"], "markers": list(markers),
+                      "marker_color": marker_color_for(list(markers), tmap)}})
+    await db.payment_transactions.update_one(
+        {"session_id": tx["session_id"]},
+        {"$set": {"processed": True, "payment_status": "paid", "status": "complete"}})
+
+
+@api_router.get("/checkout/status/{session_id}")
+async def checkout_status(session_id: str, user=Depends(get_current_user)):
+    tx = await db.payment_transactions.find_one({"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction inconnue")
+    client = stripe_client()
+    st = await client.get_checkout_status(session_id)
+    await db.payment_transactions.update_one(
+        {"session_id": session_id}, {"$set": {"payment_status": st.payment_status, "status": st.status}})
+    if st.payment_status == "paid" and not tx.get("processed"):
+        await _apply_stripe_payment(tx)
+    return {
+        "kind": tx["kind"],
+        "amount": tx["amount"],
+        "status": st.status,
+        "payment_status": st.payment_status,
+    }
+
+
+@api_router.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    body = await request.body()
+    sig = request.headers.get("Stripe-Signature")
+    client = stripe_client()
+    try:
+        event = await client.handle_webhook(body, sig)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Webhook invalide")
+    sid = getattr(event, "session_id", None)
+    if event.payment_status == "paid" and sid:
+        tx = await db.payment_transactions.find_one({"session_id": sid}, {"_id": 0})
+        if tx and not tx.get("processed"):
+            await _apply_stripe_payment(tx)
+    return {"received": True}
 
 
 # ---------------------------------------------------------------------------
@@ -825,6 +983,83 @@ async def dashboard(user=Depends(get_current_user)):
         "arrivals_today": arrivals_today,
         "departures_today": departures_today,
         "interventions": upcoming_interventions,
+    }
+
+
+@api_router.get("/analytics/revenue")
+async def analytics_revenue(year: Optional[int] = None, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    y = year or date.today().year
+    props = await db.properties.find({"user_id": uid}, {"_id": 0}).to_list(500)
+    reservations = await db.reservations.find(
+        {"user_id": uid, "status": {"$ne": "annulee"}}, {"_id": 0}).to_list(5000)
+
+    def parse(d):
+        try:
+            return date.fromisoformat(d)
+        except Exception:
+            return None
+
+    # Structure: per property → 12 mois {revenue, nights}
+    per_prop = {p["id"]: {"revenue": [0.0] * 12, "nights": [0] * 12} for p in props}
+    for r in reservations:
+        pid = r.get("property_id")
+        if pid not in per_prop:
+            continue
+        ci, co = parse(r.get("check_in")), parse(r.get("check_out"))
+        if not ci or not co or co <= ci:
+            continue
+        total_nights = (co - ci).days
+        fin = r.get("finance") or {}
+        price = float(fin.get("total") or r.get("total_price") or 0)
+        # Répartir les nuits (et le revenu au prorata) sur chaque mois de l'année demandée
+        cur = ci
+        while cur < co:
+            if cur.year == y:
+                m = cur.month - 1
+                per_prop[pid]["nights"][m] += 1
+                if total_nights > 0:
+                    per_prop[pid]["revenue"][m] += price / total_nights
+            cur = cur + timedelta(days=1)
+
+    out_props = []
+    totals_rev = [0.0] * 12
+    totals_nights = [0] * 12
+    days_per_month = [pycalendar.monthrange(y, m)[1] for m in range(1, 13)]
+    for p in props:
+        d = per_prop[p["id"]]
+        monthly = []
+        for m in range(12):
+            rev = round(d["revenue"][m])
+            nights = d["nights"][m]
+            occ = round(min(nights / days_per_month[m] * 100, 100)) if days_per_month[m] else 0
+            monthly.append({"month": m + 1, "revenue": rev, "nights": nights, "occupancy": occ})
+            totals_rev[m] += d["revenue"][m]
+            totals_nights[m] += nights
+        total_rev = round(sum(d["revenue"]))
+        total_nights_p = sum(d["nights"])
+        avg_occ = round(min(total_nights_p / sum(days_per_month) * 100, 100)) if props else 0
+        out_props.append({
+            "id": p["id"], "name": p.get("name", "Logement"),
+            "monthly": monthly, "total_revenue": total_rev, "avg_occupancy": avg_occ,
+        })
+
+    n_props = max(len(props), 1)
+    totals_monthly = []
+    for m in range(12):
+        occ = round(min(totals_nights[m] / (days_per_month[m] * n_props) * 100, 100)) if days_per_month[m] else 0
+        totals_monthly.append({"month": m + 1, "revenue": round(totals_rev[m]), "nights": totals_nights[m], "occupancy": occ})
+    total_rev_all = round(sum(totals_rev))
+    avg_occ_all = round(min(sum(totals_nights) / (sum(days_per_month) * n_props) * 100, 100))
+
+    return {
+        "year": y,
+        "properties": out_props,
+        "totals": {
+            "monthly": totals_monthly,
+            "total_revenue": total_rev_all,
+            "avg_occupancy": avg_occ_all,
+        },
     }
 
 
@@ -1496,6 +1731,7 @@ class StaffIn(BaseModel):
     name: str
     role: str = ""
     phone: str = ""
+    email: str = ""
 
 
 @api_router.get("/staff")
@@ -1603,19 +1839,39 @@ async def owner_summary(owner_id: str, user=Depends(get_current_user)):
     revenue_total = 0.0
     per_month = {}
     nights_total = 0
+    prop_name = {p["id"]: p.get("name", "Logement") for p in props}
+    pp = {p["id"]: {"id": p["id"], "name": p.get("name", "Logement"), "revenue": 0.0, "nights": 0, "months": {}} for p in props}
     for r in reservations:
         if r.get("status") == "annulee":
             continue
         ci = parse(r.get("check_in"))
         co = parse(r.get("check_out"))
-        price = float(r.get("total_price", 0) or 0)
+        fin = r.get("finance") or {}
+        price = float(fin.get("total") or r.get("total_price", 0) or 0)
         revenue_total += price
+        pid = r.get("property_id")
         if ci:
             key = f"{ci.year}-{ci.month:02d}"
             per_month[key] = per_month.get(key, 0) + price
+            if pid in pp:
+                pp[pid]["months"][key] = pp[pid]["months"].get(key, 0) + price
+        if pid in pp:
+            pp[pid]["revenue"] += price
         if ci and co and co > ci:
-            nights_total += (co - ci).days
+            n = (co - ci).days
+            nights_total += n
+            if pid in pp:
+                pp[pid]["nights"] += n
     months_sorted = sorted(per_month.items())
+    per_property = [
+        {
+            "id": v["id"], "name": v["name"],
+            "revenue_total": round(v["revenue"]), "nights_total": v["nights"],
+            "per_month": [{"month": k, "revenue": round(rv)} for k, rv in sorted(v["months"].items())],
+        }
+        for v in pp.values()
+    ]
+    per_property.sort(key=lambda x: -x["revenue_total"])
     return {
         "owner": owner,
         "properties": props,
@@ -1623,6 +1879,7 @@ async def owner_summary(owner_id: str, user=Depends(get_current_user)):
         "reservations_count": len([r for r in reservations if r.get("status") != "annulee"]),
         "nights_total": nights_total,
         "per_month": [{"month": k, "revenue": round(v)} for k, v in months_sorted],
+        "per_property": per_property,
     }
 
 
