@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Header, Request
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Header, Request, Body
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -1277,8 +1277,11 @@ async def ai_pricing(payload: PricingRequest, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Property not found")
     system = (
         "Tu es un expert en tarification (revenue management) de locations saisonnières. "
-        "Tu donnes des recommandations de prix concrètes et concises en français, "
-        "avec des fourchettes de prix par nuit et un raisonnement bref (saisonnalité, week-ends, événements)."
+        "Tu réponds STRICTEMENT en JSON valide (aucun texte hors JSON), au format : "
+        '{"advice": "conseils en français, 3-4 puces max", '
+        '"season": {"name": "nom court de la saison", "start_date": "YYYY-MM-DD", '
+        '"end_date": "YYYY-MM-DD", "price": nombre_en_euros_par_nuit}}. '
+        "La saison correspond à la période demandée avec un prix/nuit recommandé concret."
     )
     chat = make_chat(system, f"pricing_{user['user_id']}")
     period = payload.period or "les prochaines semaines"
@@ -1292,11 +1295,37 @@ async def ai_pricing(payload: PricingRequest, user=Depends(get_current_user)):
         f"Logement: {prop.get('name')} à {prop.get('location')}, {prop.get('bedrooms')} chambres, "
         f"capacité {prop.get('capacity')}. Prix de base actuel: {prop.get('base_price')}€/nuit.\n"
         f"{seasons_txt}"
-        f"Donne une recommandation de tarification pour {period}. "
-        f"Sois concret avec des chiffres et 3-4 conseils maximum."
+        f"Donne une recommandation de tarification pour {period} (année {date.today().year} ou suivante)."
     )
-    suggestion = await chat.send_message(UserMessage(text=prompt))
-    return {"suggestion": suggestion}
+    raw = await chat.send_message(UserMessage(text=prompt))
+    advice, season = _parse_pricing_json(raw)
+    return {"suggestion": advice, "season": season}
+
+
+def _parse_pricing_json(raw: str):
+    """Extrait advice + season d'une réponse LLM (tolère les fences ```json)."""
+    txt = (raw or "").strip()
+    if txt.startswith("```"):
+        txt = re.sub(r"^```(?:json)?\s*", "", txt)
+        txt = re.sub(r"\s*```$", "", txt).strip()
+    try:
+        data = json.loads(txt)
+    except Exception:
+        return raw, None
+    advice = data.get("advice") or ""
+    s = data.get("season") or {}
+    season = None
+    try:
+        if s and s.get("start_date") and s.get("end_date"):
+            season = {
+                "name": str(s.get("name") or "Saison recommandée"),
+                "start_date": str(s.get("start_date")),
+                "end_date": str(s.get("end_date")),
+                "price": round(float(s.get("price") or 0), 2),
+            }
+    except Exception:
+        season = None
+    return advice, season
 
 
 # ---------------------------------------------------------------------------
@@ -1307,6 +1336,12 @@ class PreferencesIn(BaseModel):
     statuses: Optional[list] = None
     commission_rates: Optional[dict] = None
     payment_methods: Optional[dict] = None
+    ai_auto_draft: Optional[bool] = None
+
+
+async def _ai_auto_draft_enabled(uid: str) -> bool:
+    doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
+    return bool((doc or {}).get("ai_auto_draft", True))
 
 
 @api_router.get("/preferences")
@@ -1318,6 +1353,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "status_colors": {s["key"]: s["color"] for s in statuses},
         "commission_rates": _build_commission_rates(doc),
         "payment_methods": _build_payment_methods(doc),
+        "ai_auto_draft": bool((doc or {}).get("ai_auto_draft", True)),
     }
 
 
@@ -1366,6 +1402,9 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
                 pm[k] = bool(payload.payment_methods[k])
         set_doc["payment_methods"] = {**DEFAULT_PAYMENT_METHODS, **pm}
 
+    if payload.ai_auto_draft is not None:
+        set_doc["ai_auto_draft"] = bool(payload.ai_auto_draft)
+
     await db.preferences.update_one({"user_id": uid}, {"$set": set_doc}, upsert=True)
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     statuses = _build_statuses(doc)
@@ -1374,6 +1413,7 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "status_colors": {s["key"]: s["color"] for s in statuses},
         "commission_rates": _build_commission_rates(doc),
         "payment_methods": _build_payment_methods(doc),
+        "ai_auto_draft": bool((doc or {}).get("ai_auto_draft", True)),
     }
 
 
@@ -1708,15 +1748,24 @@ def _normalize_msgs(thread: dict) -> list:
     return msgs
 
 
-async def _make_guest_draft(uid: str, thread_uid: str, last_guest_text: str, prop: Optional[dict]) -> str:
+_TONE_LABELS = {
+    "chaleureux": "chaleureux et convivial",
+    "professionnel": "professionnel et posé",
+    "concis": "concis et direct",
+}
+
+
+async def _make_guest_draft(uid: str, thread_uid: str, last_guest_text: str,
+                            prop: Optional[dict], tone: str = "chaleureux") -> str:
     """Génère un BROUILLON de réponse au voyageur (Claude Sonnet 4.6), à valider par l'hôte."""
     ctx = ""
     if prop:
         ctx = (f"Logement: {prop.get('name')} à {prop.get('location', '')}, "
                f"{prop.get('bedrooms', 0)} chambres, capacité {prop.get('capacity', 0)} personnes.")
+    tone_txt = _TONE_LABELS.get(tone, _TONE_LABELS["chaleureux"])
     system = (
         "Tu es l'assistant d'un hôte de location saisonnière. "
-        "Tu rédiges un BROUILLON de réponse au voyageur, court, professionnel et chaleureux, en français. "
+        f"Tu rédiges un BROUILLON de réponse au voyageur, court, sur un ton {tone_txt}, en français. "
         "Le brouillon sera relu et validé par l'hôte avant envoi. "
         "Réponds uniquement avec le message prêt à valider, sans préambule."
     )
@@ -1753,7 +1802,7 @@ async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
         if (conv and conv.get("ai_draft") and conv.get("ai_draft_msg_id") == last["id"]
                 and not conv.get("ai_draft_validated")):
             ai_draft = conv["ai_draft"]
-        else:
+        elif await _ai_auto_draft_enabled(uid):
             prop = await db.properties.find_one(
                 {"id": (conv or {}).get("property_id"), "user_id": uid}, {"_id": 0})
             try:
@@ -1777,7 +1826,7 @@ async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
 
 
 @api_router.post("/inbox/{thread_uid}/generate-draft")
-async def generate_draft(thread_uid: str, user=Depends(get_current_user)):
+async def generate_draft(thread_uid: str, payload: dict = Body(default={}), user=Depends(get_current_user)):
     """Génère (ou régénère) un brouillon de réponse IA pour une conversation."""
     if not _can_inbox(user):
         raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
@@ -1785,6 +1834,7 @@ async def generate_draft(thread_uid: str, user=Depends(get_current_user)):
     if not adapter:
         raise HTTPException(status_code=400, detail="Channel manager non connecté")
     uid = user["user_id"]
+    tone = (payload or {}).get("tone") or "chaleureux"
     conv = await db.conversations.find_one(
         {"user_id": uid, "thread_uid": thread_uid}, {"_id": 0})
     async with httpx.AsyncClient(timeout=30) as http:
@@ -1795,7 +1845,7 @@ async def generate_draft(thread_uid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Aucun message voyageur auquel répondre")
     prop = await db.properties.find_one(
         {"id": (conv or {}).get("property_id"), "user_id": uid}, {"_id": 0})
-    draft = await _make_guest_draft(uid, thread_uid, last_guest["text"], prop)
+    draft = await _make_guest_draft(uid, thread_uid, last_guest["text"], prop, tone)
     await _store_draft(uid, thread_uid, last_guest["id"], draft)
     return {"ai_draft": draft}
 
@@ -1867,6 +1917,8 @@ async def inbox_reply(thread_uid: str, payload: ReplyIn, user=Depends(get_curren
 
 async def _generate_drafts_for_user(uid: str) -> int:
     """Pré-génère les brouillons IA pour les conversations non lues (notifications)."""
+    if not await _ai_auto_draft_enabled(uid):
+        return 0
     adapter, _ = await get_channel_adapter(uid)
     if not adapter:
         return 0

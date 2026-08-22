@@ -11,6 +11,7 @@ const OPTIONS = [
   { path: "/settings/staff", icon: "people-outline", title: "Intervenants", sub: "Équipe ménage & technique" },
   { path: "/settings/owners", icon: "person-outline", title: "Propriétaires", sub: "Fiches, logements & revenus" },
   { path: "/settings/messages", icon: "chatbubbles-outline", title: "Messages automatiques", sub: "Modèles, marqueurs & couleurs" },
+  { path: "/settings/assistant", icon: "sparkles-outline", title: "Assistant IA", sub: "Brouillons automatiques des réponses" },
   { path: "/settings/commissions", icon: "cash-outline", title: "Commissions plateformes", sub: "Taux par plateforme & revenu net" },
   { path: "/settings/payments", icon: "card-outline", title: "Paiement", sub: "Passerelles & méthodes de paiement" },
   { path: "/settings/api-key", icon: "key-outline", title: "Clé API Lodgify", sub: "Connexion channel manager" },

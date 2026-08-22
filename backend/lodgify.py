@@ -111,14 +111,26 @@ class LodgifyAdapter:
             "type": "Owner",
             "send_notification": True,
         }]
-        r = await http.post(
-            f"https://api.lodgify.com/v1/reservation/{booking_id}/messages",
-            json=payload,
-            headers={**self._headers(), "Content-Type": "application/json"},
-        )
-        if r.status_code >= 400:
-            raise HTTPException(status_code=502, detail=f"Lodgify envoi {r.status_code}")
-        return r.status_code
+        headers = {**self._headers(), "Content-Type": "application/json"}
+        # Endpoint d'écriture v1 documenté : /v1/reservation/booking/{id}/messages
+        url = f"https://api.lodgify.com/v1/reservation/booking/{booking_id}/messages"
+        r = await http.post(url, json=payload, headers=headers)
+        body_text = (r.text or "")[:300]
+        # Lodgify renvoie parfois 200 avec {"success": false, "error": {...}} (erreur métier)
+        try:
+            data = r.json()
+        except Exception:
+            data = None
+        if r.status_code < 400 and (not isinstance(data, dict) or data.get("success") is not False):
+            return r.status_code
+        err_msg = ""
+        if isinstance(data, dict):
+            err_msg = ((data.get("error") or {}).get("message")) or ""
+        import logging
+        logging.getLogger("lodgify").error("Lodgify send failed %s: %s", r.status_code, body_text)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Envoi Lodgify refusé : {err_msg or body_text or r.status_code}")
 
 
 def map_lodgify_property(lp: dict) -> dict:

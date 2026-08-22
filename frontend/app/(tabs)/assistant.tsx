@@ -178,6 +178,9 @@ function PricingTab() {
   const [selected, setSelected] = useState<string | null>(null);
   const [period, setPeriod] = useState("");
   const [result, setResult] = useState("");
+  const [season, setSeason] = useState<any>(null);
+  const [applied, setApplied] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useFocusEffect(
@@ -193,16 +196,43 @@ function PricingTab() {
     if (!selected) return;
     setLoading(true);
     setResult("");
+    setSeason(null);
+    setApplied(false);
     try {
       const res = await api.post("/ai/pricing-suggestion", {
         property_id: selected,
         period,
       });
       setResult(res.suggestion);
+      setSeason(res.season || null);
     } catch {
       setResult("Erreur lors de la génération. Réessayez.");
     }
     setLoading(false);
+  }
+
+  async function applySeason() {
+    if (!season || !selected || applying) return;
+    const prop = props.find((p) => p.id === selected);
+    if (!prop) return;
+    setApplying(true);
+    const newSeason = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: season.name,
+      start_date: season.start_date,
+      end_date: season.end_date,
+      price: season.price,
+    };
+    try {
+      const updated = await api.put(`/properties/${selected}`, {
+        ...prop,
+        seasons: [...(prop.seasons || []), newSeason],
+      });
+      setProps((list) => list.map((p) => (p.id === selected ? updated : p)));
+      setApplied(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+    setApplying(false);
   }
 
   async function copy() {
@@ -265,6 +295,37 @@ function PricingTab() {
                 <Ionicons name="copy-outline" size={14} color={colors.brandPrimary} />
                 <Text style={styles.copyText}>Copier</Text>
               </Pressable>
+            </View>
+          )}
+          {!!season && (
+            <View style={styles.seasonCard}>
+              <View style={styles.aiTag}>
+                <Ionicons name="pricetag" size={14} color={colors.brandPrimary} />
+                <Text style={styles.aiTagText}>Saison suggérée</Text>
+              </View>
+              <Text style={styles.seasonName}>{season.name}</Text>
+              <View style={styles.seasonMeta}>
+                <Ionicons name="calendar-outline" size={14} color={colors.onSurfaceTertiary} />
+                <Text style={styles.seasonMetaText}>
+                  {season.start_date} → {season.end_date}
+                </Text>
+              </View>
+              <Text style={styles.seasonPrice}>{season.price} € / nuit</Text>
+              {applied ? (
+                <View style={styles.appliedRow}>
+                  <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                  <Text style={styles.appliedText}>Saison ajoutée au logement</Text>
+                </View>
+              ) : (
+                <PrimaryButton
+                  testID="apply-season"
+                  label="Appliquer comme saison tarifaire"
+                  onPress={applySeason}
+                  loading={applying}
+                  style={{ marginTop: spacing.md }}
+                  icon={<Ionicons name="add-circle" size={16} color={colors.onBrandPrimary} />}
+                />
+              )}
             </View>
           )}
         </>
@@ -376,4 +437,18 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   resultText: { fontFamily: font.regular, fontSize: fontSize.lg, color: colors.onSurface, lineHeight: 23 },
+  seasonCard: {
+    marginTop: spacing.md,
+    backgroundColor: colors.brandPrimary + "0F",
+    borderWidth: 1,
+    borderColor: colors.brandPrimary + "40",
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+  },
+  seasonName: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
+  seasonMeta: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 4 },
+  seasonMetaText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary },
+  seasonPrice: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.brandPrimary, marginTop: 6 },
+  appliedRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.md },
+  appliedText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.success },
 });

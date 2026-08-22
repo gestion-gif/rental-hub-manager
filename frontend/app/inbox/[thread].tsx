@@ -24,6 +24,7 @@ export default function ThreadDetail() {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [draftUsed, setDraftUsed] = useState(false);
+  const [tone, setTone] = useState<"chaleureux" | "professionnel" | "concis">("chaleureux");
 
   const load = useCallback(async () => {
     try {
@@ -44,7 +45,7 @@ export default function ThreadDetail() {
   async function suggest() {
     setAiLoading(true); setError(null);
     try {
-      const r = await api.post(`/inbox/${thread}/generate-draft`, {});
+      const r = await api.post(`/inbox/${thread}/generate-draft`, { tone });
       setDraft(r.ai_draft);
       setReply(r.ai_draft);
       setDraftUsed(false);
@@ -115,6 +116,21 @@ export default function ThreadDetail() {
                 </Pressable>
               </View>
             )}
+            <View style={styles.toneRow}>
+              <Text style={styles.toneLabel}>Ton :</Text>
+              {(["chaleureux", "professionnel", "concis"] as const).map((t) => (
+                <Pressable
+                  key={t}
+                  testID={`tone-${t}`}
+                  onPress={() => setTone(t)}
+                  style={[styles.toneChip, tone === t && styles.toneChipActive]}
+                >
+                  <Text style={[styles.toneChipText, tone === t && styles.toneChipTextActive]}>
+                    {t === "chaleureux" ? "Chaleureux" : t === "professionnel" ? "Pro" : "Concis"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
             <Pressable testID="ai-suggest" onPress={suggest} style={styles.suggestBtn} disabled={aiLoading}>
               {aiLoading ? (
                 <ActivityIndicator size="small" color={colors.brandPrimary} />
@@ -169,6 +185,12 @@ const styles = StyleSheet.create({
   error: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.error, marginBottom: spacing.sm, textAlign: "center" },
   suggestBtn: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.sm },
   suggestText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
+  toneRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: spacing.sm, flexWrap: "wrap" },
+  toneLabel: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
+  toneChip: { paddingVertical: 4, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary },
+  toneChipActive: { backgroundColor: colors.brandPrimary },
+  toneChipText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  toneChipTextActive: { color: colors.onBrandPrimary, fontFamily: font.semibold },
   draftCard: { backgroundColor: colors.brandPrimary + "0F", borderWidth: 1, borderColor: colors.brandPrimary + "40", borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.sm },
   draftHead: { flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 6 },
   draftHeadText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
