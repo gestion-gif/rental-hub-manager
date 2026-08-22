@@ -70,6 +70,7 @@ export default function RootLayout() {
                 <Stack.Screen name="settings/staff" />
                 <Stack.Screen name="settings/owners" />
                 <Stack.Screen name="settings/owner/[id]" />
+                <Stack.Screen name="settings/messages" />
                 <Stack.Screen name="settings/api-key" />
                 <Stack.Screen name="property/[id]" />
                 <Stack.Screen name="channel-manager" />

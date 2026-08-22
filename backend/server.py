@@ -1019,6 +1019,7 @@ async def channel_sync(user=Depends(get_current_user)):
     if not prop_by_lodgify:
         raise HTTPException(status_code=400, detail="Aucun logement lié. Importez d'abord vos logements Lodgify.")
 
+    tmap = {t["marker_key"]: t for t in await get_templates(uid)}
     async with httpx.AsyncClient(timeout=90) as http:
         bookings = await adapter.list_bookings(http, "All")
 
@@ -1070,6 +1071,17 @@ async def channel_sync(user=Depends(get_current_user)):
         }
         q = {"user_id": uid, "lodgify_id": lodgify_key}
         existing = await db.reservations.find_one(q)
+        # Markers: preserve message markers already set, recompute the "paid" marker
+        markers = set((existing or {}).get("markers") or [])
+        markers.discard("paid")
+        total_amt = float(b.get("total_amount") or 0)
+        amount_paid = float(b.get("amount_paid") or 0)
+        amount_due = b.get("amount_due")
+        is_paid = total_amt > 0 and ((amount_due is not None and float(amount_due) <= 0) or amount_paid >= total_amt)
+        if is_paid and status != "annulee":
+            markers.add("paid")
+        payload["markers"] = list(markers)
+        payload["marker_color"] = marker_color_for(list(markers), tmap)
         if existing:
             await db.reservations.update_one(q, {"$set": payload})
             updated += 1
@@ -1360,6 +1372,144 @@ async def owner_summary(owner_id: str, user=Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
+# Message templates + markers (couleurs automatiques + envois programmés)
+# ---------------------------------------------------------------------------
+DEFAULT_TEMPLATES = [
+    {"marker_key": "paid", "name": "Payée", "kind": "payment", "color": "#30D158",
+     "body": "", "trigger_event": "payment", "trigger_days": 0, "enabled": True, "order": 10},
+    {"marker_key": "booklet", "name": "Livret d'accueil envoyé", "kind": "message", "color": "#0A84FF",
+     "body": "Bonjour {guest}, voici votre livret d'accueil pour {property}. Bon séjour !",
+     "trigger_event": "before_arrival", "trigger_days": 3, "enabled": False, "order": 20},
+    {"marker_key": "keys", "name": "Instructions clés envoyées", "kind": "message", "color": "#BF5AF2",
+     "body": "Bonjour {guest}, voici les instructions pour récupérer les clés de {property}.",
+     "trigger_event": "before_arrival", "trigger_days": 1, "enabled": False, "order": 30},
+]
+
+
+class MessageTemplateIn(BaseModel):
+    name: str
+    body: str = ""
+    color: str = "#0A84FF"
+    trigger_event: str = "before_arrival"  # before_arrival | payment
+    trigger_days: int = 3
+    enabled: bool = False
+
+
+async def get_templates(uid: str):
+    docs = await db.message_templates.find({"user_id": uid}, {"_id": 0}).to_list(100)
+    if not docs:
+        docs = []
+        for t in DEFAULT_TEMPLATES:
+            doc = {**t, "id": str(uuid.uuid4()), "user_id": uid, "created_at": now_utc().isoformat()}
+            await db.message_templates.insert_one(doc)
+            doc.pop("_id", None)
+            docs.append(doc)
+    docs.sort(key=lambda x: x.get("order", 100))
+    return docs
+
+
+def marker_color_for(markers, tmap):
+    best_order, best_color = -1, None
+    for k in (markers or []):
+        t = tmap.get(k)
+        if t and t.get("order", 100) > best_order:
+            best_order = t["order"]
+            best_color = t["color"]
+    return best_color
+
+
+@api_router.get("/message-templates")
+async def list_templates(user=Depends(get_current_user)):
+    return await get_templates(user["user_id"])
+
+
+@api_router.post("/message-templates")
+async def create_template(payload: MessageTemplateIn, user=Depends(get_current_user)):
+    await get_templates(user["user_id"])  # ensure defaults seeded
+    doc = payload.dict()
+    doc["marker_key"] = f"tpl_{uuid.uuid4().hex[:8]}"
+    doc["kind"] = "message"
+    doc["order"] = 100
+    doc["id"] = str(uuid.uuid4())
+    doc["user_id"] = user["user_id"]
+    doc["created_at"] = now_utc().isoformat()
+    await db.message_templates.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/message-templates/{tpl_id}")
+async def update_template(tpl_id: str, payload: MessageTemplateIn, user=Depends(get_current_user)):
+    res = await db.message_templates.update_one(
+        {"id": tpl_id, "user_id": user["user_id"]}, {"$set": payload.dict()})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Modèle introuvable")
+    return await db.message_templates.find_one({"id": tpl_id}, {"_id": 0})
+
+
+@api_router.delete("/message-templates/{tpl_id}")
+async def delete_template(tpl_id: str, user=Depends(get_current_user)):
+    tpl = await db.message_templates.find_one({"id": tpl_id, "user_id": user["user_id"]}, {"_id": 0})
+    if tpl and tpl.get("kind") == "payment":
+        raise HTTPException(status_code=400, detail="Le marqueur Payée ne peut pas être supprimé")
+    await db.message_templates.delete_one({"id": tpl_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+
+async def run_automations_for_user(uid: str):
+    """Send due automatic messages via Lodgify and set the corresponding markers."""
+    settings = await db.channel_settings.find_one({"user_id": uid}, {"_id": 0})
+    if not settings or not settings.get("api_key"):
+        return 0
+    templates = await get_templates(uid)
+    active = [t for t in templates if t.get("kind") == "message" and t.get("enabled")]
+    if not active:
+        return 0
+    tmap = {t["marker_key"]: t for t in templates}
+    adapter = LodgifyAdapter(settings["api_key"])
+    today = date.today()
+    sent = 0
+    reservations = await db.reservations.find(
+        {"user_id": uid, "source": "lodgify", "status": {"$ne": "annulee"},
+         "thread_uid": {"$nin": [None, ""]}, "lodgify_id": {"$nin": [None, ""]}},
+        {"_id": 0}).to_list(3000)
+    async with httpx.AsyncClient(timeout=30) as http:
+        for r in reservations:
+            try:
+                ci = date.fromisoformat(r["check_in"]) if r.get("check_in") else None
+            except Exception:
+                ci = None
+            if not ci or ci < today:
+                continue
+            markers = set(r.get("markers") or [])
+            changed = False
+            for t in active:
+                if t["marker_key"] in markers:
+                    continue
+                if t["trigger_event"] == "before_arrival" and today >= ci - timedelta(days=int(t.get("trigger_days", 0))):
+                    body = (t.get("body") or "").replace("{guest}", r.get("guest_name", "")).replace(
+                        "{property}", r.get("property_name") or "")
+                    try:
+                        await adapter.send_message(http, r["lodgify_id"], body, t["name"])
+                    except Exception:
+                        continue
+                    markers.add(t["marker_key"])
+                    changed = True
+                    sent += 1
+            if changed:
+                await db.reservations.update_one(
+                    {"user_id": uid, "id": r["id"]},
+                    {"$set": {"markers": list(markers), "marker_color": marker_color_for(list(markers), tmap)}})
+    return sent
+
+
+@api_router.post("/automations/run")
+async def automations_run(user=Depends(get_current_user)):
+    sent = await run_automations_for_user(user["user_id"])
+    return {"sent": sent}
+
+
+# ---------------------------------------------------------------------------
 app.include_router(api_router)
 
 app.add_middleware(
@@ -1381,6 +1531,22 @@ async def startup():
     await db.properties.create_index("user_id")
     await db.reservations.create_index("user_id")
     await db.interventions.create_index("user_id")
+    asyncio.create_task(automation_scheduler())
+
+
+async def automation_scheduler():
+    """Every 30 min, send due automatic messages for all connected users."""
+    while True:
+        try:
+            uids = await db.channel_settings.distinct("user_id")
+            for uid in uids:
+                try:
+                    await run_automations_for_user(uid)
+                except Exception:
+                    logger.exception("automation error for %s", uid)
+        except Exception:
+            logger.exception("automation scheduler loop error")
+        await asyncio.sleep(1800)
 
 
 @app.on_event("shutdown")
