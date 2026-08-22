@@ -205,7 +205,7 @@ def _build_ics(prop: dict, reservations: list) -> str:
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
-        "PRODID:-//StayPilot//Channel Manager//FR",
+        "PRODID:-//Casanéo//Channel Manager//FR",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
         f"X-WR-CALNAME:{_ics_escape(prop.get('name', 'Logement'))}",
@@ -221,7 +221,7 @@ def _build_ics(prop: dict, reservations: list) -> str:
             f"DTSTAMP:{now}",
             f"DTSTART;VALUE=DATE:{ci}",
             f"DTEND;VALUE=DATE:{co}",
-            "SUMMARY:Réservé (StayPilot)",
+            "SUMMARY:Réservé (Casanéo)",
             "STATUS:CONFIRMED",
             "TRANSP:OPAQUE",
             "END:VEVENT",

@@ -54,11 +54,12 @@ export default function Login() {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xl, paddingTop: insets.top + 80 }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.brandRow}>
-          <View style={styles.logoBox}>
-            <AntDesign name="home" size={22} color={colors.onBrandPrimary} />
-          </View>
-          <Text style={styles.brandName}>StayPilot</Text>
+        <View style={styles.logoWrap}>
+          <Image
+            source={require("@/assets/images/casaneo-logo.png")}
+            style={styles.logoImg}
+            contentFit="contain"
+          />
         </View>
         <Text style={styles.title}>Gérez vos locations{"\n"}saisonnières sans effort</Text>
         <Text style={styles.subtitle}>
@@ -117,6 +118,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.lg },
+  logoWrap: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.92)", borderRadius: 16, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, marginBottom: spacing.lg },
+  logoImg: { width: 224, height: 58 },
   logoBox: {
     width: 40,
     height: 40,

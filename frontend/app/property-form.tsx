@@ -39,6 +39,7 @@ export default function PropertyForm() {
     address_complement: "",
     description: "",
     welcome_book_url: "",
+    management_fee_pct: "",
   });
   const [rooms, setRooms] = useState<string[]>([]);
   const [amenities, setAmenities] = useState<string[]>([]);
@@ -70,6 +71,7 @@ export default function PropertyForm() {
           address_complement: p.address_complement || "",
           description: p.description || "",
           welcome_book_url: p.welcome_book_url || "",
+          management_fee_pct: p.management_fee_pct ? String(p.management_fee_pct) : "",
         });
         setRooms(p.rooms || []);
         setAmenities(p.amenities || []);
@@ -103,6 +105,7 @@ export default function PropertyForm() {
       address_complement: form.address_complement.trim(),
       description: form.description.trim(),
       welcome_book_url: form.welcome_book_url.trim(),
+      management_fee_pct: parseFloat(form.management_fee_pct) || 0,
       rooms,
       amenities,
       seasons: existing.current.seasons || [],
@@ -188,6 +191,10 @@ export default function PropertyForm() {
             <Field label="Capacité" testID="prop-capacity" value={form.capacity} onChangeText={(v) => set("capacity", v)} keyboardType="number-pad" />
           </View>
         </View>
+
+        <SectionLabel text="Gestion / Conciergerie" />
+        <Field label="Frais de gestion (%)" testID="prop-mgmt-fee" value={form.management_fee_pct} onChangeText={(v) => set("management_fee_pct", v)} keyboardType="decimal-pad" placeholder="20" />
+        <Text style={styles.helper}>Appliqué sur le montant des nuitées pour le relevé propriétaire.</Text>
 
         <SectionLabel text="Descriptif" />
         <Field
@@ -293,6 +300,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   textarea: { minHeight: 96, textAlignVertical: "top", paddingTop: 12 },
+  helper: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: -spacing.sm, marginBottom: spacing.md, lineHeight: 17 },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   selChip: {
     flexDirection: "row",

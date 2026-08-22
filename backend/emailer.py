@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Emergent managed email proxy. Constant — never read from env (survives deploy).
 EMAIL_BASE_URL = "https://integrations.emergentagent.com"
-EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "StayPilot")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "Casanéo")
 EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO")
 
 _SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")

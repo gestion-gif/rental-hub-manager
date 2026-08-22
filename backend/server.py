@@ -94,6 +94,7 @@ class PropertyIn(BaseModel):
     seasons: List[Season] = []
     ical_links: List[IcalLink] = []
     welcome_book_url: str = ""
+    management_fee_pct: float = 0
     lodgify_id: Optional[str] = None
     owner_id: Optional[str] = None
 
@@ -2404,6 +2405,126 @@ async def owner_summary(owner_id: str, user=Depends(get_current_user)):
         "per_month": [{"month": k, "revenue": round(v)} for k, v in months_sorted],
         "per_property": per_property,
     }
+
+
+
+# ---------------------------------------------------------------------------
+# Relevé des propriétaires (comptabilité conciergerie / propriétaire)
+# ---------------------------------------------------------------------------
+class ExpenseIn(BaseModel):
+    property_id: str
+    month: str            # YYYY-MM
+    label: str
+    amount: float = 0
+    charge_to: str = "owner"   # owner | concierge
+
+
+@api_router.get("/statement-expenses")
+async def list_expenses(month: str, property_id: str = "", user=Depends(get_current_user)):
+    q = {"user_id": user["user_id"], "month": month, **_prop_scope(user, "property_id")}
+    if property_id:
+        q["property_id"] = property_id
+    docs = await db.statement_expenses.find(q, {"_id": 0}).sort("created_at", 1).to_list(500)
+    return docs
+
+
+@api_router.post("/statement-expenses")
+async def create_expense(payload: ExpenseIn, user=Depends(get_current_user)):
+    if not payload.label.strip():
+        raise HTTPException(status_code=400, detail="Libellé requis")
+    doc = payload.dict()
+    doc["label"] = doc["label"].strip()
+    doc["charge_to"] = doc["charge_to"] if doc["charge_to"] in ("owner", "concierge") else "owner"
+    doc["id"] = str(uuid.uuid4())
+    doc["user_id"] = user["user_id"]
+    doc["created_at"] = now_utc().isoformat()
+    await db.statement_expenses.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.delete("/statement-expenses/{expense_id}")
+async def delete_expense(expense_id: str, user=Depends(get_current_user)):
+    await db.statement_expenses.delete_one({"id": expense_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+
+def _res_amounts(r: dict) -> dict:
+    """Ventilation d'une réservation : nuitées / ménage / taxe / commission plateforme."""
+    fin = r.get("finance") or {}
+    nights = float(r.get("nights_total") or fin.get("stay") or r.get("total_price") or 0)
+    cleaning = float(r.get("cleaning_fee") or fin.get("fees") or 0)
+    tax = float(r.get("tourist_tax") or fin.get("taxes") or 0)
+    commission = float(fin.get("commission") or 0)
+    return {"nights": round(nights, 2), "cleaning": round(cleaning, 2),
+            "tax": round(tax, 2), "commission": round(commission, 2)}
+
+
+@api_router.get("/owner-statement")
+async def owner_statement(month: str, property_id: str = "", user=Depends(get_current_user)):
+    """Relevé mensuel par logement : ventilation + revenus conciergerie/propriétaire.
+
+    Règles: frais de gestion = % logement x nuitées ; ménage -> conciergerie ;
+    taxe de séjour -> reversée à la commune ; revenu propriétaire = nuitées -
+    frais de gestion - commissions plateforme - dépenses propriétaire.
+    Réservations retenues : arrivée (check_in) dans le mois, hors annulées.
+    """
+    try:
+        y, m = month.split("-")
+        start = f"{int(y):04d}-{int(m):02d}-01"
+        nm = int(m) + 1
+        ny = int(y) + (1 if nm > 12 else 0)
+        nm = 1 if nm > 12 else nm
+        end = f"{ny:04d}-{nm:02d}-01"
+    except Exception:
+        raise HTTPException(status_code=400, detail="Mois invalide (YYYY-MM)")
+
+    pq = {"user_id": user["user_id"], **_prop_scope(user, "id")}
+    if property_id:
+        pq["id"] = property_id
+    properties = await db.properties.find(pq, {"_id": 0}).to_list(500)
+
+    statements = []
+    for p in properties:
+        pid = p["id"]
+        reservations = await db.reservations.find(
+            {"user_id": user["user_id"], "property_id": pid,
+             "check_in": {"$gte": start, "$lt": end}, "status": {"$ne": "annulee"}},
+            {"_id": 0}).sort("check_in", 1).to_list(1000)
+        lines = []
+        t_nights = t_clean = t_tax = t_comm = 0.0
+        for r in reservations:
+            a = _res_amounts(r)
+            t_nights += a["nights"]; t_clean += a["cleaning"]; t_tax += a["tax"]; t_comm += a["commission"]
+            lines.append({
+                "id": r.get("id"), "guest_name": r.get("guest_name"),
+                "platform": r.get("platform"), "check_in": r.get("check_in"),
+                "check_out": r.get("check_out"), **a,
+            })
+        expenses = await db.statement_expenses.find(
+            {"user_id": user["user_id"], "property_id": pid, "month": month}, {"_id": 0}).to_list(500)
+        owner_exp = round(sum(float(e.get("amount") or 0) for e in expenses if e.get("charge_to") == "owner"), 2)
+        concierge_exp = round(sum(float(e.get("amount") or 0) for e in expenses if e.get("charge_to") == "concierge"), 2)
+
+        pct = float(p.get("management_fee_pct") or 0)
+        mgmt_fee = round(t_nights * pct / 100.0, 2)
+        owner_revenue = round(t_nights - mgmt_fee - t_comm - owner_exp, 2)
+        concierge_revenue = round(mgmt_fee + t_clean - concierge_exp, 2)
+
+        statements.append({
+            "property_id": pid, "property_name": p.get("name"), "owner": p.get("owner"),
+            "management_fee_pct": pct, "reservations_count": len(lines), "lines": lines,
+            "totals": {
+                "nights": round(t_nights, 2), "cleaning": round(t_clean, 2),
+                "tax": round(t_tax, 2), "commission": round(t_comm, 2),
+                "management_fee": mgmt_fee, "owner_expenses": owner_exp,
+                "concierge_expenses": concierge_exp,
+                "owner_revenue": owner_revenue, "concierge_revenue": concierge_revenue,
+                "tourist_tax_to_reverse": round(t_tax, 2),
+            },
+            "expenses": expenses,
+        })
+    return {"month": month, "statements": statements}
 
 
 # ---------------------------------------------------------------------------

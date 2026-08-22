@@ -797,7 +797,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   priceBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: spacing.xl },
-  priceSheet: { backgroundColor: colors.surface, borderRadius: radius.xl, padding: spacing.xl },
+  priceSheet: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl },
   priceSheetTitle: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
   priceSheetSeason: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.brandPrimary, marginTop: spacing.md },
   priceSheetRange: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },

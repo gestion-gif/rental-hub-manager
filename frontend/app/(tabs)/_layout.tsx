@@ -17,6 +17,7 @@ const ITEMS = [
   { name: "calendar", label: "Réservations", icon: "list-outline" },
   { name: "planning", label: "Calendrier", icon: "calendar-outline" },
   { name: "properties", label: "Logements", icon: "business-outline" },
+  { name: "statement", label: "Relevé propriétaires", icon: "document-text-outline", revenue: true },
   { name: "assistant", label: "Assistant IA", icon: "sparkles-outline" },
 ];
 
@@ -42,7 +43,7 @@ function CustomDrawer(props: any) {
       <DrawerContentScrollView {...props} contentContainerStyle={{ paddingTop: insets.top + spacing.lg }}>
         <View style={styles.brand}>
           <View style={styles.logo}><Ionicons name="home" size={20} color={colors.onBrandPrimary} /></View>
-          <Text style={styles.brandText}>StayPilot</Text>
+          <Text style={styles.brandText}>Casanéo</Text>
         </View>
 
         <View style={styles.userRow}>
@@ -60,6 +61,7 @@ function CustomDrawer(props: any) {
         <View style={styles.sep} />
 
         {ITEMS.map((it) => {
+          if ((it as any).revenue && !canSeeRevenue(user)) return null;
           const active = current === it.name;
           return (
             <React.Fragment key={it.name}>
@@ -129,6 +131,7 @@ export default function DrawerLayout() {
       <Drawer.Screen name="calendar" />
       <Drawer.Screen name="planning" />
       <Drawer.Screen name="properties" />
+      <Drawer.Screen name="statement" />
       <Drawer.Screen name="assistant" />
     </Drawer>
   );

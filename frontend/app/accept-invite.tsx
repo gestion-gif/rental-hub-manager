@@ -56,7 +56,7 @@ export default function AcceptInvite() {
         </View>
         <Text style={styles.title}>Créer votre compte</Text>
         <Text style={styles.subtitle}>
-          Choisissez un mot de passe pour accéder à votre espace StayPilot.
+          Choisissez un mot de passe pour accéder à votre espace Casanéo.
         </Text>
 
         {!token && (
