@@ -178,7 +178,7 @@ function PricingTab() {
   const [selected, setSelected] = useState<string | null>(null);
   const [period, setPeriod] = useState("");
   const [result, setResult] = useState("");
-  const [season, setSeason] = useState<any>(null);
+  const [seasons, setSeasons] = useState<any[]>([]);
   const [applied, setApplied] = useState(false);
   const [applying, setApplying] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -196,7 +196,7 @@ function PricingTab() {
     if (!selected) return;
     setLoading(true);
     setResult("");
-    setSeason(null);
+    setSeasons([]);
     setApplied(false);
     try {
       const res = await api.post("/ai/pricing-suggestion", {
@@ -204,29 +204,29 @@ function PricingTab() {
         period,
       });
       setResult(res.suggestion);
-      setSeason(res.season || null);
+      setSeasons(res.seasons || []);
     } catch {
       setResult("Erreur lors de la génération. Réessayez.");
     }
     setLoading(false);
   }
 
-  async function applySeason() {
-    if (!season || !selected || applying) return;
+  async function applySeasons() {
+    if (!seasons.length || !selected || applying) return;
     const prop = props.find((p) => p.id === selected);
     if (!prop) return;
     setApplying(true);
-    const newSeason = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: season.name,
-      start_date: season.start_date,
-      end_date: season.end_date,
-      price: season.price,
-    };
+    const toAdd = seasons.map((s, i) => ({
+      id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+      name: s.name,
+      start_date: s.start_date,
+      end_date: s.end_date,
+      price: s.price,
+    }));
     try {
       const updated = await api.put(`/properties/${selected}`, {
         ...prop,
-        seasons: [...(prop.seasons || []), newSeason],
+        seasons: [...(prop.seasons || []), ...toAdd],
       });
       setProps((list) => list.map((p) => (p.id === selected ? updated : p)));
       setApplied(true);
@@ -297,30 +297,34 @@ function PricingTab() {
               </Pressable>
             </View>
           )}
-          {!!season && (
+          {seasons.length > 0 && (
             <View style={styles.seasonCard}>
               <View style={styles.aiTag}>
                 <Ionicons name="pricetag" size={14} color={colors.brandPrimary} />
-                <Text style={styles.aiTagText}>Saison suggérée</Text>
+                <Text style={styles.aiTagText}>Saisons suggérées</Text>
               </View>
-              <Text style={styles.seasonName}>{season.name}</Text>
-              <View style={styles.seasonMeta}>
-                <Ionicons name="calendar-outline" size={14} color={colors.onSurfaceTertiary} />
-                <Text style={styles.seasonMetaText}>
-                  {season.start_date} → {season.end_date}
-                </Text>
-              </View>
-              <Text style={styles.seasonPrice}>{season.price} € / nuit</Text>
+              {seasons.map((s, i) => (
+                <View key={i} style={[styles.seasonRow, i > 0 && styles.seasonRowBorder]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.seasonName}>{s.name}</Text>
+                    <View style={styles.seasonMeta}>
+                      <Ionicons name="calendar-outline" size={13} color={colors.onSurfaceTertiary} />
+                      <Text style={styles.seasonMetaText}>{s.start_date} → {s.end_date}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.seasonPrice}>{s.price} €</Text>
+                </View>
+              ))}
               {applied ? (
                 <View style={styles.appliedRow}>
                   <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-                  <Text style={styles.appliedText}>Saison ajoutée au logement</Text>
+                  <Text style={styles.appliedText}>Saisons ajoutées au logement</Text>
                 </View>
               ) : (
                 <PrimaryButton
-                  testID="apply-season"
-                  label="Appliquer comme saison tarifaire"
-                  onPress={applySeason}
+                  testID="apply-seasons"
+                  label={`Appliquer ${seasons.length > 1 ? `ces ${seasons.length} saisons` : "cette saison"}`}
+                  onPress={applySeasons}
                   loading={applying}
                   style={{ marginTop: spacing.md }}
                   icon={<Ionicons name="add-circle" size={16} color={colors.onBrandPrimary} />}
@@ -445,8 +449,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
   },
-  seasonName: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
-  seasonMeta: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 4 },
+  seasonName: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
+  seasonRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: spacing.sm, gap: spacing.sm },
+  seasonRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  seasonMeta: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
   seasonMetaText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary },
   seasonPrice: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.brandPrimary, marginTop: 6 },
   appliedRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.md },

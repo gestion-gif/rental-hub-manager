@@ -1279,9 +1279,10 @@ async def ai_pricing(payload: PricingRequest, user=Depends(get_current_user)):
         "Tu es un expert en tarification (revenue management) de locations saisonnières. "
         "Tu réponds STRICTEMENT en JSON valide (aucun texte hors JSON), au format : "
         '{"advice": "conseils en français, 3-4 puces max", '
-        '"season": {"name": "nom court de la saison", "start_date": "YYYY-MM-DD", '
-        '"end_date": "YYYY-MM-DD", "price": nombre_en_euros_par_nuit}}. '
-        "La saison correspond à la période demandée avec un prix/nuit recommandé concret."
+        '"seasons": [{"name": "Basse saison", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "price": nombre}, '
+        '{"name": "Moyenne saison", ...}, {"name": "Haute saison", ...}]}. '
+        "Propose exactement 3 saisons cohérentes (basse, moyenne, haute) couvrant la période demandée, "
+        "avec des prix/nuit concrets et croissants."
     )
     chat = make_chat(system, f"pricing_{user['user_id']}")
     period = payload.period or "les prochaines semaines"
@@ -1298,12 +1299,13 @@ async def ai_pricing(payload: PricingRequest, user=Depends(get_current_user)):
         f"Donne une recommandation de tarification pour {period} (année {date.today().year} ou suivante)."
     )
     raw = await chat.send_message(UserMessage(text=prompt))
-    advice, season = _parse_pricing_json(raw)
-    return {"suggestion": advice, "season": season}
+    advice, seasons_out = _parse_pricing_json(raw)
+    return {"suggestion": advice, "seasons": seasons_out,
+            "season": seasons_out[0] if seasons_out else None}
 
 
 def _parse_pricing_json(raw: str):
-    """Extrait advice + season d'une réponse LLM (tolère les fences ```json)."""
+    """Extrait advice + liste de saisons d'une réponse LLM (tolère les fences ```json)."""
     txt = (raw or "").strip()
     if txt.startswith("```"):
         txt = re.sub(r"^```(?:json)?\s*", "", txt)
@@ -1311,21 +1313,24 @@ def _parse_pricing_json(raw: str):
     try:
         data = json.loads(txt)
     except Exception:
-        return raw, None
+        return raw, []
     advice = data.get("advice") or ""
-    s = data.get("season") or {}
-    season = None
-    try:
-        if s and s.get("start_date") and s.get("end_date"):
-            season = {
-                "name": str(s.get("name") or "Saison recommandée"),
-                "start_date": str(s.get("start_date")),
-                "end_date": str(s.get("end_date")),
-                "price": round(float(s.get("price") or 0), 2),
-            }
-    except Exception:
-        season = None
-    return advice, season
+    raw_seasons = data.get("seasons")
+    if raw_seasons is None and data.get("season"):
+        raw_seasons = [data["season"]]
+    out = []
+    for s in (raw_seasons or []):
+        try:
+            if s and s.get("start_date") and s.get("end_date"):
+                out.append({
+                    "name": str(s.get("name") or "Saison recommandée"),
+                    "start_date": str(s.get("start_date")),
+                    "end_date": str(s.get("end_date")),
+                    "price": round(float(s.get("price") or 0), 2),
+                })
+        except Exception:
+            continue
+    return advice, out
 
 
 # ---------------------------------------------------------------------------

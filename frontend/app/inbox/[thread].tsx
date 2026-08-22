@@ -25,6 +25,7 @@ export default function ThreadDetail() {
   const [draft, setDraft] = useState<string | null>(null);
   const [draftUsed, setDraftUsed] = useState(false);
   const [tone, setTone] = useState<"chaleureux" | "professionnel" | "concis">("chaleureux");
+  const [showTrans, setShowTrans] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -76,6 +77,8 @@ export default function ThreadDetail() {
     setSending(false);
   }
 
+  const hasTrans = messages.some((m: any) => !m.mine && m.text_fr);
+
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
@@ -86,7 +89,13 @@ export default function ThreadDetail() {
           <Text style={styles.title} numberOfLines={1}>{data?.guest_name || "Conversation"}</Text>
           {!!data?.property_name && <Text style={styles.subtitle} numberOfLines={1}>{data.property_name} · {data.source}</Text>}
         </View>
-        <View style={{ width: 34 }} />
+        {hasTrans ? (
+          <Pressable testID="toggle-trans" onPress={() => setShowTrans((s) => !s)} style={[styles.transToggle, showTrans && styles.transToggleOn]}>
+            <Ionicons name="language" size={18} color={showTrans ? colors.onBrandPrimary : colors.onSurfaceSecondary} />
+          </Pressable>
+        ) : (
+          <View style={{ width: 34 }} />
+        )}
       </View>
 
       {loading ? (
@@ -99,7 +108,7 @@ export default function ThreadDetail() {
               <View key={m.id} style={[styles.bubbleRow, m.mine ? styles.rowRight : styles.rowLeft]}>
                 <View style={[styles.bubble, m.mine ? styles.bubbleMine : styles.bubbleGuest]}>
                   <Text style={[styles.msgText, m.mine && styles.msgTextMine]}>{m.text}</Text>
-                  {!m.mine && !!m.text_fr && (
+                  {!m.mine && !!m.text_fr && showTrans && (
                     <View style={styles.transBox}>
                       <View style={styles.transHead}>
                         <Ionicons name="language" size={11} color={colors.brandPrimary} />
@@ -193,6 +202,8 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   header: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   backBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
+  transToggle: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
+  transToggleOn: { backgroundColor: colors.brandPrimary },
   title: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
   subtitle: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 1 },
   bubbleRow: { flexDirection: "row", marginBottom: spacing.md },
