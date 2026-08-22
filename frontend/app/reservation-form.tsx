@@ -21,6 +21,7 @@ import { usePreferences } from "@/src/context/PreferencesContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { canSeePrices, canModify } from "@/src/permissions";
 import { Field, PrimaryButton } from "@/src/components/ui";
+import { Picker } from "@/src/components/Picker";
 import DateField from "@/src/components/DateField";
 import { PlatformLogo } from "@/src/components/PlatformLogo";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
@@ -332,14 +333,15 @@ export default function ReservationForm() {
         >
           {showPrices && detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} onAddPayment={addPayment} onDeletePayment={deletePayment} onSetCommission={saveCommission} onCheckout={startCheckout} paying={paying} payMsg={payMsg} />}
           <Text style={styles.label}>Logement</Text>
-          <ChipRow
-            items={props.map((p) => ({ key: p.id, label: p.name }))}
+          <Picker
+            testID="res-prop-picker"
+            title="Choisir un logement"
+            icon="business-outline"
             value={form.property_id}
+            items={props.map((p) => ({ id: p.id, name: p.name }))}
             onSelect={setProperty}
-            prefix="res-prop"
           />
 
-          <View style={{ height: spacing.lg }} />
           <Text style={styles.label}>Statut</Text>
           <ChipRow
             items={statuses.map((s) => ({ key: s.key, label: s.label, color: s.color }))}
