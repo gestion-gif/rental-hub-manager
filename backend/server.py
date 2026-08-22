@@ -965,19 +965,40 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
     return res
 
 
+class IcalFrequencyIn(BaseModel):
+    frequency: str = "daily"  # hourly | 6h | daily
+
+
+_FREQ_SECONDS = {"hourly": 3300, "6h": 21300, "daily": 23 * 3600}
+
+
+@api_router.put("/properties/{property_id}/ical-frequency")
+async def set_ical_frequency(property_id: str, payload: IcalFrequencyIn, user=Depends(get_current_user)):
+    freq = payload.frequency if payload.frequency in _FREQ_SECONDS else "daily"
+    res = await db.properties.update_one(
+        {"id": property_id, "user_id": user["user_id"], **_prop_scope(user)},
+        {"$set": {"ical_sync_frequency": freq}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return {"frequency": freq}
+
+
 async def _ical_auto_sync_loop():
-    """Boucle de synchro iCal automatique : chaque logement resynchronisé ~toutes les 24h."""
+    """Boucle de synchro iCal automatique : fréquence configurable par logement."""
     await asyncio.sleep(60)  # laisser l'app démarrer
     while True:
         try:
             props = await db.properties.find(
-                {"ical_links.0": {"$exists": True}}, {"_id": 0, "id": 1, "user_id": 1, "ical_last_sync": 1}).to_list(2000)
+                {"ical_links.0": {"$exists": True}},
+                {"_id": 0, "id": 1, "user_id": 1, "ical_last_sync": 1, "ical_sync_frequency": 1}).to_list(2000)
             for p in props:
+                freq = p.get("ical_sync_frequency") or "daily"
+                threshold = _FREQ_SECONDS.get(freq, _FREQ_SECONDS["daily"])
                 last = p.get("ical_last_sync")
                 stale = True
                 if last:
                     try:
-                        stale = (now_utc() - datetime.fromisoformat(last)).total_seconds() > 23 * 3600
+                        stale = (now_utc() - datetime.fromisoformat(last)).total_seconds() > threshold
                     except Exception:
                         stale = True
                 if stale:
@@ -1178,7 +1199,8 @@ async def dashboard(user=Depends(get_current_user)):
 
 @api_router.get("/cleaning-schedule")
 async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_user)):
-    """Vue simple pour le personnel de ménage : départs + ménages d'un jour donné."""
+    """Vue quotidienne : départs, ménages, interventions, remises de clés,
+    cautions à encaisser et arrivées (vérification caution le jour de l'arrivée)."""
     uid = user["user_id"]
     try:
         target = date.fromisoformat(day) if day else date.today()
@@ -1193,28 +1215,68 @@ async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_
     deps = await db.reservations.find(
         {"user_id": uid, "check_out": tstr, "status": {"$ne": "annulee"}, **scope}, {"_id": 0}).to_list(500)
     departures = [{
-        "id": r["id"],
-        "property_id": r["property_id"],
+        "id": r["id"], "property_id": r["property_id"],
         "property_name": pmap.get(r["property_id"], "Logement"),
-        "guest_name": r.get("guest_name"),
-        "checkout_time": r.get("checkout_time") or "",
+        "guest_name": r.get("guest_name"), "checkout_time": r.get("checkout_time") or "",
         "platform": r.get("platform") or "",
     } for r in deps if r["property_id"] in pmap]
 
-    cl = await db.interventions.find(
-        {"user_id": uid, "kind": "menage", "date": tstr, **scope}, {"_id": 0}).to_list(500)
-    cleanings = [{
-        "id": iv["id"],
-        "property_id": iv["property_id"],
-        "property_name": pmap.get(iv["property_id"], "Logement"),
-        "description": iv.get("description", ""),
-        "intervenant": iv.get("intervenant", ""),
-        "done": bool(iv.get("done")),
-    } for iv in cl if iv["property_id"] in pmap]
+    arr = await db.reservations.find(
+        {"user_id": uid, "check_in": tstr, "status": {"$ne": "annulee"}, **scope}, {"_id": 0}).to_list(500)
+    arrivals = [{
+        "id": r["id"], "property_id": r["property_id"],
+        "property_name": pmap.get(r["property_id"], "Logement"),
+        "guest_name": r.get("guest_name"), "checkin_time": r.get("checkin_time") or "",
+        "platform": r.get("platform") or "",
+        "deposit_collected": bool((r.get("finance") or {}).get("deposit_collected")),
+        "deposit_amount": (r.get("finance") or {}).get("deposit_amount") or 0,
+        "damage_deposit": r.get("damage_deposit") or "",
+    } for r in arr if r["property_id"] in pmap]
+
+    # Toutes les interventions du jour, regroupées par type
+    ivs = await db.interventions.find(
+        {"user_id": uid, "date": tstr, **scope}, {"_id": 0}).to_list(1000)
+
+    def _iv(iv):
+        return {
+            "id": iv["id"], "property_id": iv["property_id"],
+            "property_name": pmap.get(iv["property_id"], "Logement"),
+            "description": iv.get("description", ""), "intervenant": iv.get("intervenant", ""),
+            "done": bool(iv.get("done")),
+            "caution_amount": iv.get("caution_amount") or 0,
+            "caution_debited": bool(iv.get("caution_debited")),
+        }
+
+    cleanings, interventions, key_handovers, cautions = [], [], [], []
+    for iv in ivs:
+        if iv["property_id"] not in pmap:
+            continue
+        kind = iv.get("kind", "menage")
+        item = _iv(iv)
+        if kind == "menage":
+            cleanings.append(item)
+        elif kind == "remise_cles":
+            key_handovers.append(item)
+        elif kind == "caution":
+            cautions.append(item)
+        else:
+            interventions.append(item)
 
     departures.sort(key=lambda x: (x["checkout_time"] or "~", x["property_name"]))
-    cleanings.sort(key=lambda x: x["property_name"])
-    return {"date": tstr, "departures": departures, "cleanings": cleanings}
+    arrivals.sort(key=lambda x: (x["checkin_time"] or "~", x["property_name"]))
+    for lst in (cleanings, interventions, key_handovers, cautions):
+        lst.sort(key=lambda x: x["property_name"])
+
+    return {
+        "date": tstr,
+        "departures": departures,
+        "arrivals": arrivals,
+        "cleanings": cleanings,
+        "interventions": interventions,
+        "key_handovers": key_handovers,
+        "cautions": cautions,
+    }
+
 
 
 @api_router.get("/analytics/revenue")

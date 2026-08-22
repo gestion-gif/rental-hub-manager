@@ -20,6 +20,12 @@ const PLATFORMS = [
   { id: "Autre", name: "Autre" },
 ];
 
+const FREQUENCIES = [
+  { id: "hourly", name: "Toutes les heures" },
+  { id: "6h", name: "Toutes les 6 heures" },
+  { id: "daily", name: "Quotidienne" },
+];
+
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL as string;
 
 export default function IcalSettings() {
@@ -30,6 +36,7 @@ export default function IcalSettings() {
   const [links, setLinks] = useState<any[]>([]);
   const [exportUrl, setExportUrl] = useState("");
   const [lastSync, setLastSync] = useState<string>("");
+  const [frequency, setFrequency] = useState<string>("daily");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -53,6 +60,7 @@ export default function IcalSettings() {
     setSelected(p.id);
     setLinks((p.ical_links || []).map((l: any) => ({ ...l })));
     setLastSync(p.ical_last_sync || "");
+    setFrequency(p.ical_sync_frequency || "daily");
     setSyncMsg("");
     try {
       const ex = await api.get(`/properties/${p.id}/ical-export`);
@@ -117,6 +125,14 @@ export default function IcalSettings() {
     Alert.alert("Copié", "Le lien d'export a été copié. Collez-le dans Airbnb/Booking pour importer votre disponibilité.");
   }
 
+  async function changeFrequency(freq: string) {
+    setFrequency(freq);
+    try {
+      await api.put(`/properties/${selected}/ical-frequency`, { frequency: freq });
+      setProperties((ps) => ps.map((p) => (p.id === selected ? { ...p, ical_sync_frequency: freq } : p)));
+    } catch {}
+  }
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -178,9 +194,17 @@ export default function IcalSettings() {
               {!!lastSync && (
                 <View style={styles.autoBadge}>
                   <Ionicons name="time-outline" size={13} color={colors.onSurfaceSecondary} />
-                  <Text style={styles.autoText}>Synchro auto quotidienne · dernière : {dayjs(lastSync).format("D MMM HH:mm")}</Text>
+                  <Text style={styles.autoText}>Synchro auto · dernière : {dayjs(lastSync).format("D MMM HH:mm")}</Text>
                 </View>
               )}
+              <Picker
+                label="Fréquence de synchronisation automatique"
+                testID="ical-frequency"
+                title="Fréquence de synchro"
+                value={frequency}
+                items={FREQUENCIES}
+                onSelect={changeFrequency}
+              />
               {links.length === 0 && <Text style={styles.noLinks}>Aucun lien d'import pour l'instant.</Text>}
               {links.map((l, i) => (
                 <View key={i} style={styles.linkItem} testID={`ical-link-${i}`}>
