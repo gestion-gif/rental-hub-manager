@@ -147,3 +147,8 @@
 - Helpers `src/permissions.ts` : memberRole, canSeeInbox/canSeeSettings/canSeeOccupancy/canSeeCurrentStays (le compte Google propriétaire = account_owner voit tout).
 - Défense côté backend : `_can_inbox(user)` → 403 sur GET /inbox, /inbox/{thread}, POST /inbox/{thread}/reply et count=0 sur /inbox-unread-count pour les rôles cleaning/intervenant/owner (empêche l'accès direct hors UI).
 - Vérifié : membre cleaning → /inbox 403, /analytics 403, /inbox-unread-count count 0 ; 28/28 tests membres verts, app compile.
+
+## Ajout Vue « Ménage du jour » (2026-06)
+- Nouvel endpoint `GET /api/cleaning-schedule?day=YYYY-MM-DD` (défaut aujourd'hui) : renvoie {date, departures[], cleanings[]} scopé aux logements du membre (_prop_scope). Départs = réservations check_out=jour (non annulées) avec property_name + checkout_time + guest. Ménages = interventions kind=menage du jour (property_name, intervenant, done).
+- Écran `/cleaning` : page simple avec navigation jour précédent/suivant, section Départs et section Ménages à faire (tap → intervention-form, coche visuelle done). Nom voyageur respecte l'autorisation (guestLabel). Entrée drawer « Ménage du jour » visible par tous (utile aussi au propriétaire).
+- 176/176 pytest verts, app compile.

@@ -77,6 +77,7 @@ export default function RootLayout() {
                 <Stack.Screen name="settings/api-key" />
                 <Stack.Screen name="property/[id]" />
                 <Stack.Screen name="channel-manager" />
+                <Stack.Screen name="cleaning" />
                 <Stack.Screen name="inbox" />
                 <Stack.Screen name="inbox/[thread]" />
               </Stack>

@@ -76,6 +76,11 @@ function CustomDrawer(props: any) {
 
         <View style={styles.sep} />
 
+        <Pressable testID="drawer-cleaning" onPress={() => goStack("/cleaning")} style={styles.item}>
+          <Ionicons name="sparkles-outline" size={20} color={colors.onSurfaceSecondary} />
+          <Text style={styles.itemText}>Ménage du jour</Text>
+        </Pressable>
+
         {canSeeRevenue(user) && (
           <Pressable testID="drawer-analytics" onPress={() => goStack("/analytics")} style={styles.item}>
             <Ionicons name="stats-chart-outline" size={20} color={colors.onSurfaceSecondary} />

@@ -1064,6 +1064,47 @@ async def dashboard(user=Depends(get_current_user)):
     }
 
 
+@api_router.get("/cleaning-schedule")
+async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_user)):
+    """Vue simple pour le personnel de ménage : départs + ménages d'un jour donné."""
+    uid = user["user_id"]
+    try:
+        target = date.fromisoformat(day) if day else date.today()
+    except ValueError:
+        target = date.today()
+    tstr = target.isoformat()
+    scope = _prop_scope(user, "property_id")
+    props = await db.properties.find(
+        {"user_id": uid, **_prop_scope(user)}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    pmap = {p["id"]: p.get("name", "Logement") for p in props}
+
+    deps = await db.reservations.find(
+        {"user_id": uid, "check_out": tstr, "status": {"$ne": "annulee"}, **scope}, {"_id": 0}).to_list(500)
+    departures = [{
+        "id": r["id"],
+        "property_id": r["property_id"],
+        "property_name": pmap.get(r["property_id"], "Logement"),
+        "guest_name": r.get("guest_name"),
+        "checkout_time": r.get("checkout_time") or "",
+        "platform": r.get("platform") or "",
+    } for r in deps if r["property_id"] in pmap]
+
+    cl = await db.interventions.find(
+        {"user_id": uid, "kind": "menage", "date": tstr, **scope}, {"_id": 0}).to_list(500)
+    cleanings = [{
+        "id": iv["id"],
+        "property_id": iv["property_id"],
+        "property_name": pmap.get(iv["property_id"], "Logement"),
+        "description": iv.get("description", ""),
+        "intervenant": iv.get("intervenant", ""),
+        "done": bool(iv.get("done")),
+    } for iv in cl if iv["property_id"] in pmap]
+
+    departures.sort(key=lambda x: (x["checkout_time"] or "~", x["property_name"]))
+    cleanings.sort(key=lambda x: x["property_name"])
+    return {"date": tstr, "departures": departures, "cleanings": cleanings}
+
+
 @api_router.get("/analytics/revenue")
 async def analytics_revenue(year: Optional[int] = None, user=Depends(get_current_user)):
     if not _can(user, "view_revenue_charts"):
