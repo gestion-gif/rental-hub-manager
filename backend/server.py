@@ -386,6 +386,28 @@ async def update_status(reservation_id: str, body: dict, user=Depends(get_curren
     return item
 
 
+@api_router.patch("/reservations/{reservation_id}/paid")
+async def set_reservation_paid(reservation_id: str, body: dict, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    paid = bool(body.get("paid", True))
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    markers = set(r.get("markers") or [])
+    if paid:
+        markers.add("paid")
+    else:
+        markers.discard("paid")
+    tmap = {t["marker_key"]: t for t in await get_templates(uid)}
+    await db.reservations.update_one(
+        {"id": reservation_id, "user_id": uid},
+        {"$set": {"paid_manual": paid, "markers": list(markers),
+                  "marker_color": marker_color_for(list(markers), tmap)}})
+    item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    compute_display(item, await status_color_map(uid))
+    return item
+
+
 @api_router.delete("/reservations/{reservation_id}")
 async def delete_reservation(reservation_id: str, user=Depends(get_current_user)):
     await db.reservations.delete_one({"id": reservation_id, "user_id": user["user_id"]})
@@ -1163,9 +1185,11 @@ async def channel_sync(user=Depends(get_current_user)):
         total_amt = float(b.get("total_amount") or 0)
         amount_paid = float(b.get("amount_paid") or 0)
         amount_due = b.get("amount_due")
-        is_paid = total_amt > 0 and ((amount_due is not None and float(amount_due) <= 0) or amount_paid >= total_amt)
+        paid_manual = bool((existing or {}).get("paid_manual"))
+        is_paid = paid_manual or (total_amt > 0 and ((amount_due is not None and float(amount_due) <= 0) or amount_paid >= total_amt))
         if is_paid and status != "annulee":
             markers.add("paid")
+        payload["paid_manual"] = paid_manual
         payload["markers"] = list(markers)
         payload["marker_color"] = marker_color_for(list(markers), tmap)
         if existing:

@@ -18,6 +18,7 @@ import { MenuButton } from "@/src/components/MenuButton";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import StatusBadge, { tint } from "@/src/components/StatusBadge";
 import { INTERVENTION_TYPES, getInterventionType } from "@/src/interventionTypes";
+import { InterventionIcon } from "@/src/components/InterventionIcon";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 dayjs.locale("fr");
@@ -314,7 +315,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                         onPress={() => onIv(iv.id)}
                         style={[styles.ivMarker, { left: off * DAY_W + 3, backgroundColor: t.color }]}
                       >
-                        <Ionicons name="construct" size={9} color="#fff" />
+                        <InterventionIcon kind={iv.kind} size={9} color="#fff" />
                       </Pressable>
                     );
                   })}
@@ -442,7 +443,7 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, p
                       </Text>
                     </View>
                     <View style={[styles.ivBadge, { backgroundColor: t.color + "22" }]}>
-                      <View style={[styles.ivDotSm, { backgroundColor: t.color }]} />
+                      <InterventionIcon kind={iv.kind} size={12} color={t.color} />
                       <Text style={[styles.ivBadgeText, { color: t.color }]}>{t.label}</Text>
                     </View>
                   </Pressable>

@@ -103,6 +103,14 @@ export default function ReservationForm() {
     router.back();
   }
 
+  async function togglePaid() {
+    const next = !((detail?.markers || []).includes("paid"));
+    try {
+      const updated = await api.patch(`/reservations/${id}/paid`, { paid: next });
+      setDetail(updated);
+    } catch {}
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -130,7 +138,7 @@ export default function ReservationForm() {
           bottomOffset={20}
           showsVerticalScrollIndicator={false}
         >
-          {detail?.finance && <FinanceCard detail={detail} />}
+          {detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} />}
           <Text style={styles.label}>Logement</Text>
           <ChipRow
             items={props.map((p) => ({ key: p.id, label: p.name }))}
@@ -201,7 +209,7 @@ export default function ReservationForm() {
   );
 }
 
-function FinanceCard({ detail }: any) {
+function FinanceCard({ detail, isPaid, onTogglePaid }: any) {
   const f = detail.finance || {};
   const cur = f.currency || "EUR";
   const money = (n: number) => `${(n || 0).toFixed(2)} ${cur === "EUR" ? "€" : cur}`;
@@ -219,6 +227,14 @@ function FinanceCard({ detail }: any) {
         <View style={styles.payCell}><Text style={styles.payLabel}>Dû</Text><Text style={styles.payVal}>{money(f.due)}</Text></View>
         <View style={styles.payCell}><Text style={styles.payLabel}>Total</Text><Text style={[styles.payVal, styles.qBold]}>{money(f.total)}</Text></View>
       </View>
+
+      {/* Encaissement manuel (Airbnb / paiement externe) */}
+      <Pressable testID="toggle-paid" onPress={onTogglePaid} style={[styles.paidBtn, isPaid && styles.paidBtnOn]}>
+        <Ionicons name={isPaid ? "checkmark-circle" : "cash-outline"} size={18} color={isPaid ? "#fff" : colors.onSurface} />
+        <Text style={[styles.paidBtnText, isPaid && { color: "#fff" }]}>
+          {isPaid ? "Encaissement validé — appuyez pour annuler" : "Marquer l'encaissement comme reçu"}
+        </Text>
+      </Pressable>
 
       {/* Devis */}
       <View style={styles.finCard}>
@@ -325,6 +341,9 @@ const styles = StyleSheet.create({
   payCell: { flex: 1, alignItems: "center" },
   payLabel: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
   payVal: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, marginTop: 3 },
+  paidBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingVertical: 12, marginBottom: spacing.md },
+  paidBtnOn: { backgroundColor: "#30D158" },
+  paidBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
   finCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md },
   finHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md },
   finTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.sm },

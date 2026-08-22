@@ -21,6 +21,7 @@ import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
 import StatusBadge from "@/src/components/StatusBadge";
 import { getInterventionType } from "@/src/interventionTypes";
+import { InterventionIcon } from "@/src/components/InterventionIcon";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 type Dash = {
@@ -307,7 +308,7 @@ function InterventionCard({ iv, onPress }: any) {
           <Text style={styles.stayProp} numberOfLines={1}>{iv.property_name}</Text>
         </View>
         <View style={[styles.ivBadge, { backgroundColor: t.color + "22" }]}>
-          <View style={[styles.ivDot, { backgroundColor: t.color }]} />
+          <InterventionIcon kind={iv.kind} size={13} color={t.color} />
           <Text style={[styles.ivBadgeText, { color: t.color }]}>{t.label}</Text>
         </View>
       </View>

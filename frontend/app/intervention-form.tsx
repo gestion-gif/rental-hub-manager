@@ -11,6 +11,7 @@ import { api, uploadFile, fileUrl } from "@/src/api";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import DateField from "@/src/components/DateField";
 import { INTERVENTION_TYPES } from "@/src/interventionTypes";
+import { InterventionIcon } from "@/src/components/InterventionIcon";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 export default function InterventionForm() {
@@ -158,7 +159,7 @@ export default function InterventionForm() {
                   onPress={() => set("kind", t.key)}
                   style={[styles.typeCard, active && { borderColor: t.color, backgroundColor: t.color + "1A" }]}
                 >
-                  <View style={[styles.typeDot, { backgroundColor: t.color }]} />
+                  <InterventionIcon kind={t.key} size={18} color={t.color} />
                   <Text style={[styles.typeLabel, active && { color: t.color }]}>{t.label}</Text>
                   {active && <Ionicons name="checkmark-circle" size={18} color={t.color} />}
                 </Pressable>
