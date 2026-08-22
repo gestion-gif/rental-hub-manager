@@ -5,7 +5,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import re
 import json
-import html as htmllib
 import asyncio
 import logging
 import uuid
@@ -18,6 +17,11 @@ from datetime import datetime, timezone, timedelta, date
 import httpx
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
+
+from lodgify import (
+    LODGIFY_STATUS_MAP, source_label, strip_html,
+    LodgifyAdapter, map_lodgify_property,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1213,148 +1217,11 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
 # ---------------------------------------------------------------------------
 # Channel Manager — Lodgify integration (provider-neutral, swappable to Channex)
 # ---------------------------------------------------------------------------
-SOURCE_LABELS = {
-    "AirbnbIntegration": "Airbnb",
-    "Airbnb": "Airbnb",
-    "BookingComIntegration": "Booking.com",
-    "BookingCom": "Booking.com",
-    "HomeAwayIntegration": "Vrbo",
-    "HomeAway": "Vrbo",
-    "Vrbo": "Vrbo",
-    "Manual": "Direct",
-    "OwnerWebsite": "Site web",
-    "Website": "Site web",
-    "Direct": "Direct",
-}
-
-LODGIFY_STATUS_MAP = {
-    "Booked": "confirmee",
-    "Open": "demande",
-    "Tentative": "demande",
-    "Declined": "annulee",
-    "Expired": "annulee",
-    "Canceled": "annulee",
-    "Cancelled": "annulee",
-}
-
-
-def source_label(src: Optional[str]) -> str:
-    if not src:
-        return "Direct"
-    if src in SOURCE_LABELS:
-        return SOURCE_LABELS[src]
-    return src.replace("Integration", "").strip() or "Direct"
-
-
-def strip_html(text: str) -> str:
-    if not text:
-        return ""
-    t = text.replace("<br/>", "\n").replace("<br>", "\n").replace("<br />", "\n")
-    t = re.sub(r"<[^>]+>", "", t)
-    t = htmllib.unescape(t)
-    return t.strip()
-
-
-class LodgifyAdapter:
-    """Thin async client for the Lodgify Public API v2. Auth via X-ApiKey header."""
-
-    BASE = "https://api.lodgify.com/v2"
-
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-
-    def _headers(self):
-        return {"X-ApiKey": self.api_key, "Accept": "application/json"}
-
-    async def _get(self, http: httpx.AsyncClient, path: str, params: dict = None):
-        for attempt in range(3):
-            r = await http.get(f"{self.BASE}{path}", params=params or {}, headers=self._headers())
-            if r.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-                await asyncio.sleep(2 ** attempt)
-                continue
-            if r.status_code == 401 or r.status_code == 403:
-                raise HTTPException(status_code=400, detail="Clé API Lodgify invalide")
-            if r.status_code >= 400:
-                raise HTTPException(status_code=502, detail=f"Lodgify {r.status_code}")
-            return r.json()
-        raise HTTPException(status_code=502, detail="Lodgify indisponible")
-
-    async def validate(self, http):
-        body = await self._get(http, "/properties", {"page": 1, "size": 1, "includeCount": "true"})
-        return body.get("count", len(body.get("items", [])))
-
-    async def list_properties(self, http):
-        page, out = 1, []
-        while True:
-            body = await self._get(http, "/properties", {"page": page, "size": 50, "includeCount": "true"})
-            items = body.get("items", [])
-            out.extend(items)
-            if len(items) < 50:
-                return out
-            page += 1
-
-    async def list_bookings(self, http, stay="All"):
-        page, out = 1, []
-        while True:
-            body = await self._get(http, "/reservations/bookings",
-                                   {"page": page, "size": 50, "stayFilter": stay, "includeCount": "true"})
-            items = body.get("items", [])
-            out.extend(items)
-            if len(items) < 50 or page >= 20:
-                return out
-            page += 1
-
-    async def get_thread(self, http, uid):
-        return await self._get(http, f"/messaging/{uid}")
-
-    async def send_message(self, http, booking_id: str, message: str, subject: str = ""):
-        payload = [{
-            "subject": subject or "Re:",
-            "message": message,
-            "type": "Owner",
-            "send_notification": True,
-        }]
-        r = await http.post(
-            f"https://api.lodgify.com/v1/reservation/{booking_id}/messages",
-            json=payload,
-            headers={**self._headers(), "Content-Type": "application/json"},
-        )
-        if r.status_code >= 400:
-            raise HTTPException(status_code=502, detail=f"Lodgify envoi {r.status_code}")
-        return r.status_code
-
-
 async def get_channel_adapter(user_id: str):
     doc = await db.channel_settings.find_one({"user_id": user_id}, {"_id": 0})
     if not doc or not doc.get("api_key"):
         return None, None
     return LodgifyAdapter(doc["api_key"]), doc
-
-
-def map_lodgify_property(lp: dict) -> dict:
-    img = lp.get("image_url") or ""
-    if img.startswith("//"):
-        img = "https:" + img
-    return {
-        "name": lp.get("name") or lp.get("internal_name") or f"Logement {lp.get('id')}",
-        "location": lp.get("city") or lp.get("country") or "",
-        "image_url": img,
-        "base_price": 0,
-        "capacity": 2,
-        "bedrooms": 1,
-        "owner": "",
-        "surface": 0,
-        "address": lp.get("address") or "",
-        "postal_code": lp.get("zip") or "",
-        "city": lp.get("city") or "",
-        "address_complement": "",
-        "description": strip_html(lp.get("description") or "")[:1000],
-        "rooms": [],
-        "amenities": [],
-        "seasons": [],
-        "ical_links": [],
-        "lodgify_id": str(lp.get("id")),
-    }
 
 
 class ChannelConnectIn(BaseModel):
@@ -1766,6 +1633,60 @@ async def delete_staff(staff_id: str, user=Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
+# Members (utilisateurs) — équipe avec rôles et autorisations granulaires
+# ---------------------------------------------------------------------------
+class MemberIn(BaseModel):
+    first_name: str = ""
+    last_name: str = ""
+    email: str = ""
+    phone: str = ""
+    language: str = "fr"
+    role: str = "member"
+    permissions: List[str] = []
+    active: bool = True
+
+
+@api_router.get("/members")
+async def list_members(user=Depends(get_current_user)):
+    return await db.members.find({"user_id": user["user_id"]}, {"_id": 0}).sort("first_name", 1).to_list(500)
+
+
+@api_router.post("/members")
+async def create_member(payload: MemberIn, user=Depends(get_current_user)):
+    doc = payload.dict()
+    doc["id"] = str(uuid.uuid4())
+    doc["user_id"] = user["user_id"]
+    doc["created_at"] = now_utc().isoformat()
+    await db.members.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/members/{member_id}")
+async def get_member(member_id: str, user=Depends(get_current_user)):
+    m = await db.members.find_one({"id": member_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    return m
+
+
+@api_router.put("/members/{member_id}")
+async def update_member(member_id: str, payload: MemberIn, user=Depends(get_current_user)):
+    res = await db.members.update_one(
+        {"id": member_id, "user_id": user["user_id"]}, {"$set": payload.dict()})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    return await db.members.find_one({"id": member_id}, {"_id": 0})
+
+
+@api_router.delete("/members/{member_id}")
+async def delete_member(member_id: str, user=Depends(get_current_user)):
+    await db.members.delete_one({"id": member_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+
+
+# ---------------------------------------------------------------------------
 # Owners (propriétaires) — managed in Settings, linked to properties
 # ---------------------------------------------------------------------------
 class OwnerIn(BaseModel):
@@ -1815,6 +1736,37 @@ async def delete_owner(owner_id: str, user=Depends(get_current_user)):
     await db.properties.update_many(
         {"user_id": user["user_id"], "owner_id": owner_id}, {"$set": {"owner_id": None}})
     return {"ok": True}
+
+
+@api_router.post("/owners/{owner_id}/documents")
+async def add_owner_document(owner_id: str, body: dict, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    owner = await db.owners.find_one({"id": owner_id, "user_id": uid}, {"_id": 0})
+    if not owner:
+        raise HTTPException(status_code=404, detail="Propriétaire introuvable")
+    path = (body.get("path") or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="Fichier manquant")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": (body.get("name") or "Document").strip(),
+        "path": path,
+        "created_at": now_utc().isoformat(),
+    }
+    docs = (owner.get("documents") or []) + [doc]
+    await db.owners.update_one({"id": owner_id, "user_id": uid}, {"$set": {"documents": docs}})
+    return await db.owners.find_one({"id": owner_id}, {"_id": 0})
+
+
+@api_router.delete("/owners/{owner_id}/documents/{doc_id}")
+async def delete_owner_document(owner_id: str, doc_id: str, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    owner = await db.owners.find_one({"id": owner_id, "user_id": uid}, {"_id": 0})
+    if not owner:
+        raise HTTPException(status_code=404, detail="Propriétaire introuvable")
+    docs = [d for d in (owner.get("documents") or []) if d.get("id") != doc_id]
+    await db.owners.update_one({"id": owner_id, "user_id": uid}, {"$set": {"documents": docs}})
+    return await db.owners.find_one({"id": owner_id}, {"_id": 0})
 
 
 @api_router.get("/owners/{owner_id}/summary")
@@ -1890,7 +1842,7 @@ DEFAULT_TEMPLATES = [
     {"marker_key": "paid", "name": "Payée", "kind": "payment", "color": "#30D158",
      "body": "", "trigger_event": "payment", "trigger_days": 0, "enabled": True, "order": 10},
     {"marker_key": "booklet", "name": "Livret d'accueil envoyé", "kind": "message", "color": "#0A84FF",
-     "body": "Bonjour {guest}, voici votre livret d'accueil pour {property}. Bon séjour !",
+     "body": "Bonjour {guest}, voici votre livret d'accueil pour {property} : {welcome_book}. Bon séjour !",
      "trigger_event": "before_arrival", "trigger_days": 3, "enabled": False, "order": 20},
     {"marker_key": "keys", "name": "Instructions clés envoyées", "kind": "message", "color": "#BF5AF2",
      "body": "Bonjour {guest}, voici les instructions pour récupérer les clés de {property}.",
@@ -1979,6 +1931,8 @@ async def run_automations_for_user(uid: str):
         return 0
     tmap = {t["marker_key"]: t for t in templates}
     adapter = LodgifyAdapter(settings["api_key"])
+    props = await db.properties.find({"user_id": uid}, {"_id": 0, "id": 1, "welcome_book_url": 1}).to_list(2000)
+    pmap = {p["id"]: p for p in props}
     today = date.today()
     sent = 0
     reservations = await db.reservations.find(
@@ -2000,7 +1954,8 @@ async def run_automations_for_user(uid: str):
                     continue
                 if t["trigger_event"] == "before_arrival" and today >= ci - timedelta(days=int(t.get("trigger_days", 0))):
                     body = (t.get("body") or "").replace("{guest}", r.get("guest_name", "")).replace(
-                        "{property}", r.get("property_name") or "")
+                        "{property}", r.get("property_name") or "").replace(
+                        "{welcome_book}", (pmap.get(r.get("property_id"), {}) or {}).get("welcome_book_url", "") or "")
                     try:
                         await adapter.send_message(http, r["lodgify_id"], body, t["name"])
                     except Exception:
@@ -2070,11 +2025,12 @@ def _get_object(path: str):
 @api_router.post("/upload")
 async def upload_file(file: UploadFile = File(...), user=Depends(get_current_user)):
     ext = (file.filename or "photo.jpg").rsplit(".", 1)[-1].lower()
-    if ext not in ("jpg", "jpeg", "png", "webp", "heic"):
-        ext = "jpg"
+    allowed = ("jpg", "jpeg", "png", "webp", "heic", "pdf", "doc", "docx", "xls", "xlsx", "txt", "csv")
+    if ext not in allowed:
+        ext = "bin"
     path = f"{_APP_NAME}/uploads/{user['user_id']}/{uuid.uuid4().hex}.{ext}"
     data = await file.read()
-    ct = file.content_type or "image/jpeg"
+    ct = file.content_type or "application/octet-stream"
     try:
         result = await run_in_threadpool(_put_object, path, data, ct)
     except Exception as e:

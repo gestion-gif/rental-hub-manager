@@ -67,6 +67,8 @@ export default function RootLayout() {
                   options={{ presentation: "modal" }}
                 />
                 <Stack.Screen name="settings/index" />
+                <Stack.Screen name="settings/members" />
+                <Stack.Screen name="settings/member-form" />
                 <Stack.Screen name="settings/staff" />
                 <Stack.Screen name="settings/owners" />
                 <Stack.Screen name="settings/owner/[id]" />

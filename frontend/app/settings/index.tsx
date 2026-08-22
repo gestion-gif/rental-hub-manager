@@ -7,6 +7,7 @@ import { useRouter } from "expo-router";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const OPTIONS = [
+  { path: "/settings/members", icon: "people-circle-outline", title: "Utilisateurs", sub: "Équipe, rôles & autorisations" },
   { path: "/settings/staff", icon: "people-outline", title: "Intervenants", sub: "Équipe ménage & technique" },
   { path: "/settings/owners", icon: "person-outline", title: "Propriétaires", sub: "Fiches, logements & revenus" },
   { path: "/settings/messages", icon: "chatbubbles-outline", title: "Messages automatiques", sub: "Modèles, marqueurs & couleurs" },

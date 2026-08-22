@@ -1,13 +1,16 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Alert, Modal, Linking } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import * as DocumentPicker from "expo-document-picker";
 import dayjs from "dayjs";
 import "dayjs/locale/fr";
 dayjs.locale("fr");
 
-import { api } from "@/src/api";
+import { api, uploadFile, fileUrl } from "@/src/api";
+import { Field, PrimaryButton } from "@/src/components/ui";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 export default function OwnerDetail() {
@@ -16,12 +19,53 @@ export default function OwnerDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [editModal, setEditModal] = useState(false);
+  const [form, setForm] = useState({ name: "", email: "", phone: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     try { setData(await api.get(`/owners/${id}/summary`)); } catch {}
     setLoading(false);
   }, [id]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  function openEdit() {
+    const o = data.owner;
+    setForm({ name: o.name || "", email: o.email || "", phone: o.phone || "", notes: o.notes || "" });
+    setEditModal(true);
+  }
+
+  async function saveEdit() {
+    if (!form.name.trim() || saving) return;
+    setSaving(true);
+    try { await api.put(`/owners/${id}`, form); setEditModal(false); await load(); } catch {}
+    setSaving(false);
+  }
+
+  async function importDocument() {
+    if (uploading) return;
+    try {
+      const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
+      if (res.canceled || !res.assets?.length) return;
+      const asset = res.assets[0];
+      setUploading(true);
+      const path = await uploadFile(asset.uri, asset.name || "document", asset.mimeType || "application/octet-stream");
+      const updated = await api.post(`/owners/${id}/documents`, { name: asset.name || "Document", path });
+      setData((d: any) => ({ ...d, owner: updated }));
+    } catch (e: any) {
+      Alert.alert("Import", e?.message || "Import du document échoué");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removeDocument(docId: string) {
+    try {
+      const updated = await api.del(`/owners/${id}/documents/${docId}`);
+      setData((d: any) => ({ ...d, owner: updated }));
+    } catch {}
+  }
 
   async function remove() {
     Alert.alert("Supprimer", "Supprimer ce propriétaire ? Les logements associés seront déliés.", [
@@ -34,6 +78,7 @@ export default function OwnerDetail() {
   if (!data) return <View style={styles.center}><Text>Introuvable</Text></View>;
 
   const { owner, properties, revenue_total, reservations_count, nights_total, per_month, per_property } = data;
+  const documents = owner.documents || [];
   const maxRev = Math.max(1, ...per_month.map((m: any) => m.revenue));
   const recent = per_month.slice(-6);
 
@@ -44,9 +89,14 @@ export default function OwnerDetail() {
           <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
         </Pressable>
         <Text style={styles.title} numberOfLines={1}>{owner.name}</Text>
-        <Pressable testID="delete-owner" onPress={remove} style={styles.backBtn}>
-          <Ionicons name="trash-outline" size={18} color={colors.error} />
-        </Pressable>
+        <View style={{ flexDirection: "row", gap: spacing.sm }}>
+          <Pressable testID="edit-owner" onPress={openEdit} style={styles.backBtn}>
+            <Ionicons name="create-outline" size={18} color={colors.onSurface} />
+          </Pressable>
+          <Pressable testID="delete-owner" onPress={remove} style={styles.backBtn}>
+            <Ionicons name="trash-outline" size={18} color={colors.error} />
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }}>
@@ -123,7 +173,55 @@ export default function OwnerDetail() {
             </Pressable>
           ))
         )}
+
+        <View style={styles.docHead}>
+          <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Documents ({documents.length})</Text>
+          <Pressable testID="import-document" onPress={importDocument} style={styles.importBtn} disabled={uploading}>
+            {uploading ? (
+              <ActivityIndicator size="small" color={colors.brandPrimary} />
+            ) : (
+              <>
+                <Ionicons name="cloud-upload-outline" size={16} color={colors.brandPrimary} />
+                <Text style={styles.importBtnText}>Importer</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+        {documents.length === 0 ? (
+          <Text style={styles.empty}>Aucun document. Importez baux, mandats, attestations...</Text>
+        ) : (
+          documents.map((doc: any) => (
+            <View key={doc.id} style={styles.docRow}>
+              <Ionicons name="document-text-outline" size={18} color={colors.onSurfaceSecondary} />
+              <Pressable style={{ flex: 1 }} onPress={() => Linking.openURL(fileUrl(doc.path))}>
+                <Text style={styles.docName} numberOfLines={1}>{doc.name}</Text>
+                {!!doc.created_at && <Text style={styles.docDate}>{dayjs(doc.created_at).format("DD MMM YYYY")}</Text>}
+              </Pressable>
+              <Pressable testID={`del-doc-${doc.id}`} onPress={() => removeDocument(doc.id)} hitSlop={8}>
+                <Ionicons name="trash-outline" size={18} color={colors.error} />
+              </Pressable>
+            </View>
+          ))
+        )}
       </ScrollView>
+
+      <Modal visible={editModal} animationType="slide" transparent onRequestClose={() => setEditModal(false)}>
+        <View style={styles.modalWrap}>
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>Modifier le propriétaire</Text>
+              <Pressable testID="close-owner-edit" onPress={() => setEditModal(false)}><Ionicons name="close" size={22} color={colors.onSurface} /></Pressable>
+            </View>
+            <KeyboardAwareScrollView bottomOffset={20}>
+              <Field label="Nom" testID="edit-owner-name" value={form.name} onChangeText={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="M. Dupont / SCI Azur" />
+              <Field label="Email" testID="edit-owner-email" value={form.email} onChangeText={(v) => setForm((f) => ({ ...f, email: v }))} placeholder="contact@exemple.fr" autoCapitalize="none" keyboardType="email-address" />
+              <Field label="Téléphone" testID="edit-owner-phone" value={form.phone} onChangeText={(v) => setForm((f) => ({ ...f, phone: v }))} placeholder="06 12 34 56 78" keyboardType="phone-pad" />
+              <Field label="Notes" testID="edit-owner-notes" value={form.notes} onChangeText={(v) => setForm((f) => ({ ...f, notes: v }))} placeholder="Informations complémentaires" multiline style={styles.textarea} />
+              <PrimaryButton testID="save-owner-edit" label="Enregistrer" onPress={saveEdit} loading={saving} disabled={!form.name.trim()} />
+            </KeyboardAwareScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -170,4 +268,15 @@ const styles = StyleSheet.create({
   ppBarTrack: { flex: 1, height: 8, backgroundColor: colors.surfaceSecondary, borderRadius: 4, overflow: "hidden" },
   ppBarFill: { height: "100%", backgroundColor: colors.brandPrimary, borderRadius: 4, minWidth: 2 },
   ppMonthVal: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurface, width: 62, textAlign: "right" },
+  docHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.xl, marginBottom: spacing.md },
+  importBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.pill },
+  importBtnText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
+  docRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.lg, marginBottom: spacing.sm },
+  docName: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  docDate: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  modalWrap: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+  sheet: { backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, maxHeight: "85%" },
+  sheetHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.lg },
+  sheetTitle: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
+  textarea: { minHeight: 90, textAlignVertical: "top" },
 });

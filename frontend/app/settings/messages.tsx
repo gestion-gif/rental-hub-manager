@@ -136,7 +136,8 @@ export default function MessagesScreen() {
               </View>
               {!isPayment && (
                 <>
-                  <Field label="Message envoyé au voyageur" testID="tpl-body" value={form.body} onChangeText={(v: string) => setForm((f: any) => ({ ...f, body: v }))} placeholder="Utilisez {guest} et {property}" multiline style={styles.textarea} />
+                  <Field label="Message envoyé au voyageur" testID="tpl-body" value={form.body} onChangeText={(v: string) => setForm((f: any) => ({ ...f, body: v }))} placeholder="Utilisez {guest}, {property} et {welcome_book}" multiline style={styles.textarea} />
+                  <Text style={styles.varHint}>Variables : {"{guest}"} (voyageur), {"{property}"} (logement), {"{welcome_book}"} (lien du livret d'accueil du logement)</Text>
                   <Field label="Envoyer combien de jours avant l'arrivée ?" testID="tpl-days" value={String(form.trigger_days)} onChangeText={(v: string) => setForm((f: any) => ({ ...f, trigger_days: v.replace(/[^0-9]/g, "") }))} keyboardType="number-pad" placeholder="3" />
                   <View style={styles.switchRow}>
                     <View style={{ flex: 1 }}>
@@ -181,5 +182,6 @@ const styles = StyleSheet.create({
   swatch: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   swatchActive: { borderWidth: 3, borderColor: colors.onSurface },
   textarea: { minHeight: 90, textAlignVertical: "top", paddingTop: 12 },
+  varHint: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: -6, marginBottom: spacing.md },
   switchRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.lg },
 });

@@ -7,6 +7,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { api } from "@/src/api";
 import { Field, PrimaryButton } from "@/src/components/ui";
+import { PropertyPicker } from "@/src/components/PropertyPicker";
 import { ROOM_OPTIONS, AMENITY_OPTIONS } from "@/src/propertyOptions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
@@ -139,28 +140,16 @@ export default function PropertyForm() {
         {owners.length > 0 && (
           <View style={{ marginBottom: spacing.lg }}>
             <Text style={styles.ownerLabel}>Propriétaire</Text>
-            <View style={styles.ownerChips}>
-              <Pressable
-                testID="owner-chip-none"
-                onPress={() => { setOwnerId(""); set("owner", ""); }}
-                style={[styles.ownerChip, !ownerId && styles.ownerChipActive]}
-              >
-                <Text style={[styles.ownerChipText, !ownerId && styles.ownerChipTextActive]}>Aucun</Text>
-              </Pressable>
-              {owners.map((o) => {
-                const active = ownerId === o.id;
-                return (
-                  <Pressable
-                    key={o.id}
-                    testID={`owner-chip-${o.id}`}
-                    onPress={() => { setOwnerId(o.id); set("owner", o.name); }}
-                    style={[styles.ownerChip, active && styles.ownerChipActive]}
-                  >
-                    <Text style={[styles.ownerChipText, active && styles.ownerChipTextActive]}>{o.name}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <PropertyPicker
+              testID="owner-picker"
+              value={ownerId || "all"}
+              items={owners.map((o: any) => ({ id: o.id, name: o.name }))}
+              allLabel="Aucun"
+              onSelect={(v: string) => {
+                if (v === "all") { setOwnerId(""); set("owner", ""); }
+                else { setOwnerId(v); set("owner", owners.find((o: any) => o.id === v)?.name || ""); }
+              }}
+            />
           </View>
         )}
         <Field label={owners.length > 0 ? "Propriétaire (nom libre)" : "Propriétaire"} testID="prop-owner" value={form.owner} onChangeText={(v) => set("owner", v)} placeholder="Nom du propriétaire" />

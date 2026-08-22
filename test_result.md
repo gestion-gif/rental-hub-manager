@@ -326,3 +326,34 @@ backend:
 agent_communication:
     -agent: "main"
     -message: "Iteration 11. Tester UNIQUEMENT le backend (frontend = Google OAuth non automatisable). Auth: insérer users + user_sessions (user_id de TEST isolé ex test_iter11) dans Mongo, header Authorization: Bearer <token>. À TESTER: 1) POST /api/reservations (manuelle) -> finance présente (total=due=total_price, paid=0). PUT en changeant total_price -> finance.total et due mis à jour. 2) PATCH /api/reservations/{id}/commission {amount:50} -> finance.commission=50. 3) GET/PUT /api/preferences avec commission_rates (PUT partiel commission_rates ne doit pas effacer statuses). 4) POST /api/reservations/{id}/checkout kind=payment (sans amount -> prend finance.due) et kind=deposit {amount:300, origin_url:'https://x'} -> renvoie url+session_id; amount invalide (deposit amount 0) -> 400. GET /api/checkout/status/{session_id} -> renvoie payment_status (unpaid/open attendu car pas de vrai paiement); session_id inconnu -> 404. NE PAS compléter un paiement carte réel. 5) GET /api/analytics/revenue?year=2026 avec 1 logement + 2 réservations -> structure properties/totals correcte, revenu réparti par mois. NE PAS tester /channel/sync ni l'envoi de messages Lodgify (données réelles)."
+
+## Iteration 12 — Module Utilisateurs (rôles & autorisations granulaires)
+backend:
+  - task: "Members (utilisateurs) CRUD"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Nouvelle collection members. GET /api/members (tri first_name), POST /api/members (MemberIn: first_name,last_name,email,phone,language,role,permissions[],active), GET /api/members/{id} (404 si absent), PUT /api/members/{id} (404 si absent), DELETE /api/members/{id}. Isolé par user_id. À tester en backend uniquement."
+
+frontend:
+  - task: "Module Utilisateurs UI (liste + formulaire rôles/autorisations)"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/settings/members.tsx, member-form.tsx, src/permissions.ts, src/components/Picker.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Écran Utilisateurs (liste + FAB), formulaire avec 3 encarts (Coordonnées, Infos complémentaires avec langue, Rôle+autorisations). Rôle applique des autorisations par défaut. Cases à cocher: 15 autorisations générales + 28 PM Modules. Non testable auto (Google OAuth)."
+
+agent_communication:
+    -agent: "main"
+    -message: "Iteration 12. Tester UNIQUEMENT le backend: nouveau CRUD /api/members. Auth: insérer users + user_sessions (user_id de TEST isolé ex test_iter12) dans Mongo, header Authorization: Bearer <token>. TESTS: 1) POST /api/members {first_name:'Marie', last_name:'Dupont', email:'m@x.com', role:'manager', language:'fr', permissions:['edit_property','view_guest_name'], active:true} -> renvoie id, tous les champs. 2) GET /api/members -> liste triée par first_name, contient le membre. 3) GET /api/members/{id} -> le membre; id inconnu -> 404. 4) PUT /api/members/{id} {...modifié role:'admin'} -> mis à jour; id inconnu -> 404. 5) DELETE /api/members/{id} -> {ok:true}, puis GET liste ne le contient plus. 6) Isolation: un membre créé par user A ne doit pas apparaître pour user B. NE PAS tester le frontend."
