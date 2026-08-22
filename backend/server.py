@@ -854,57 +854,58 @@ _BLOCK_SUMMARIES = {
 }
 
 
-@api_router.post("/properties/{property_id}/sync")
-async def sync_ical(property_id: str, user=Depends(get_current_user)):
-    prop = await db.properties.find_one({"id": property_id, "user_id": user["user_id"]}, {"_id": 0})
+async def run_ical_sync(user_id: str, property_id: str):
+    """Coeur de la synchro iCal (import). Persiste le statut par lien sur le logement.
+    Renvoie un récap ou None si le logement est introuvable."""
+    prop = await db.properties.find_one({"id": property_id, "user_id": user_id}, {"_id": 0})
     if not prop:
-        raise HTTPException(status_code=404, detail="Property not found")
+        return None
     links = prop.get("ical_links") or []
     if not links:
-        return {"imported": 0, "updated": 0, "errors": ["Aucun lien iCal configuré"]}
+        return {"imported": 0, "updated": 0, "errors": ["Aucun lien iCal configuré"], "details": []}
 
     imported = 0
     updated = 0
     errors = []
     details = []
+    updated_links = []
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15",
         "Accept": "text/calendar, text/plain, */*",
     }
+    now_iso = now_utc().isoformat()
     async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=headers) as http:
         for link in links:
             platform = link.get("platform", "iCal")
             url = link.get("url", "").strip()
-            if url.startswith("webcal://"):
-                url = "https://" + url[len("webcal://"):]
+            meta = {"platform": platform, "url": link.get("url", ""), "last_synced_at": now_iso,
+                    "last_imported": 0, "last_updated": 0, "last_count": 0, "last_error": ""}
+            fetch_url = url
+            if fetch_url.startswith("webcal://"):
+                fetch_url = "https://" + fetch_url[len("webcal://"):]
             link_imported = 0
             link_updated = 0
             try:
-                resp = await http.get(url)
+                resp = await http.get(fetch_url)
                 body = resp.text
                 looks_ical = "BEGIN:VCALENDAR" in body or "BEGIN:VEVENT" in body
-                logger.info(
-                    "iCal sync %s: url=%s status=%s len=%s ical=%s",
-                    platform, url[:80], resp.status_code, len(body), looks_ical,
-                )
                 if resp.status_code != 200:
                     msg = f"{platform}: lien inaccessible (HTTP {resp.status_code})"
-                    errors.append(msg)
-                    details.append(msg)
-                    continue
+                    errors.append(msg); details.append(msg)
+                    meta["last_error"] = f"HTTP {resp.status_code}"
+                    updated_links.append(meta); continue
                 if not looks_ical:
                     msg = f"{platform}: le lien ne renvoie pas un calendrier iCal (vérifiez l'URL d'export .ics)"
-                    errors.append(msg)
-                    details.append(msg)
-                    continue
+                    errors.append(msg); details.append(msg)
+                    meta["last_error"] = "Pas un calendrier iCal"
+                    updated_links.append(meta); continue
                 events = parse_ical(body)
                 valid_events = [e for e in events if e.get("start") and e.get("end")]
-                logger.info("iCal sync %s: %s events parsed (%s valid)", platform, len(events), len(valid_events))
                 feed_uids = []
                 for ev in valid_events:
                     uid = ev.get("uid") or f"{platform}-{ev['start']}-{ev['end']}"
                     feed_uids.append(uid)
-                    await ensure_cleaning(user["user_id"], property_id, ev.get("end"), "confirmee")
+                    await ensure_cleaning(user_id, property_id, ev.get("end"), "confirmee")
                     summary = (ev.get("summary") or "").strip()
                     description = (ev.get("description") or "").strip()
                     if summary and summary.lower() not in _BLOCK_SUMMARIES:
@@ -914,46 +915,30 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
                     note = f"Importé depuis {platform}"
                     if description:
                         note += f"\n{description}"
-                    q = {"user_id": user["user_id"], "property_id": property_id, "ical_uid": uid}
+                    q = {"user_id": user_id, "property_id": property_id, "ical_uid": uid}
                     existing = await db.reservations.find_one(q)
                     if existing:
                         await db.reservations.update_one(q, {"$set": {
-                            "check_in": ev["start"],
-                            "check_out": ev["end"],
-                            "guest_name": guest,
-                            "platform": platform,
-                            "notes": note,
+                            "check_in": ev["start"], "check_out": ev["end"],
+                            "guest_name": guest, "platform": platform, "notes": note,
                         }})
-                        updated += 1
-                        link_updated += 1
+                        updated += 1; link_updated += 1
                     else:
                         await db.reservations.insert_one({
-                            "id": str(uuid.uuid4()),
-                            "user_id": user["user_id"],
-                            "property_id": property_id,
-                            "guest_name": guest,
-                            "guest_email": "",
-                            "platform": platform,
-                            "check_in": ev["start"],
-                            "check_out": ev["end"],
-                            "guests": 1,
-                            "total_price": 0,
-                            "status": "confirmee",
-                            "notes": note,
-                            "source": "ical",
-                            "ical_uid": uid,
-                            "created_at": now_utc().isoformat(),
+                            "id": str(uuid.uuid4()), "user_id": user_id, "property_id": property_id,
+                            "guest_name": guest, "guest_email": "", "platform": platform,
+                            "check_in": ev["start"], "check_out": ev["end"], "guests": 1,
+                            "total_price": 0, "status": "confirmee", "notes": note,
+                            "source": "ical", "ical_uid": uid, "created_at": now_utc().isoformat(),
                         })
-                        imported += 1
-                        link_imported += 1
-                # Remove imported reservations that disappeared from the feed
+                        imported += 1; link_imported += 1
                 await db.reservations.delete_many({
-                    "user_id": user["user_id"],
-                    "property_id": property_id,
-                    "source": "ical",
-                    "platform": platform,
-                    "ical_uid": {"$nin": feed_uids},
+                    "user_id": user_id, "property_id": property_id, "source": "ical",
+                    "platform": platform, "ical_uid": {"$nin": feed_uids},
                 })
+                meta["last_imported"] = link_imported
+                meta["last_updated"] = link_updated
+                meta["last_count"] = len(valid_events)
                 if len(valid_events) == 0:
                     details.append(f"{platform}: aucune réservation dans le calendrier")
                 else:
@@ -961,10 +946,50 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
             except Exception as e:
                 logger.exception("iCal sync error for %s", platform)
                 msg = f"{platform}: erreur ({str(e)[:80]})"
-                errors.append(msg)
-                details.append(msg)
+                errors.append(msg); details.append(msg)
+                meta["last_error"] = str(e)[:120]
+            updated_links.append(meta)
 
-    return {"imported": imported, "updated": updated, "errors": errors, "details": details}
+    await db.properties.update_one(
+        {"id": property_id, "user_id": user_id},
+        {"$set": {"ical_links": updated_links, "ical_last_sync": now_iso}})
+    return {"imported": imported, "updated": updated, "errors": errors, "details": details,
+            "last_sync": now_iso, "ical_links": updated_links}
+
+
+@api_router.post("/properties/{property_id}/sync")
+async def sync_ical(property_id: str, user=Depends(get_current_user)):
+    res = await run_ical_sync(user["user_id"], property_id)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return res
+
+
+async def _ical_auto_sync_loop():
+    """Boucle de synchro iCal automatique : chaque logement resynchronisé ~toutes les 24h."""
+    await asyncio.sleep(60)  # laisser l'app démarrer
+    while True:
+        try:
+            props = await db.properties.find(
+                {"ical_links.0": {"$exists": True}}, {"_id": 0, "id": 1, "user_id": 1, "ical_last_sync": 1}).to_list(2000)
+            for p in props:
+                last = p.get("ical_last_sync")
+                stale = True
+                if last:
+                    try:
+                        stale = (now_utc() - datetime.fromisoformat(last)).total_seconds() > 23 * 3600
+                    except Exception:
+                        stale = True
+                if stale:
+                    try:
+                        await run_ical_sync(p["user_id"], p["id"])
+                    except Exception:
+                        logger.exception("auto ical sync failed for %s", p.get("id"))
+                    await asyncio.sleep(2)  # espacer les appels externes
+        except Exception:
+            logger.exception("auto ical loop error")
+        await asyncio.sleep(3600)  # revérifier chaque heure
+
 
 
 class IcalLinksIn(BaseModel):
@@ -2430,6 +2455,7 @@ async def startup():
     await db.reservations.create_index("user_id")
     await db.interventions.create_index("user_id")
     asyncio.create_task(automation_scheduler())
+    asyncio.create_task(_ical_auto_sync_loop())
 
 
 async def automation_scheduler():

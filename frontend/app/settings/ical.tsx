@@ -5,6 +5,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import dayjs from "dayjs";
+import "dayjs/locale/fr";
+dayjs.locale("fr");
 
 import { api } from "@/src/api";
 import { Picker } from "@/src/components/Picker";
@@ -24,8 +27,9 @@ export default function IcalSettings() {
   const router = useRouter();
   const [properties, setProperties] = useState<any[]>([]);
   const [selected, setSelected] = useState<string>("");
-  const [links, setLinks] = useState<{ platform: string; url: string }[]>([]);
+  const [links, setLinks] = useState<any[]>([]);
   const [exportUrl, setExportUrl] = useState("");
+  const [lastSync, setLastSync] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -47,7 +51,8 @@ export default function IcalSettings() {
   async function selectProperty(prop: any, list = properties) {
     const p = (list.find((x) => x.id === prop.id) || prop);
     setSelected(p.id);
-    setLinks((p.ical_links || []).map((l: any) => ({ platform: l.platform || "Autre", url: l.url || "" })));
+    setLinks((p.ical_links || []).map((l: any) => ({ ...l })));
+    setLastSync(p.ical_last_sync || "");
     setSyncMsg("");
     try {
       const ex = await api.get(`/properties/${p.id}/ical-export`);
@@ -73,10 +78,10 @@ export default function IcalSettings() {
   async function saveLinks() {
     if (saving) return;
     setSaving(true);
+    const payload = links.map((l) => ({ platform: l.platform, url: l.url }));
     try {
-      await api.put(`/properties/${selected}/ical-links`, { links });
-      // refresh local property copy
-      setProperties((ps) => ps.map((p) => (p.id === selected ? { ...p, ical_links: links } : p)));
+      await api.put(`/properties/${selected}/ical-links`, { links: payload });
+      setProperties((ps) => ps.map((p) => (p.id === selected ? { ...p, ical_links: payload } : p)));
       Alert.alert("Enregistré", "Vos liens d'import iCal ont été enregistrés.");
     } catch {
       Alert.alert("Erreur", "Enregistrement impossible.");
@@ -88,9 +93,13 @@ export default function IcalSettings() {
     if (syncing) return;
     setSyncing(true);
     setSyncMsg("");
+    const payload = links.map((l) => ({ platform: l.platform, url: l.url }));
     try {
-      await api.put(`/properties/${selected}/ical-links`, { links });
+      await api.put(`/properties/${selected}/ical-links`, { links: payload });
       const res = await api.post(`/properties/${selected}/sync`, {});
+      if (res.ical_links) setLinks(res.ical_links);
+      if (res.last_sync) setLastSync(res.last_sync);
+      setProperties((ps) => ps.map((p) => (p.id === selected ? { ...p, ical_links: res.ical_links || payload, ical_last_sync: res.last_sync } : p)));
       const parts: string[] = [];
       if (typeof res.imported === "number") parts.push(`${res.imported} importée(s)`);
       if (typeof res.updated === "number") parts.push(`${res.updated} mise(s) à jour`);
@@ -166,15 +175,31 @@ export default function IcalSettings() {
             </View>
             <View style={styles.card}>
               <Text style={styles.hint}>Collez les liens iCal exportés par les plateformes pour importer leurs réservations ici.</Text>
-
+              {!!lastSync && (
+                <View style={styles.autoBadge}>
+                  <Ionicons name="time-outline" size={13} color={colors.onSurfaceSecondary} />
+                  <Text style={styles.autoText}>Synchro auto quotidienne · dernière : {dayjs(lastSync).format("D MMM HH:mm")}</Text>
+                </View>
+              )}
               {links.length === 0 && <Text style={styles.noLinks}>Aucun lien d'import pour l'instant.</Text>}
               {links.map((l, i) => (
-                <View key={i} style={styles.linkRow} testID={`ical-link-${i}`}>
-                  <View style={styles.platTag}><Text style={styles.platText}>{l.platform}</Text></View>
-                  <Text style={styles.linkUrl} numberOfLines={1}>{l.url}</Text>
-                  <Pressable testID={`remove-link-${i}`} onPress={() => removeLink(i)} hitSlop={8}>
-                    <Ionicons name="close-circle" size={20} color={colors.error} />
-                  </Pressable>
+                <View key={i} style={styles.linkItem} testID={`ical-link-${i}`}>
+                  <View style={styles.linkRow}>
+                    <View style={styles.platTag}><Text style={styles.platText}>{l.platform}</Text></View>
+                    <Text style={styles.linkUrl} numberOfLines={1}>{l.url}</Text>
+                    <Pressable testID={`remove-link-${i}`} onPress={() => removeLink(i)} hitSlop={8}>
+                      <Ionicons name="close-circle" size={20} color={colors.error} />
+                    </Pressable>
+                  </View>
+                  {l.last_error ? (
+                    <Text style={styles.statusErr}>⚠ {l.last_error}</Text>
+                  ) : l.last_synced_at ? (
+                    <Text style={styles.statusOk}>
+                      Synchro {dayjs(l.last_synced_at).format("D MMM HH:mm")} · {l.last_imported || 0} importée(s), {l.last_updated || 0} maj · {l.last_count || 0} évènement(s)
+                    </Text>
+                  ) : (
+                    <Text style={styles.statusPending}>Pas encore synchronisé</Text>
+                  )}
                 </View>
               ))}
 
@@ -255,7 +280,13 @@ const styles = StyleSheet.create({
   copyBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.brandPrimary, borderRadius: radius.md, paddingVertical: 12 },
   copyText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onBrandPrimary },
   noLinks: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, marginBottom: spacing.sm },
-  linkRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 10 },
+  linkItem: { paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider },
+  linkRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  statusOk: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.success, marginTop: 4, marginLeft: 2 },
+  statusErr: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.error, marginTop: 4, marginLeft: 2 },
+  statusPending: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 4, marginLeft: 2 },
+  autoBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.surfaceSecondary, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6, marginBottom: spacing.md },
+  autoText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
   platTag: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 4 },
   platText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
   linkUrl: { flex: 1, fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },

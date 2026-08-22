@@ -159,3 +159,9 @@
   - **Export** : flux .ics public par logement `GET /api/ical/{property_id}/{token}.ics` (sans auth, token stocké dans property.ical_export_token, VEVENT par réservation non annulée, SUMMARY neutre « Réservé (StayPilot) » pour ne pas divulguer le nom). URL récupérée via `GET /api/properties/{id}/ical-export`. Bouton Copier (expo-clipboard).
   - **Import** : gestion des liens iCal par logement via `PUT /api/properties/{id}/ical-links` {links:[{platform,url}]} (réutilise l'infra sync existante), bouton « Synchroniser » → POST /properties/{id}/sync.
 - Vérifié : payment_methods défaut/persistance OK ; flux .ics public renvoie un VCALENDAR valide, mauvais token → 404. 176/176 pytest verts, écrans rendus.
+
+## Ajout Sync auto iCal + statut + réorg drawer (2026-06)
+- **Drawer** : « Boîte de réception » remontée juste sous « Accueil » (rendue dans ITEMS.map après l'item index).
+- **Synchro iCal automatique** : refactor du endpoint en `run_ical_sync(user_id, property_id)` (réutilisable) qui persiste le statut par lien sur `property.ical_links` (last_synced_at, last_imported, last_updated, last_count, last_error) + `property.ical_last_sync`. Boucle de fond `_ical_auto_sync_loop` lancée au startup : vérifie chaque heure, resynchronise tout logement dont la dernière synchro date de +23h (quotidien de fait). Délai initial 60s, espacement 2s entre logements.
+- **Statut de sync (UI ical.tsx)** : chaque lien affiche « Synchro <date> · X importée(s), Y maj · Z évènement(s) » ou l'erreur en rouge ; badge « Synchro auto quotidienne · dernière : <date> ». Après sync manuelle, le statut se met à jour depuis la réponse.
+- 176/176 pytest verts (dont 10 tests iCal), écrans rendus, drawer vérifié.

@@ -62,15 +62,27 @@ function CustomDrawer(props: any) {
         {ITEMS.map((it) => {
           const active = current === it.name;
           return (
-            <Pressable
-              key={it.name}
-              testID={`drawer-${it.name}`}
-              onPress={() => navigation.navigate(it.name)}
-              style={[styles.item, active && styles.itemActive]}
-            >
-              <Ionicons name={it.icon as any} size={20} color={active ? colors.brandPrimary : colors.onSurfaceSecondary} />
-              <Text style={[styles.itemText, active && styles.itemTextActive]}>{it.label}</Text>
-            </Pressable>
+            <React.Fragment key={it.name}>
+              <Pressable
+                testID={`drawer-${it.name}`}
+                onPress={() => navigation.navigate(it.name)}
+                style={[styles.item, active && styles.itemActive]}
+              >
+                <Ionicons name={it.icon as any} size={20} color={active ? colors.brandPrimary : colors.onSurfaceSecondary} />
+                <Text style={[styles.itemText, active && styles.itemTextActive]}>{it.label}</Text>
+              </Pressable>
+              {it.name === "index" && canSeeInbox(user) && (
+                <Pressable testID="drawer-inbox" onPress={() => goStack("/inbox")} style={styles.item}>
+                  <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />
+                  <Text style={styles.itemText}>Boîte de réception</Text>
+                  {unread > 0 && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{unread > 9 ? "9+" : unread}</Text>
+                    </View>
+                  )}
+                </Pressable>
+              )}
+            </React.Fragment>
           );
         })}
 
@@ -87,15 +99,6 @@ function CustomDrawer(props: any) {
             <Text style={styles.itemText}>Statistiques</Text>
           </Pressable>
         )}
-        <Pressable testID="drawer-inbox" onPress={() => goStack("/inbox")} style={[styles.item, !canSeeInbox(user) && { display: "none" }]}>
-          <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />
-          <Text style={styles.itemText}>Boîte de réception</Text>
-          {unread > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{unread > 9 ? "9+" : unread}</Text>
-            </View>
-          )}
-        </Pressable>
         {canSeeSettings(user) && (
           <Pressable testID="drawer-settings" onPress={() => goStack("/settings")} style={styles.item}>
             <Ionicons name="settings-outline" size={20} color={colors.onSurfaceSecondary} />
