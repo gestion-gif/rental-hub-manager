@@ -191,3 +191,8 @@
 - **Ton du brouillon** : sélecteur de ton (Chaleureux / Pro / Concis) dans le fil de discussion, transmis à POST /api/inbox/{thread}/generate-draft {tone}. `_make_guest_draft(..., tone)` adapte le prompt.
 - **Réglages assistant** : préférence `ai_auto_draft` (défaut true) dans GET/PUT /api/preferences. Nouvel écran Paramètres → Assistant IA (toggle brouillons automatiques). Si désactivé : la pré-génération de fond ET l'auto-génération à l'ouverture d'une conversation sont sautées (génération manuelle toujours possible).
 - Testé : 185/185 pytest verts ; pricing structuré + PUT saison + toggle ai_auto_draft validés par curl ; app compile.
+
+## Traduction voyageur + brouillon multilingue + envoi 1-tap (2026-06)
+- **Brouillon dans la langue du voyageur** : `_make_guest_draft` rédige désormais le brouillon dans la MÊME langue que le dernier message du voyageur (le ton choisi reste appliqué).
+- **Traduction FR des messages voyageurs** : GET /api/inbox/{thread} traduit automatiquement en français les messages voyageurs rédigés dans une autre langue (`_translate_to_fr`, 1 appel Claude, sortie JSON). Chaque message voyageur non-français reçoit `text_fr` ; les messages déjà en français restent inchangés (pas de doublon). Brouillon + traduction sont lancés en parallèle (`asyncio.gather`). Affichage : encart « Traduction FR » sous la bulle du voyageur.
+- **Envoi en 1 tap** : la carte « Brouillon IA — à valider » propose « Modifier » (remplit la zone de saisie) et « Valider et envoyer » (envoie directement via `sendText`). Vérifié : traduction EN/DE→FR OK, FR inchangé (test unitaire `_translate_to_fr`).

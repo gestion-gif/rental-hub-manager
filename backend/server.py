@@ -1765,7 +1765,9 @@ async def _make_guest_draft(uid: str, thread_uid: str, last_guest_text: str,
     tone_txt = _TONE_LABELS.get(tone, _TONE_LABELS["chaleureux"])
     system = (
         "Tu es l'assistant d'un hôte de location saisonnière. "
-        f"Tu rédiges un BROUILLON de réponse au voyageur, court, sur un ton {tone_txt}, en français. "
+        f"Tu rédiges un BROUILLON de réponse au voyageur, court, sur un ton {tone_txt}. "
+        "Rédige le brouillon dans la MÊME langue que le dernier message du voyageur "
+        "(par défaut sa langue). "
         "Le brouillon sera relu et validé par l'hôte avant envoi. "
         "Réponds uniquement avec le message prêt à valider, sans préambule."
     )
@@ -1779,6 +1781,32 @@ async def _store_draft(uid: str, thread_uid: str, msg_id: str, draft: str):
         {"user_id": uid, "thread_uid": thread_uid},
         {"$set": {"ai_draft": draft, "ai_draft_at": now_utc().isoformat(),
                   "ai_draft_msg_id": msg_id, "ai_draft_validated": False}})
+
+
+async def _translate_to_fr(uid: str, thread_uid: str, texts: list) -> list:
+    """Traduit en français une liste de messages voyageurs (1 appel LLM, sortie JSON)."""
+    clean = [t for t in texts if (t or "").strip()]
+    if not clean:
+        return []
+    system = (
+        "Tu es un traducteur professionnel. On te donne un tableau JSON de messages de voyageurs. "
+        "Réponds STRICTEMENT par un tableau JSON de la MÊME longueur : chaque élément est la "
+        "traduction FRANÇAISE du message correspondant. Si un message est déjà en français, "
+        "renvoie-le inchangé. Aucun texte hors du tableau JSON."
+    )
+    chat = make_chat(system, f"trans_{uid}_{thread_uid}")
+    raw = await chat.send_message(UserMessage(text=json.dumps(texts, ensure_ascii=False)))
+    txt = (raw or "").strip()
+    if txt.startswith("```"):
+        txt = re.sub(r"^```(?:json)?\s*", "", txt)
+        txt = re.sub(r"\s*```$", "", txt).strip()
+    try:
+        arr = json.loads(txt)
+        if isinstance(arr, list) and len(arr) == len(texts):
+            return [str(x) for x in arr]
+    except Exception:
+        pass
+    return []
 
 
 @api_router.get("/inbox/{thread_uid}")
@@ -1795,22 +1823,44 @@ async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
         thread = await adapter.get_thread(http, thread_uid)
     msgs = _normalize_msgs(thread)
 
-    # Brouillon IA : proposé uniquement quand le dernier message vient du voyageur
-    ai_draft = None
-    if msgs and not msgs[-1].get("mine"):
-        last = msgs[-1]
-        if (conv and conv.get("ai_draft") and conv.get("ai_draft_msg_id") == last["id"]
-                and not conv.get("ai_draft_validated")):
-            ai_draft = conv["ai_draft"]
-        elif await _ai_auto_draft_enabled(uid):
-            prop = await db.properties.find_one(
-                {"id": (conv or {}).get("property_id"), "user_id": uid}, {"_id": 0})
-            try:
-                ai_draft = await _make_guest_draft(uid, thread_uid, last["text"], prop)
-                await _store_draft(uid, thread_uid, last["id"], ai_draft)
-            except Exception:
-                logger.exception("draft generation failed")
-                ai_draft = None
+    need_draft = bool(msgs and not msgs[-1].get("mine"))
+    guest_idx = [i for i, m in enumerate(msgs) if not m.get("mine")]
+    prop = None
+    if need_draft:
+        prop = await db.properties.find_one(
+            {"id": (conv or {}).get("property_id"), "user_id": uid}, {"_id": 0})
+
+    stored_draft = None
+    if (need_draft and conv and conv.get("ai_draft")
+            and conv.get("ai_draft_msg_id") == msgs[-1]["id"]
+            and not conv.get("ai_draft_validated")):
+        stored_draft = conv["ai_draft"]
+
+    async def _do_draft():
+        if not need_draft or stored_draft is not None:
+            return stored_draft
+        if not await _ai_auto_draft_enabled(uid):
+            return None
+        try:
+            d = await _make_guest_draft(uid, thread_uid, msgs[-1]["text"], prop)
+            await _store_draft(uid, thread_uid, msgs[-1]["id"], d)
+            return d
+        except Exception:
+            logger.exception("draft generation failed")
+            return None
+
+    async def _do_trans():
+        try:
+            return await _translate_to_fr(uid, thread_uid, [msgs[i]["text"] for i in guest_idx])
+        except Exception:
+            return []
+
+    ai_draft, fr = await asyncio.gather(_do_draft(), _do_trans())
+    for j, i in enumerate(guest_idx):
+        if j < len(fr):
+            t = (fr[j] or "").strip()
+            if t and t != (msgs[i]["text"] or "").strip():
+                msgs[i]["text_fr"] = t
 
     await db.conversations.update_one(
         {"user_id": uid, "thread_uid": thread_uid},

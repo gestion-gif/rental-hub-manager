@@ -58,11 +58,15 @@ export default function ThreadDetail() {
   }
 
   async function send() {
-    const text = reply.trim();
-    if (!text || sending) return;
+    await sendText(reply);
+  }
+
+  async function sendText(text: string) {
+    const t = (text || "").trim();
+    if (!t || sending) return;
     setSending(true); setError(null);
     try {
-      const r = await api.post(`/inbox/${thread}/reply`, { message: text });
+      const r = await api.post(`/inbox/${thread}/reply`, { message: t });
       setMessages((m) => [...m, r.message]);
       setReply("");
       setDraft(null);
@@ -95,6 +99,15 @@ export default function ThreadDetail() {
               <View key={m.id} style={[styles.bubbleRow, m.mine ? styles.rowRight : styles.rowLeft]}>
                 <View style={[styles.bubble, m.mine ? styles.bubbleMine : styles.bubbleGuest]}>
                   <Text style={[styles.msgText, m.mine && styles.msgTextMine]}>{m.text}</Text>
+                  {!m.mine && !!m.text_fr && (
+                    <View style={styles.transBox}>
+                      <View style={styles.transHead}>
+                        <Ionicons name="language" size={11} color={colors.brandPrimary} />
+                        <Text style={styles.transLabel}>Traduction FR</Text>
+                      </View>
+                      <Text style={styles.transText}>{m.text_fr}</Text>
+                    </View>
+                  )}
                   <Text style={[styles.msgDate, m.mine && styles.msgDateMine]}>{m.date ? dayjs(m.date).format("DD MMM · HH:mm") : ""}</Text>
                 </View>
               </View>
@@ -110,10 +123,22 @@ export default function ThreadDetail() {
                   <Text style={styles.draftHeadText}>Brouillon IA — à valider</Text>
                 </View>
                 <Text style={styles.draftText} numberOfLines={4}>{draft}</Text>
-                <Pressable testID="use-draft" onPress={useDraft} style={styles.useDraftBtn}>
-                  <Ionicons name="checkmark-circle" size={14} color={colors.onBrandPrimary} />
-                  <Text style={styles.useDraftText}>Utiliser ce brouillon</Text>
-                </Pressable>
+                <View style={styles.draftActions}>
+                  <Pressable testID="use-draft" onPress={useDraft} style={styles.useDraftBtn}>
+                    <Ionicons name="create-outline" size={14} color={colors.brandPrimary} />
+                    <Text style={styles.useDraftText}>Modifier</Text>
+                  </Pressable>
+                  <Pressable testID="send-draft" onPress={() => sendText(draft)} disabled={sending} style={[styles.sendDraftBtn, sending && { opacity: 0.6 }]}>
+                    {sending ? (
+                      <ActivityIndicator size="small" color={colors.onBrandPrimary} />
+                    ) : (
+                      <>
+                        <Ionicons name="paper-plane" size={14} color={colors.onBrandPrimary} />
+                        <Text style={styles.sendDraftText}>Valider et envoyer</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
               </View>
             )}
             <View style={styles.toneRow}>
@@ -195,8 +220,15 @@ const styles = StyleSheet.create({
   draftHead: { flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 6 },
   draftHeadText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
   draftText: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurface, lineHeight: 19 },
-  useDraftBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, marginTop: spacing.sm, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.brandPrimary },
-  useDraftText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onBrandPrimary },
+  draftActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm },
+  useDraftBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 9, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary },
+  useDraftText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
+  sendDraftBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 9, borderRadius: radius.pill, backgroundColor: colors.brandPrimary },
+  sendDraftText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onBrandPrimary },
+  transBox: { marginTop: 8, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  transHead: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 3 },
+  transLabel: { fontFamily: font.semibold, fontSize: 10, color: colors.brandPrimary, textTransform: "uppercase", letterSpacing: 0.4 },
+  transText: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceSecondary, lineHeight: 19, fontStyle: "italic" },
   inputRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm },
   input: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, paddingHorizontal: spacing.lg, paddingTop: 12, paddingBottom: 12, fontFamily: font.regular, fontSize: fontSize.lg, color: colors.onSurface, maxHeight: 120 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
