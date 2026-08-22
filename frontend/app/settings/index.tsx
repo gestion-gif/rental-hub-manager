@@ -12,7 +12,9 @@ const OPTIONS = [
   { path: "/settings/owners", icon: "person-outline", title: "Propriétaires", sub: "Fiches, logements & revenus" },
   { path: "/settings/messages", icon: "chatbubbles-outline", title: "Messages automatiques", sub: "Modèles, marqueurs & couleurs" },
   { path: "/settings/commissions", icon: "cash-outline", title: "Commissions plateformes", sub: "Taux par plateforme & revenu net" },
+  { path: "/settings/payments", icon: "card-outline", title: "Paiement", sub: "Passerelles & méthodes de paiement" },
   { path: "/settings/api-key", icon: "key-outline", title: "Clé API Lodgify", sub: "Connexion channel manager" },
+  { path: "/settings/ical", icon: "calendar-outline", title: "Import / Export iCal", sub: "Synchro calendriers .ics (Airbnb, Booking…)" },
   { path: "/settings/status-colors", icon: "color-palette-outline", title: "Couleurs des statuts", sub: "Personnalisez le code couleur" },
 ];
 

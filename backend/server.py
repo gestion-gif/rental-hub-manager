@@ -967,6 +967,93 @@ async def sync_ical(property_id: str, user=Depends(get_current_user)):
     return {"imported": imported, "updated": updated, "errors": errors, "details": details}
 
 
+class IcalLinksIn(BaseModel):
+    links: List[IcalLink] = []
+
+
+@api_router.put("/properties/{property_id}/ical-links")
+async def set_ical_links(property_id: str, payload: IcalLinksIn, user=Depends(get_current_user)):
+    """Remplace la liste des liens iCal importés pour un logement."""
+    links = [{"platform": (l.platform or "Autre").strip(), "url": (l.url or "").strip()}
+             for l in payload.links if (l.url or "").strip()]
+    res = await db.properties.update_one(
+        {"id": property_id, "user_id": user["user_id"], **_prop_scope(user)},
+        {"$set": {"ical_links": links}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return {"ical_links": links}
+
+
+@api_router.get("/properties/{property_id}/ical-export")
+async def get_ical_export(property_id: str, user=Depends(get_current_user)):
+    """Renvoie le token/chemin du flux .ics public à partager avec les plateformes."""
+    prop = await db.properties.find_one(
+        {"id": property_id, "user_id": user["user_id"], **_prop_scope(user)}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    token = prop.get("ical_export_token")
+    if not token:
+        token = uuid.uuid4().hex
+        await db.properties.update_one(
+            {"id": property_id, "user_id": user["user_id"]},
+            {"$set": {"ical_export_token": token}})
+    return {"token": token, "path": f"/api/ical/{property_id}/{token}.ics"}
+
+
+def _ics_date(d: str) -> str:
+    return (d or "").replace("-", "")
+
+
+def _ics_escape(s: str) -> str:
+    return (s or "").replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;").replace("\n", "\\n")
+
+
+def _build_ics(prop: dict, reservations: list) -> str:
+    now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//StayPilot//Channel Manager//FR",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{_ics_escape(prop.get('name', 'Logement'))}",
+    ]
+    for r in reservations:
+        ci, co = _ics_date(r.get("check_in")), _ics_date(r.get("check_out"))
+        if not ci or not co:
+            continue
+        uid = r.get("ical_uid") or f"{r.get('id')}@staypilot"
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{_ics_escape(uid)}",
+            f"DTSTAMP:{now}",
+            f"DTSTART;VALUE=DATE:{ci}",
+            f"DTEND;VALUE=DATE:{co}",
+            "SUMMARY:Réservé (StayPilot)",
+            "STATUS:CONFIRMED",
+            "TRANSP:OPAQUE",
+            "END:VEVENT",
+        ]
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
+
+
+@api_router.get("/ical/{property_id}/{token}.ics")
+async def public_ical_feed(property_id: str, token: str):
+    """Flux .ics public (sans auth) pour synchroniser la disponibilité vers Airbnb/Booking."""
+    prop = await db.properties.find_one(
+        {"id": property_id, "ical_export_token": token}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Flux introuvable")
+    reservations = await db.reservations.find(
+        {"property_id": property_id, "status": {"$ne": "annulee"}},
+        {"_id": 0, "id": 1, "check_in": 1, "check_out": 1, "ical_uid": 1}).to_list(5000)
+    body = _build_ics(prop, reservations)
+    from fastapi.responses import Response
+    return Response(content=body, media_type="text/calendar; charset=utf-8")
+
+
+
 # ---------------------------------------------------------------------------
 # Dashboard
 # ---------------------------------------------------------------------------
@@ -1253,11 +1340,23 @@ class PreferencesIn(BaseModel):
     status_colors: Optional[dict] = None
     statuses: Optional[list] = None
     commission_rates: Optional[dict] = None
+    payment_methods: Optional[dict] = None
 
 
 DEFAULT_COMMISSION_RATES = {
     "Airbnb": 15.5, "Booking.com": 15.0, "Vrbo": 8.0, "Direct": 0.0, "Site web": 0.0,
 }
+
+# Passerelles/méthodes de paiement. Stripe & paiements manuels actifs par défaut.
+DEFAULT_PAYMENT_METHODS = {
+    "stripe": True,
+    "paypal": False,
+    "manual": True,
+}
+
+
+def _build_payment_methods(doc):
+    return {**DEFAULT_PAYMENT_METHODS, **((doc or {}).get("payment_methods") or {})}
 
 
 def _build_commission_rates(doc):
@@ -1280,6 +1379,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "statuses": statuses,
         "status_colors": {s["key"]: s["color"] for s in statuses},
         "commission_rates": _build_commission_rates(doc),
+        "payment_methods": _build_payment_methods(doc),
     }
 
 
@@ -1321,6 +1421,13 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
                 continue
         set_doc["commission_rates"] = {**DEFAULT_COMMISSION_RATES, **rates}
 
+    if payload.payment_methods is not None:
+        pm = {}
+        for k in DEFAULT_PAYMENT_METHODS:
+            if k in payload.payment_methods:
+                pm[k] = bool(payload.payment_methods[k])
+        set_doc["payment_methods"] = {**DEFAULT_PAYMENT_METHODS, **pm}
+
     await db.preferences.update_one({"user_id": uid}, {"$set": set_doc}, upsert=True)
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     statuses = _build_statuses(doc)
@@ -1328,6 +1435,7 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "statuses": statuses,
         "status_colors": {s["key"]: s["color"] for s in statuses},
         "commission_rates": _build_commission_rates(doc),
+        "payment_methods": _build_payment_methods(doc),
     }
 
 

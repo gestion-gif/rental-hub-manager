@@ -152,3 +152,10 @@
 - Nouvel endpoint `GET /api/cleaning-schedule?day=YYYY-MM-DD` (défaut aujourd'hui) : renvoie {date, departures[], cleanings[]} scopé aux logements du membre (_prop_scope). Départs = réservations check_out=jour (non annulées) avec property_name + checkout_time + guest. Ménages = interventions kind=menage du jour (property_name, intervenant, done).
 - Écran `/cleaning` : page simple avec navigation jour précédent/suivant, section Départs et section Ménages à faire (tap → intervention-form, coche visuelle done). Nom voyageur respecte l'autorisation (guestLabel). Entrée drawer « Ménage du jour » visible par tous (utile aussi au propriétaire).
 - 176/176 pytest verts, app compile.
+
+## Ajout onglets Paramètres : Paiement + Import/Export iCal (2026-06)
+- **Paramètres → Paiement** (`settings/payments.tsx`) : passerelles en ligne (Stripe activé, « Voir d'autres passerelles » = Adyen/Braintree/Mollie/Square/Authorize.net « Bientôt ») + méthodes alternatives (PayPal, Paiements manuels), avec toggles Activé/Désactivé, statut et puces descriptives. Persistance via `Preferences.payment_methods` {stripe,paypal,manual} (défaut stripe+manual actifs). PUT partiel préservant statuses/commissions.
+- **Paramètres → Import / Export iCal** (`settings/ical.tsx`) :
+  - **Export** : flux .ics public par logement `GET /api/ical/{property_id}/{token}.ics` (sans auth, token stocké dans property.ical_export_token, VEVENT par réservation non annulée, SUMMARY neutre « Réservé (StayPilot) » pour ne pas divulguer le nom). URL récupérée via `GET /api/properties/{id}/ical-export`. Bouton Copier (expo-clipboard).
+  - **Import** : gestion des liens iCal par logement via `PUT /api/properties/{id}/ical-links` {links:[{platform,url}]} (réutilise l'infra sync existante), bouton « Synchroniser » → POST /properties/{id}/sync.
+- Vérifié : payment_methods défaut/persistance OK ; flux .ics public renvoie un VCALENDAR valide, mauvais token → 404. 176/176 pytest verts, écrans rendus.
