@@ -122,3 +122,11 @@
 - **Autorisations à cocher** : 15 « Autorisations générales » + 28 « Autorisations des PM Modules » (catalogue `src/permissions.ts` avec titre + description). Composant `Picker` générique réutilisable.
 - Réponses auto voyageurs IA (Claude Sonnet 4.6) : choix utilisateur = brouillon à valider + notification (à implémenter dans une prochaine itération).
 - Testé backend : 163/163 pytest verts (iteration_12, dont 15 nouveaux tests members : CRUD, tri, 404, isolation multi-utilisateur, auth guard).
+
+## Ajout Accès logements + Invitation email + Auth mot de passe (2026-06)
+- **Accès par logement** : `Member.property_ids[]`. Un membre ne voit QUE les logements cochés — filtrage réel appliqué côté backend sur /properties, /properties/{id}, /reservations, /interventions, /dashboard, /analytics/revenue, /inbox (via `_prop_scope`). L'owner (Google) voit tout.
+- **Sessions membres** : `get_current_user` gère les sessions `kind:"member"` → renvoie user_id = owner (données), role="member", allowed_property_ids. Stockées dans user_sessions (30j).
+- **Invitation email** (Emergent-managed / Resend, `backend/emailer.py`) : bouton « Envoyer l'invitation » sur la fiche → POST /api/members/{id}/invite {origin_url} génère un token à usage unique (sha256, 7j), envoie un email HTML (template serveur, gate anti-phishing) avec lien `{origin}/accept-invite?token=...`. EMERGENT_EMAIL_KEY + EMAIL_FROM_NAME=StayPilot dans backend/.env.
+- **Auth mot de passe** (pwdlib/argon2) coexistant avec Google OAuth : POST /api/auth/accept-invite {token,password>=8} → pose password_hash, active le compte, renvoie session_token+user. POST /api/auth/login {email,password} → session membre. Erreurs génériques (401), invitations expirées → 400, pw court → 422.
+- **Frontend** : formulaire utilisateur avec section « Accès aux logements » (MultiPicker cases à cocher) + carte « Accès de l'utilisateur » (bouton d'invitation, badges Invitation envoyée / Compte actif). Écran de connexion étendu (email + mot de passe en plus de Google). Nouvel écran `/accept-invite` (création du mot de passe). AuthContext : loginWithPassword + acceptInvite.
+- Vérifié : email envoyé (delivered@resend.dev), accept-invite→login→membre ne voit que Villa A (owner voit Villa A+B). 163/163 pytest verts.

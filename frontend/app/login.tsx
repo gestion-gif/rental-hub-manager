@@ -1,24 +1,44 @@
-import React, { useEffect } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, StyleSheet, Pressable, Alert } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { AntDesign } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { useAuth } from "@/src/context/AuthContext";
-import { PrimaryButton } from "@/src/components/ui";
+import { PrimaryButton, Field } from "@/src/components/ui";
 import { colors, font, fontSize, spacing, HERO_IMAGE } from "@/src/theme";
 
 export default function Login() {
-  const { signIn, signingIn, user } = useAuth();
+  const { signIn, signingIn, user, loginWithPassword } = useAuth();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const [showEmail, setShowEmail] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
 
   useEffect(() => {
     if (user) router.replace("/(tabs)");
   }, [user]);
+
+  async function onEmailLogin() {
+    if (loggingIn) return;
+    if (!email.trim() || !password) {
+      Alert.alert("Champs requis", "Saisissez votre email et votre mot de passe.");
+      return;
+    }
+    setLoggingIn(true);
+    try {
+      await loginWithPassword(email.trim(), password);
+    } catch {
+      Alert.alert("Connexion échouée", "Email ou mot de passe incorrect.");
+    }
+    setLoggingIn(false);
+  }
 
   return (
     <View style={styles.container} testID="login-screen">
@@ -29,7 +49,11 @@ export default function Login() {
         locations={[0, 0.45, 0.85]}
         style={StyleSheet.absoluteFill}
       />
-      <View style={[styles.content, { paddingBottom: insets.bottom + spacing.xl }]}>
+      <KeyboardAwareScrollView
+        bottomOffset={20}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xl, paddingTop: insets.top + 80 }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.brandRow}>
           <View style={styles.logoBox}>
             <AntDesign name="home" size={22} color={colors.onBrandPrimary} />
@@ -49,10 +73,38 @@ export default function Login() {
           style={{ backgroundColor: colors.surface }}
           icon={<AntDesign name="google" size={18} color={colors.onSurface} />}
         />
+
+        {!showEmail ? (
+          <Pressable testID="show-email-login" onPress={() => setShowEmail(true)} style={styles.linkBtn}>
+            <Text style={styles.linkText}>Se connecter avec un email et un mot de passe</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.emailBox}>
+            <Field
+              label="Email"
+              testID="login-email"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="vous@email.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <Field
+              label="Mot de passe"
+              testID="login-password"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Votre mot de passe"
+              secureTextEntry
+            />
+            <PrimaryButton testID="email-signin-button" label="Se connecter" onPress={onEmailLogin} loading={loggingIn} />
+          </View>
+        )}
+
         <Text style={styles.legal}>
           En continuant, vous acceptez nos conditions d'utilisation.
         </Text>
-      </View>
+      </KeyboardAwareScrollView>
     </View>
   );
 }
@@ -60,7 +112,7 @@ export default function Login() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surfaceInverse },
   content: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "flex-end",
     paddingHorizontal: spacing.xl,
   },
@@ -87,6 +139,14 @@ const styles = StyleSheet.create({
     fontSize: fontSize.lg,
     lineHeight: 24,
     marginBottom: spacing.xl,
+  },
+  linkBtn: { paddingVertical: spacing.md, alignItems: "center" },
+  linkText: { color: colors.onSurfaceInverse, fontFamily: font.semibold, fontSize: fontSize.base, textDecorationLine: "underline" },
+  emailBox: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: spacing.lg,
+    marginTop: spacing.lg,
   },
   legal: {
     color: "rgba(255,255,255,0.6)",

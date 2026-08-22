@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Alert, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -8,6 +8,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { api } from "@/src/api";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import { Picker } from "@/src/components/Picker";
+import { MultiPicker } from "@/src/components/MultiPicker";
 import {
   ROLES, LANGUAGES, GENERAL_PERMISSIONS, PM_PERMISSIONS, ROLE_DEFAULTS, Role, Permission,
 } from "@/src/permissions";
@@ -21,12 +22,13 @@ type FormState = {
   language: string;
   role: Role;
   permissions: string[];
+  property_ids: string[];
   active: boolean;
 };
 
 const EMPTY: FormState = {
   first_name: "", last_name: "", email: "", phone: "",
-  language: "fr", role: "member", permissions: [], active: true,
+  language: "fr", role: "member", permissions: [], property_ids: [], active: true,
 };
 
 export default function MemberForm() {
@@ -38,6 +40,18 @@ export default function MemberForm() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [loading, setLoading] = useState(editing);
   const [saving, setSaving] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [properties, setProperties] = useState<{ id: string; name: string }[]>([]);
+  const [inviteStatus, setInviteStatus] = useState<string>("none");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const props = await api.get("/properties");
+        setProperties(props.map((p: any) => ({ id: p.id, name: p.name })));
+      } catch {}
+    })();
+  }, []);
 
   useEffect(() => {
     if (!editing) return;
@@ -48,8 +62,10 @@ export default function MemberForm() {
           first_name: m.first_name || "", last_name: m.last_name || "",
           email: m.email || "", phone: m.phone || "",
           language: m.language || "fr", role: m.role || "member",
-          permissions: m.permissions || [], active: m.active !== false,
+          permissions: m.permissions || [], property_ids: m.property_ids || [],
+          active: m.active !== false,
         });
+        setInviteStatus(m.invite_status || "none");
       } catch {}
       setLoading(false);
     })();
@@ -94,6 +110,27 @@ export default function MemberForm() {
       { text: "Annuler", style: "cancel" },
       { text: "Supprimer", style: "destructive", onPress: async () => { await api.del(`/members/${id}`); router.back(); } },
     ]);
+  }
+
+  async function sendInvite() {
+    if (inviting) return;
+    if (!form.email.trim()) {
+      Alert.alert("Email requis", "Renseignez l'email de l'utilisateur puis enregistrez avant d'envoyer l'invitation.");
+      return;
+    }
+    setInviting(true);
+    try {
+      const origin =
+        Platform.OS === "web" && typeof window !== "undefined"
+          ? window.location.origin
+          : (process.env.EXPO_PUBLIC_BACKEND_URL as string);
+      await api.post(`/members/${id}/invite`, { origin_url: origin });
+      setInviteStatus("pending");
+      Alert.alert("Invitation envoyée", `Un email de connexion a été envoyé à ${form.email}.`);
+    } catch (e: any) {
+      Alert.alert("Erreur", e?.message || "Envoi de l'invitation impossible.");
+    }
+    setInviting(false);
   }
 
   if (loading) {
@@ -175,6 +212,23 @@ export default function MemberForm() {
           </Pressable>
         </View>
 
+        {/* Accès aux logements */}
+        <Text style={styles.section}>Accès aux logements</Text>
+        <View style={styles.card}>
+          <MultiPicker
+            label="Logements accessibles"
+            testID="member-properties"
+            title="Logements accessibles"
+            emptyLabel="Aucun logement"
+            values={form.property_ids}
+            items={properties}
+            onChange={(ids) => set({ property_ids: ids })}
+          />
+          <Text style={styles.hint}>
+            L'utilisateur ne verra que les logements cochés (réservations, calendrier, boîte de réception).
+          </Text>
+        </View>
+
         <Text style={styles.groupTitle}>Autorisations générales</Text>
         <View style={styles.card}>{GENERAL_PERMISSIONS.map(renderPerm)}</View>
 
@@ -188,6 +242,33 @@ export default function MemberForm() {
           loading={saving}
           style={{ marginTop: spacing.lg }}
         />
+
+        {editing && (
+          <View style={styles.inviteCard}>
+            <View style={styles.inviteHead}>
+              <Ionicons name="mail-outline" size={18} color={colors.onSurface} />
+              <Text style={styles.inviteTitle}>Accès de l'utilisateur</Text>
+              {inviteStatus === "active" && (
+                <View style={styles.badgeOk}><Text style={styles.badgeOkTxt}>Compte actif</Text></View>
+              )}
+              {inviteStatus === "pending" && (
+                <View style={styles.badgePending}><Text style={styles.badgePendingTxt}>Invitation envoyée</Text></View>
+              )}
+            </View>
+            <Text style={styles.hint}>
+              Envoyez un email de connexion : l'utilisateur créera son mot de passe puis pourra se connecter avec son email.
+            </Text>
+            <PrimaryButton
+              testID="invite-member"
+              label={inviteStatus === "none" ? "Envoyer l'invitation" : "Renvoyer l'invitation"}
+              onPress={sendInvite}
+              loading={inviting}
+              variant="secondary"
+              icon={<Ionicons name="paper-plane-outline" size={16} color={colors.onSurface} />}
+              style={{ marginTop: spacing.md }}
+            />
+          </View>
+        )}
       </KeyboardAwareScrollView>
     </View>
   );
@@ -206,4 +287,12 @@ const styles = StyleSheet.create({
   checkboxOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   permTitle: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
   permDesc: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2, lineHeight: 18 },
+  hint: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, lineHeight: 18 },
+  inviteCard: { marginTop: spacing.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg },
+  inviteHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
+  inviteTitle: { flex: 1, fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
+  badgeOk: { backgroundColor: "#E7F8EC", borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 3 },
+  badgeOkTxt: { fontFamily: font.semibold, fontSize: fontSize.sm, color: "#2FB350" },
+  badgePending: { backgroundColor: "#FFF4E5", borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 3 },
+  badgePendingTxt: { fontFamily: font.semibold, fontSize: fontSize.sm, color: "#FF9500" },
 });

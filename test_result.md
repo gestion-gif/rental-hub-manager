@@ -357,3 +357,45 @@ frontend:
 agent_communication:
     -agent: "main"
     -message: "Iteration 12. Tester UNIQUEMENT le backend: nouveau CRUD /api/members. Auth: insérer users + user_sessions (user_id de TEST isolé ex test_iter12) dans Mongo, header Authorization: Bearer <token>. TESTS: 1) POST /api/members {first_name:'Marie', last_name:'Dupont', email:'m@x.com', role:'manager', language:'fr', permissions:['edit_property','view_guest_name'], active:true} -> renvoie id, tous les champs. 2) GET /api/members -> liste triée par first_name, contient le membre. 3) GET /api/members/{id} -> le membre; id inconnu -> 404. 4) PUT /api/members/{id} {...modifié role:'admin'} -> mis à jour; id inconnu -> 404. 5) DELETE /api/members/{id} -> {ok:true}, puis GET liste ne le contient plus. 6) Isolation: un membre créé par user A ne doit pas apparaître pour user B. NE PAS tester le frontend."
+
+## Iteration 13 — Accès logements membre + Invitation email + Auth mot de passe
+backend:
+  - task: "Member property access + data scoping"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "MemberIn.property_ids[]. get_current_user gère les sessions kind:member (user_id=owner, allowed_property_ids). _prop_scope applique le filtre sur /properties, /properties/{id}, /reservations, /interventions, /dashboard, /analytics/revenue, /inbox. Owner voit tout, membre voit uniquement ses property_ids."
+  - task: "Invite email (Emergent Resend) + password auth"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py, backend/emailer.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "POST /api/members/{id}/invite {origin_url} -> token usage unique (sha256, 7j) + email HTML via Emergent Resend. POST /api/auth/accept-invite {token,password>=8} -> password_hash (argon2/pwdlib), invite_status=active, renvoie session_token+user. POST /api/auth/login {email,password} -> session membre. Auto-testé: invite ok (delivered@resend.dev), accept-invite (pw court->422, valide->session), login (mauvais pw->401, correct->session), filtrage membre (voit 1 logement sur 2)."
+
+frontend:
+  - task: "Member form property multi-select + invite button; login email/pw; accept-invite screen"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/settings/member-form.tsx, login.tsx, accept-invite.tsx, src/components/MultiPicker.tsx, src/context/AuthContext.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Section Accès aux logements (MultiPicker cases à cocher), bouton Envoyer l'invitation + badges. Login étendu email+mot de passe. Écran /accept-invite (création mot de passe). Vérifié via screenshots. Non testable auto e2e (Google OAuth pour owner)."
+
+agent_communication:
+    -agent: "main"
+    -message: "Iteration 13. Tester UNIQUEMENT le backend. Auth owner: insérer users + user_sessions (user_id isolé ex test_iter13) + 2 properties, header Bearer. TESTS: 1) POST /api/members {email:'x@test.com', property_ids:[P1]} puis GET /properties avec Bearer owner -> voit P1+P2. 2) Flux invite: set members.invite_token_hash=sha256('rawtok...') dans Mongo (via motor), POST /api/auth/accept-invite {token:'rawtok...', password:'MotDePasse123'} -> renvoie session_token; pw<8 -> 422; token inconnu -> 400. 3) POST /api/auth/login {email,password} -> session; mauvais pw -> 401. 4) Avec le session_token MEMBRE, GET /api/properties -> UNIQUEMENT P1; GET /api/reservations, /api/dashboard, /api/interventions -> scopés à P1. 5) POST /api/members/{id}/invite {origin_url:'https://x'} avec email='delivered@resend.dev' -> {ok:true} (email réel Emergent). NE PAS envoyer d'email à un vrai voyageur. Backend base localhost:8001. pwdlib/argon2 installé."

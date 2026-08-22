@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 13 – Backend tests for the new member invitation, accept-invite, email/password login, and property-scoped filtering flow. Created /app/backend/tests/test_member_auth_scope.py with 13 sequential tests inside a single class (so pytest-xdist --dist loadscope pins them to one worker; the flow relies on shared state: accept-invite -> login -> scoped listings). All 13 new tests PASS. Full regression suite is now 176 tests, all PASS (163 pre-existing + 13 new). Real Emergent Resend send verified with delivered@resend.dev sink recipient (test_13_invite_sends_email_ok returned {ok:true}). Test data cleanup verified in Mongo (no leftover docs for user_id/user prefix test_iter13 nor delivered@resend.dev). No issues detected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_member_auth_scope.py",
+    "/app/test_reports/pytest/pytest_iter13.xml",
+    "/app/test_reports/pytest/pytest_iter13_all.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py member_login (line 1848): stored = member.get('password_hash') if member else None; if member is None the subsequent `member.get('active') is False` check is skipped only because verify_password raises 401 first. Current control flow is correct but a defensive guard (`if not member: raise 401`) would be clearer.",
+    "server.py accept_invite (line 1829): the ValueError catch around datetime.fromisoformat re-raises the HTTPException(400) from the inner block as ValueError-safe only if fromisoformat itself raised; the current try/except is safe but reads awkwardly. Minor readability nit.",
+    "server.py is a very large file (2274 lines). Consider splitting into modules (auth.py, members.py, reservations.py, channel.py) for maintainability (>700 line guideline)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_member_auth_scope.py (NEW)"
+  ],
+  "success_rate": {
+    "backend": "100% (176/176 including 13 new)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "Per-test-class fixture seeds: 1 owner user + user_session, 2 properties (P1/P2), 2 reservations (future dates), 2 interventions — all tagged with user_id prefix 'user_iter13_<rand>'. All docs deleted in teardown; verified 0 leftover documents in Mongo after run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 13 backend suite is fully green. New file /app/backend/tests/test_member_auth_scope.py encapsulates the full member-auth flow in ONE class (TestMemberFlow) because tests are ordered and share state through the class-scoped `ctx` fixture — do NOT split into multiple classes (xdist loadscope would put them on different workers and the shared state -> KeyError). Uses hashlib.sha256(raw_token) to plant invite_token_hash directly in Mongo, mirroring what /api/members/{id}/invite writes. Real Emergent Resend send is triggered against delivered@resend.dev (safe sink). Owner user_id is randomized per-run ('user_iter13_<hex6>'), so multiple parallel runs won't collide.",
+  "rca_of_issue": "N/A – no bugs found in the reviewed feature. Initial run failed because tests were split across multiple classes; pytest-xdist with --dist loadscope pins EACH class to a worker, so the shared `ctx` state (member_id, member_session) wasn't visible across classes. Fixed by consolidating all 13 tests into one TestMemberFlow class."
+}

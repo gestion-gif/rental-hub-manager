@@ -27,6 +27,8 @@ type AuthState = {
   signingIn: boolean;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  loginWithPassword: (email: string, password: string) => Promise<void>;
+  acceptInvite: (token: string, password: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState>({} as AuthState);
@@ -148,9 +150,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
+  async function loginWithPassword(email: string, password: string) {
+    const data = await api.post("/auth/login", { email, password });
+    setToken(data.session_token);
+    await storage.secureSet(TOKEN_KEY, data.session_token);
+    setUser(data.user);
+  }
+
+  async function acceptInvite(token: string, password: string) {
+    const data = await api.post("/auth/accept-invite", { token, password });
+    setToken(data.session_token);
+    await storage.secureSet(TOKEN_KEY, data.session_token);
+    setUser(data.user);
+  }
+
   return (
     <AuthContext.Provider
-      value={{ user, loading, signingIn, signIn, signOut }}
+      value={{ user, loading, signingIn, signIn, signOut, loginWithPassword, acceptInvite }}
     >
       {children}
     </AuthContext.Provider>

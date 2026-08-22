@@ -18,10 +18,34 @@ import httpx
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
+import secrets
+from hashlib import sha256
+from pwdlib import PasswordHash
+
 from lodgify import (
     LODGIFY_STATUS_MAP, source_label, strip_html,
     LodgifyAdapter, map_lodgify_property,
 )
+from emailer import send_email, build_invite_email
+
+_pwd = PasswordHash.recommended()
+_DUMMY_HASH = _pwd.hash("not-a-real-password")
+
+
+def hash_password(p: str) -> str:
+    return _pwd.hash(p)
+
+
+def verify_password(p: str, stored: Optional[str]) -> bool:
+    return _pwd.verify(p, stored or _DUMMY_HASH)
+
+
+def norm_email(v: str) -> str:
+    return (v or "").strip().lower()
+
+
+def hash_token(raw: str) -> str:
+    return sha256(raw.encode("utf-8")).hexdigest()
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -144,10 +168,36 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at < now_utc():
             raise HTTPException(status_code=401, detail="Session expired")
+    if session.get("kind") == "member":
+        member = await db.members.find_one({"id": session.get("member_id")}, {"_id": 0})
+        if not member or member.get("active") is False:
+            raise HTTPException(status_code=401, detail="Member not found")
+        name = f'{member.get("first_name", "")} {member.get("last_name", "")}'.strip()
+        return {
+            "user_id": member["user_id"],  # data owner (the account that owns the properties)
+            "email": member.get("email", ""),
+            "name": name or member.get("email", ""),
+            "role": "member",
+            "member_role": member.get("role", "member"),
+            "member_id": member["id"],
+            "permissions": member.get("permissions", []),
+            "allowed_property_ids": member.get("property_ids") or [],
+        }
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    user["role"] = "owner"
+    user["allowed_property_ids"] = None  # None => all properties
     return user
+
+
+def _prop_scope(user, field="id"):
+    """Return a Mongo clause fragment restricting to the user's allowed properties.
+    Owners (allowed_property_ids is None) get no restriction (empty dict)."""
+    ids = user.get("allowed_property_ids")
+    if ids is None:
+        return {}
+    return {field: {"$in": ids}}
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +260,8 @@ async def logout(authorization: Optional[str] = Header(None)):
 # ---------------------------------------------------------------------------
 @api_router.get("/properties")
 async def list_properties(user=Depends(get_current_user)):
-    items = await db.properties.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(500)
+    items = await db.properties.find(
+        {"user_id": user["user_id"], **_prop_scope(user)}, {"_id": 0}).to_list(500)
     return items
 
 
@@ -227,7 +278,8 @@ async def create_property(payload: PropertyIn, user=Depends(get_current_user)):
 
 @api_router.get("/properties/{property_id}")
 async def get_property(property_id: str, user=Depends(get_current_user)):
-    item = await db.properties.find_one({"id": property_id, "user_id": user["user_id"]}, {"_id": 0})
+    item = await db.properties.find_one(
+        {"id": property_id, "user_id": user["user_id"], **_prop_scope(user)}, {"_id": 0})
     if not item:
         raise HTTPException(status_code=404, detail="Property not found")
     return item
@@ -323,7 +375,7 @@ def recompute_payment(r: dict):
 
 @api_router.get("/reservations")
 async def list_reservations(status: Optional[str] = None, property_id: Optional[str] = None, user=Depends(get_current_user)):
-    query = {"user_id": user["user_id"]}
+    query = {"user_id": user["user_id"], **_prop_scope(user, "property_id")}
     if status:
         query["status"] = status
     if property_id:
@@ -678,7 +730,7 @@ async def stripe_webhook(request: Request):
 # ---------------------------------------------------------------------------
 @api_router.get("/interventions")
 async def list_interventions(property_id: Optional[str] = None, user=Depends(get_current_user)):
-    query = {"user_id": user["user_id"]}
+    query = {"user_id": user["user_id"], **_prop_scope(user, "property_id")}
     if property_id:
         query["property_id"] = property_id
     # Purge past ménages (cleaning tasks before today) and exclude them from results
@@ -908,11 +960,13 @@ async def dashboard(user=Depends(get_current_user)):
     month_start = date(year, month, 1)
     month_end = date(year, month, days_in_month)
 
-    props = await db.properties.find({"user_id": uid}, {"_id": 0}).to_list(500)
-    reservations = await db.reservations.find({"user_id": uid}, {"_id": 0}).to_list(2000)
+    props = await db.properties.find({"user_id": uid, **_prop_scope(user)}, {"_id": 0}).to_list(500)
+    reservations = await db.reservations.find(
+        {"user_id": uid, **_prop_scope(user, "property_id")}, {"_id": 0}).to_list(2000)
     await db.interventions.delete_many(
         {"user_id": uid, "kind": "menage", "date": {"$lt": today_str}})
-    interventions = await db.interventions.find({"user_id": uid}, {"_id": 0}).sort("date", 1).to_list(1000)
+    interventions = await db.interventions.find(
+        {"user_id": uid, **_prop_scope(user, "property_id")}, {"_id": 0}).sort("date", 1).to_list(1000)
 
     prop_map = {p["id"]: p for p in props}
     cmap = await status_color_map(uid)
@@ -994,9 +1048,9 @@ async def dashboard(user=Depends(get_current_user)):
 async def analytics_revenue(year: Optional[int] = None, user=Depends(get_current_user)):
     uid = user["user_id"]
     y = year or date.today().year
-    props = await db.properties.find({"user_id": uid}, {"_id": 0}).to_list(500)
+    props = await db.properties.find({"user_id": uid, **_prop_scope(user)}, {"_id": 0}).to_list(500)
     reservations = await db.reservations.find(
-        {"user_id": uid, "status": {"$ne": "annulee"}}, {"_id": 0}).to_list(5000)
+        {"user_id": uid, "status": {"$ne": "annulee"}, **_prop_scope(user, "property_id")}, {"_id": 0}).to_list(5000)
 
     def parse(d):
         try:
@@ -1516,7 +1570,7 @@ async def channel_sync(user=Depends(get_current_user)):
 @api_router.get("/inbox")
 async def inbox(user=Depends(get_current_user)):
     convs = await db.conversations.find(
-        {"user_id": user["user_id"]}, {"_id": 0}).sort("last_activity", -1).to_list(500)
+        {"user_id": user["user_id"], **_prop_scope(user, "property_id")}, {"_id": 0}).sort("last_activity", -1).to_list(500)
     return convs
 
 
@@ -1643,6 +1697,7 @@ class MemberIn(BaseModel):
     language: str = "fr"
     role: str = "member"
     permissions: List[str] = []
+    property_ids: List[str] = []
     active: bool = True
 
 
@@ -1656,6 +1711,8 @@ async def create_member(payload: MemberIn, user=Depends(get_current_user)):
     doc = payload.dict()
     doc["id"] = str(uuid.uuid4())
     doc["user_id"] = user["user_id"]
+    doc["email_normalized"] = norm_email(doc.get("email", ""))
+    doc["invite_status"] = "none"  # none | pending | active
     doc["created_at"] = now_utc().isoformat()
     await db.members.insert_one(doc)
     doc.pop("_id", None)
@@ -1664,7 +1721,9 @@ async def create_member(payload: MemberIn, user=Depends(get_current_user)):
 
 @api_router.get("/members/{member_id}")
 async def get_member(member_id: str, user=Depends(get_current_user)):
-    m = await db.members.find_one({"id": member_id, "user_id": user["user_id"]}, {"_id": 0})
+    m = await db.members.find_one(
+        {"id": member_id, "user_id": user["user_id"]},
+        {"_id": 0, "password_hash": 0, "invite_token_hash": 0})
     if not m:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
     return m
@@ -1672,17 +1731,126 @@ async def get_member(member_id: str, user=Depends(get_current_user)):
 
 @api_router.put("/members/{member_id}")
 async def update_member(member_id: str, payload: MemberIn, user=Depends(get_current_user)):
+    data = payload.dict()
+    data["email_normalized"] = norm_email(data.get("email", ""))
     res = await db.members.update_one(
-        {"id": member_id, "user_id": user["user_id"]}, {"$set": payload.dict()})
+        {"id": member_id, "user_id": user["user_id"]}, {"$set": data})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
-    return await db.members.find_one({"id": member_id}, {"_id": 0})
+    return await db.members.find_one(
+        {"id": member_id}, {"_id": 0, "password_hash": 0, "invite_token_hash": 0})
 
 
 @api_router.delete("/members/{member_id}")
 async def delete_member(member_id: str, user=Depends(get_current_user)):
     await db.members.delete_one({"id": member_id, "user_id": user["user_id"]})
+    await db.user_sessions.delete_many({"member_id": member_id})
     return {"ok": True}
+
+
+class InviteIn(BaseModel):
+    origin_url: str
+
+
+@api_router.post("/members/{member_id}/invite")
+async def invite_member(member_id: str, payload: InviteIn, user=Depends(get_current_user)):
+    m = await db.members.find_one({"id": member_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    email = norm_email(m.get("email", ""))
+    if not email:
+        raise HTTPException(status_code=400, detail="Renseignez d'abord l'email de l'utilisateur.")
+    raw_token = secrets.token_urlsafe(32)
+    await db.members.update_one(
+        {"id": member_id, "user_id": user["user_id"]},
+        {"$set": {
+            "invite_token_hash": hash_token(raw_token),
+            "invite_expires_at": (now_utc() + timedelta(days=7)).isoformat(),
+            "invite_status": "pending",
+            "invited_at": now_utc().isoformat(),
+        }})
+    origin = payload.origin_url.rstrip("/")
+    link = f"{origin}/accept-invite?token={raw_token}"
+    name = f'{m.get("first_name", "")} {m.get("last_name", "")}'.strip()
+    subject, html = build_invite_email(member_name=name, invite_link=link)
+    try:
+        await send_email(to=m["email"], subject=subject, html=html)
+    except Exception as e:
+        logger.error("Invite email failed: %s", e)
+        raise HTTPException(status_code=502, detail="Échec de l'envoi de l'email d'invitation")
+    return {"ok": True, "email": m["email"]}
+
+
+class AcceptInviteIn(BaseModel):
+    token: str
+    password: str
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+async def _create_member_session(member: dict) -> dict:
+    token = secrets.token_urlsafe(32)
+    await db.user_sessions.insert_one({
+        "session_token": token,
+        "user_id": member["user_id"],
+        "kind": "member",
+        "member_id": member["id"],
+        "created_at": now_utc(),
+        "expires_at": now_utc() + timedelta(days=30),
+    })
+    name = f'{member.get("first_name", "")} {member.get("last_name", "")}'.strip()
+    return {
+        "session_token": token,
+        "user": {
+            "user_id": member["user_id"],
+            "email": member.get("email", ""),
+            "name": name or member.get("email", ""),
+            "role": "member",
+        },
+    }
+
+
+@api_router.post("/auth/accept-invite")
+async def accept_invite(payload: AcceptInviteIn):
+    if len(payload.password or "") < 8:
+        raise HTTPException(status_code=422, detail="Le mot de passe doit contenir au moins 8 caractères")
+    th = hash_token(payload.token)
+    member = await db.members.find_one({"invite_token_hash": th}, {"_id": 0})
+    if not member:
+        raise HTTPException(status_code=400, detail="Invitation invalide ou expirée")
+    exp = member.get("invite_expires_at")
+    try:
+        if exp and datetime.fromisoformat(exp) < now_utc():
+            raise HTTPException(status_code=400, detail="Invitation invalide ou expirée")
+    except ValueError:
+        pass
+    await db.members.update_one(
+        {"id": member["id"]},
+        {"$set": {
+            "password_hash": hash_password(payload.password),
+            "password_set_at": now_utc().isoformat(),
+            "invite_status": "active",
+            "active": True,
+        },
+         "$unset": {"invite_token_hash": "", "invite_expires_at": ""}})
+    member = await db.members.find_one({"id": member["id"]}, {"_id": 0})
+    return await _create_member_session(member)
+
+
+@api_router.post("/auth/login")
+async def member_login(payload: LoginIn):
+    email = norm_email(payload.email)
+    member = await db.members.find_one(
+        {"email_normalized": email, "password_hash": {"$exists": True}}, {"_id": 0})
+    stored = member.get("password_hash") if member else None
+    if not verify_password(payload.password, stored):
+        raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
+    if member.get("active") is False:
+        raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
+    return await _create_member_session(member)
 
 
 
