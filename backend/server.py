@@ -210,6 +210,16 @@ def _can(user, perm: str) -> bool:
     return perm in (user.get("permissions") or [])
 
 
+# Rôles membres sans accès à la boîte de réception (intervenant, ménage, propriétaire)
+_NO_INBOX_ROLES = {"cleaning", "intervenant", "owner"}
+
+
+def _can_inbox(user) -> bool:
+    if user.get("role") != "member":
+        return True
+    return user.get("member_role") not in _NO_INBOX_ROLES
+
+
 # ---------------------------------------------------------------------------
 # Auth routes
 # ---------------------------------------------------------------------------
@@ -1581,6 +1591,8 @@ async def channel_sync(user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 @api_router.get("/inbox")
 async def inbox(user=Depends(get_current_user)):
+    if not _can_inbox(user):
+        raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
     convs = await db.conversations.find(
         {"user_id": user["user_id"], **_prop_scope(user, "property_id")}, {"_id": 0}).sort("last_activity", -1).to_list(500)
     return convs
@@ -1588,12 +1600,16 @@ async def inbox(user=Depends(get_current_user)):
 
 @api_router.get("/inbox-unread-count")
 async def inbox_unread_count(user=Depends(get_current_user)):
+    if not _can_inbox(user):
+        return {"count": 0}
     n = await db.conversations.count_documents({"user_id": user["user_id"], "unread": True})
     return {"count": n}
 
 
 @api_router.get("/inbox/{thread_uid}")
 async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
+    if not _can_inbox(user):
+        raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
     adapter, _ = await get_channel_adapter(user["user_id"])
     if not adapter:
         raise HTTPException(status_code=400, detail="Channel manager non connecté")
@@ -1630,6 +1646,8 @@ class ReplyIn(BaseModel):
 
 @api_router.post("/inbox/{thread_uid}/reply")
 async def inbox_reply(thread_uid: str, payload: ReplyIn, user=Depends(get_current_user)):
+    if not _can_inbox(user):
+        raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
     if not payload.message.strip():
         raise HTTPException(status_code=400, detail="Message vide")
     adapter, _ = await get_channel_adapter(user["user_id"])

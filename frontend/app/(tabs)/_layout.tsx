@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "@/src/api";
 import { useAuth } from "@/src/context/AuthContext";
-import { canSeeRevenue } from "@/src/permissions";
+import { canSeeRevenue, canSeeInbox, canSeeSettings } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const ITEMS = [
@@ -82,7 +82,7 @@ function CustomDrawer(props: any) {
             <Text style={styles.itemText}>Statistiques</Text>
           </Pressable>
         )}
-        <Pressable testID="drawer-inbox" onPress={() => goStack("/inbox")} style={styles.item}>
+        <Pressable testID="drawer-inbox" onPress={() => goStack("/inbox")} style={[styles.item, !canSeeInbox(user) && { display: "none" }]}>
           <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />
           <Text style={styles.itemText}>Boîte de réception</Text>
           {unread > 0 && (
@@ -91,10 +91,12 @@ function CustomDrawer(props: any) {
             </View>
           )}
         </Pressable>
-        <Pressable testID="drawer-settings" onPress={() => goStack("/settings")} style={styles.item}>
-          <Ionicons name="settings-outline" size={20} color={colors.onSurfaceSecondary} />
-          <Text style={styles.itemText}>Paramètres</Text>
-        </Pressable>
+        {canSeeSettings(user) && (
+          <Pressable testID="drawer-settings" onPress={() => goStack("/settings")} style={styles.item}>
+            <Ionicons name="settings-outline" size={20} color={colors.onSurfaceSecondary} />
+            <Text style={styles.itemText}>Paramètres</Text>
+          </Pressable>
+        )}
       </DrawerContentScrollView>
 
       <Pressable

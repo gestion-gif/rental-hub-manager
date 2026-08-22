@@ -22,7 +22,7 @@ import { MenuButton } from "@/src/components/MenuButton";
 import StatusBadge from "@/src/components/StatusBadge";
 import { getInterventionType } from "@/src/interventionTypes";
 import { InterventionIcon } from "@/src/components/InterventionIcon";
-import { canSeeRevenue, guestLabel } from "@/src/permissions";
+import { canSeeRevenue, canSeeOccupancy, canSeeCurrentStays, canSeeInbox, guestLabel } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 type Dash = {
@@ -99,14 +99,16 @@ export default function Dashboard() {
             </View>
           </View>
           <View style={styles.headerActions}>
-            <Pressable testID="dash-inbox" onPress={() => router.push("/inbox")} style={styles.iconBtn}>
-              <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />
-              {unread > 0 && (
-                <View style={styles.iconBadge}>
-                  <Text style={styles.iconBadgeText}>{unread > 9 ? "9+" : unread}</Text>
-                </View>
-              )}
-            </Pressable>
+            {canSeeInbox(user) && (
+              <Pressable testID="dash-inbox" onPress={() => router.push("/inbox")} style={styles.iconBtn}>
+                <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />
+                {unread > 0 && (
+                  <View style={styles.iconBadge}>
+                    <Text style={styles.iconBadgeText}>{unread > 9 ? "9+" : unread}</Text>
+                  </View>
+                )}
+              </Pressable>
+            )}
             <Pressable testID="signout-button" onPress={signOut} style={styles.avatar}>
               {user?.picture ? (
                 <Image source={{ uri: user.picture }} style={styles.avatarImg} />
@@ -122,12 +124,14 @@ export default function Dashboard() {
         ) : (
           <>
             <View style={styles.statsGrid}>
-              <StatCard
-                label="Taux d'occupation"
-                value={`${data?.occupancy_rate ?? 0}%`}
-                icon="pie-chart"
-                tint={colors.info}
-              />
+              {canSeeOccupancy(user) && (
+                <StatCard
+                  label="Taux d'occupation"
+                  value={`${data?.occupancy_rate ?? 0}%`}
+                  icon="pie-chart"
+                  tint={colors.info}
+                />
+              )}
               {canSeeRevenue(user) && (
                 <StatCard
                   label="Revenus du mois"
@@ -182,20 +186,22 @@ export default function Dashboard() {
               )}
             </CollapsibleSection>
 
-            <CollapsibleSection
-              title="Séjours en cours"
-              count={data?.current_stays?.length || 0}
-              open={stayOpen}
-              onToggle={() => setStayOpen((o) => !o)}
-            >
-              {data?.current_stays?.length ? (
-                data.current_stays.map((r) => (
-                  <StayCard key={r.id} r={{ ...r, guest_name: guestLabel(user, r.guest_name) }} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
-                ))
-              ) : (
-                <EmptyRow text="Aucun séjour en cours" />
-              )}
-            </CollapsibleSection>
+            {canSeeCurrentStays(user) && (
+              <CollapsibleSection
+                title="Séjours en cours"
+                count={data?.current_stays?.length || 0}
+                open={stayOpen}
+                onToggle={() => setStayOpen((o) => !o)}
+              >
+                {data?.current_stays?.length ? (
+                  data.current_stays.map((r) => (
+                    <StayCard key={r.id} r={{ ...r, guest_name: guestLabel(user, r.guest_name) }} onPress={() => router.push(`/reservation-form?id=${r.id}`)} />
+                  ))
+                ) : (
+                  <EmptyRow text="Aucun séjour en cours" />
+                )}
+              </CollapsibleSection>
+            )}
 
             <CollapsibleSection
               title="Départs du jour"

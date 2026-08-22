@@ -150,3 +150,28 @@ export function canSeePrices(user: any): boolean {
 export function guestLabel(user: any, name?: string): string {
   return canSeeGuestName(user) ? (name || "") : "Voyageur";
 }
+
+// --- Access par rôle (le compte Google propriétaire voit tout) ---
+export function memberRole(user: any): string {
+  return user?.role === "member" ? (user.member_role || "member") : "account_owner";
+}
+
+function memberRoleIn(user: any, roles: string[]): boolean {
+  return user?.role === "member" && roles.includes(memberRole(user));
+}
+
+// Intervenant + Personnel de nettoyage : pas de boîte de réception ni paramètres.
+// Propriétaire (membre) : pas de boîte de réception ni paramètres non plus.
+export function canSeeInbox(user: any): boolean {
+  return !memberRoleIn(user, ["cleaning", "intervenant", "owner"]);
+}
+export function canSeeSettings(user: any): boolean {
+  return !memberRoleIn(user, ["cleaning", "intervenant", "owner"]);
+}
+// Intervenant + Personnel de nettoyage : pas de taux d'occupation ni séjours en cours.
+export function canSeeOccupancy(user: any): boolean {
+  return !memberRoleIn(user, ["cleaning", "intervenant"]);
+}
+export function canSeeCurrentStays(user: any): boolean {
+  return !memberRoleIn(user, ["cleaning", "intervenant"]);
+}

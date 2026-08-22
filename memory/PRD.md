@@ -140,3 +140,10 @@
   - Helpers : `src/permissions.ts` (userCan/canSeeRevenue/canSeeGuestName/canSeePrices/guestLabel) ; backend `_can(user, perm)`. `/auth/me` renvoie role+permissions (owner => tout autorisé). loginWithPassword/acceptInvite rechargent /auth/me.
 - **Filtre par intervenant (calendrier/planning)** : sélecteur « Filtrer par intervenant » (propriétaire uniquement) listant les membres ayant des logements attribués ; sélectionner un intervenant restreint la réglette/mois à ses logements. Combinable avec le filtre logement.
 - Vérifié : intervenant → analytics 403, dashboard revenue_month=None, ne voit que ses logements. 28/28 tests membres verts.
+
+## Ajout Masquage de sections par rôle (2026-06)
+- **Intervenant + Personnel de nettoyage** : ne voient plus le **taux d'occupation** ni les **séjours en cours** (dashboard), ni les **revenus**, ni la **boîte de réception** (icône dashboard + entrée drawer masquées), ni les **paramètres** (entrée drawer masquée).
+- **Propriétaire (membre)** : pas d'accès à la **boîte de réception** ni aux **paramètres**.
+- Helpers `src/permissions.ts` : memberRole, canSeeInbox/canSeeSettings/canSeeOccupancy/canSeeCurrentStays (le compte Google propriétaire = account_owner voit tout).
+- Défense côté backend : `_can_inbox(user)` → 403 sur GET /inbox, /inbox/{thread}, POST /inbox/{thread}/reply et count=0 sur /inbox-unread-count pour les rôles cleaning/intervenant/owner (empêche l'accès direct hors UI).
+- Vérifié : membre cleaning → /inbox 403, /analytics 403, /inbox-unread-count count 0 ; 28/28 tests membres verts, app compile.
