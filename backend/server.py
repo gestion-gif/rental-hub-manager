@@ -173,15 +173,18 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
         if not member or member.get("active") is False:
             raise HTTPException(status_code=401, detail="Member not found")
         name = f'{member.get("first_name", "")} {member.get("last_name", "")}'.strip()
+        mrole = member.get("role", "member")
+        # Un administrateur voit tout le compte parrain ; sinon accès limité aux logements attribués
+        allowed = None if mrole == "admin" else (member.get("property_ids") or [])
         return {
             "user_id": member["user_id"],  # data owner (the account that owns the properties)
             "email": member.get("email", ""),
             "name": name or member.get("email", ""),
             "role": "member",
-            "member_role": member.get("role", "member"),
+            "member_role": mrole,
             "member_id": member["id"],
             "permissions": member.get("permissions", []),
-            "allowed_property_ids": member.get("property_ids") or [],
+            "allowed_property_ids": allowed,
         }
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user:
