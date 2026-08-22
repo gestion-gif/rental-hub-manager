@@ -26,6 +26,7 @@ export default function ThreadDetail() {
   const [draftUsed, setDraftUsed] = useState(false);
   const [tone, setTone] = useState<"chaleureux" | "professionnel" | "concis">("chaleureux");
   const [showTrans, setShowTrans] = useState(true);
+  const [quickReplies, setQuickReplies] = useState<any[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -42,6 +43,14 @@ export default function ThreadDetail() {
   }, [thread]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  useFocusEffect(useCallback(() => {
+    api.get("/quick-replies").then(setQuickReplies).catch(() => {});
+  }, []));
+
+  function insertQuick(body: string) {
+    setReply((r) => (r.trim() ? `${r.trim()}\n\n${body}` : body));
+  }
 
   async function suggest() {
     setAiLoading(true); setError(null);
@@ -150,6 +159,16 @@ export default function ThreadDetail() {
                 </View>
               </View>
             )}
+            {quickReplies.length > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickRow}>
+                {quickReplies.map((q) => (
+                  <Pressable key={q.id} testID={`quick-${q.id}`} onPress={() => insertQuick(q.body)} style={styles.quickChip}>
+                    <Ionicons name="flash" size={12} color={colors.brandPrimary} />
+                    <Text style={styles.quickChipText} numberOfLines={1}>{q.title}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
             <View style={styles.toneRow}>
               <Text style={styles.toneLabel}>Ton :</Text>
               {(["chaleureux", "professionnel", "concis"] as const).map((t) => (
@@ -222,6 +241,9 @@ const styles = StyleSheet.create({
   suggestBtn: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.sm },
   suggestText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
   toneRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: spacing.sm, flexWrap: "wrap" },
+  quickRow: { gap: 6, paddingBottom: spacing.sm, paddingRight: spacing.lg },
+  quickChip: { flexDirection: "row", alignItems: "center", gap: 4, maxWidth: 180, paddingVertical: 6, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.brandPrimary + "12", borderWidth: 1, borderColor: colors.brandPrimary + "33" },
+  quickChipText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary, flexShrink: 1 },
   toneLabel: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
   toneChip: { paddingVertical: 4, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary },
   toneChipActive: { backgroundColor: colors.brandPrimary },

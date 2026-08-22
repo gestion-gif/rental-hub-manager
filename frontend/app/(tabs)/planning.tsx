@@ -30,6 +30,16 @@ import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 dayjs.locale("fr");
 
+function priceForDay(prop: any, dayStr: string): number | null {
+  if (!prop) return null;
+  for (const s of (prop.seasons || [])) {
+    if (s.start_date && s.end_date && dayStr >= s.start_date && dayStr <= s.end_date) {
+      return s.price;
+    }
+  }
+  return prop.base_price ?? null;
+}
+
 const SCREEN_W = Dimensions.get("window").width;
 const DAY_W = 44;
 const DAYHEAD_H = 46;
@@ -53,6 +63,7 @@ export default function Planning() {
   const [selectedMember, setSelectedMember] = useState<string>("all");
   const [anchor, setAnchor] = useState(dayjs().startOf("month"));
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [showPrices, setShowPrices] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -90,6 +101,7 @@ export default function Planning() {
   const inScope = (pid: string) =>
     (selectedProp === "all" || pid === selectedProp) && (!memberPropIds || memberPropIds.includes(pid));
   const rows = props.filter((p) => inScope(p.id));
+  const singleProp = rows.length === 1 ? rows[0] : null;
   const filtered = reservations.filter((r) => inScope(r.property_id));
   const filteredIvs = interventions.filter((iv) => inScope(iv.property_id));
 
@@ -115,6 +127,19 @@ export default function Planning() {
             <Ionicons name="color-palette-outline" size={20} color={colors.onSurface} />
           </Pressable>
         </View>
+
+        {mode === "timeline" && singleProp && (
+          <Pressable
+            testID="toggle-prices"
+            onPress={() => setShowPrices((s) => !s)}
+            style={[styles.priceToggle, showPrices && styles.priceToggleOn]}
+          >
+            <Ionicons name="pricetags-outline" size={14} color={showPrices ? colors.onBrandPrimary : colors.brandPrimary} />
+            <Text style={[styles.priceToggleText, showPrices && { color: colors.onBrandPrimary }]}>
+              {showPrices ? "Masquer les tarifs" : "Afficher les tarifs par saison"}
+            </Text>
+          </Pressable>
+        )}
 
         <View style={styles.segment}>
           {(["timeline", "month"] as const).map((m) => (
@@ -200,6 +225,8 @@ export default function Planning() {
           statusColors={statusColors}
           statuses={statuses}
           todayStr={todayStr}
+          showPrices={showPrices && !!singleProp}
+          priceProp={singleProp}
           onBar={(id: string) => router.push(`/reservation-form?id=${id}`)}
           onIv={(id: string) => router.push(`/intervention-form?id=${id}`)}
           onCreate={(pid: string, ci: string, co: string) =>
@@ -241,8 +268,9 @@ export default function Planning() {
   );
 }
 
-function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, onBar, onIv, onCreate, bottomPad }: any) {
+function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onBar, onIv, onCreate, bottomPad }: any) {
   const { user } = useAuth();
+  const headH = showPrices ? DAYHEAD_H + 16 : DAYHEAD_H;
   const [sel, setSel] = useState<{ propId: string; a: number; b: number } | null>(null);
   const dragRef = useRef<{ propId: string; a: number; b: number } | null>(null);
 
@@ -276,7 +304,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
       <View style={{ flexDirection: "row" }}>
         {/* Left fixed column */}
         <View style={{ width: LEFT_W }}>
-          <View style={[styles.corner]} />
+          <View style={[styles.corner, { height: headH }]} />
           {rows.map((p: any) => (
             <View key={p.id} style={styles.nameCell}>
               <Text style={styles.nameText} numberOfLines={2}>{p.name}</Text>
@@ -287,14 +315,21 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View>
             {/* Day header */}
-            <View style={{ flexDirection: "row", height: DAYHEAD_H }}>
+            <View style={{ flexDirection: "row", height: headH }}>
               {days.map((d: any) => {
-                const isToday = d.format("YYYY-MM-DD") === todayStr;
+                const dStr = d.format("YYYY-MM-DD");
+                const isToday = dStr === todayStr;
                 const weekend = d.day() === 0 || d.day() === 6;
+                const price = showPrices ? priceForDay(priceProp, dStr) : null;
                 return (
-                  <View key={d.valueOf()} style={[styles.dayHead, weekend && styles.weekendBg, isToday && styles.todayHead]}>
+                  <View key={d.valueOf()} style={[styles.dayHead, { height: headH }, weekend && styles.weekendBg, isToday && styles.todayHead]}>
                     <Text style={[styles.dowText, isToday && styles.todayText]}>{d.format("dd")[0]}</Text>
                     <Text style={[styles.domText, isToday && styles.todayText]}>{d.date()}</Text>
+                    {showPrices && (
+                      <Text style={[styles.priceText, isToday && styles.todayText]} numberOfLines={1}>
+                        {price != null ? `${Math.round(price)}€` : "—"}
+                      </Text>
+                    )}
                   </View>
                 );
               })}
@@ -548,6 +583,10 @@ const styles = StyleSheet.create({
     width: 38, height: 38, borderRadius: 19,
     backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center",
   },
+  priceToggle: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.brandPrimary + "12", borderWidth: 1, borderColor: colors.brandPrimary + "33", marginBottom: spacing.md },
+  priceToggleOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  priceToggleText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
+  priceText: { fontFamily: font.semibold, fontSize: 10, color: colors.brandPrimary, marginTop: 1 },
   segment: { flexDirection: "row", backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: 3, marginBottom: spacing.md },
   segBtn: { flex: 1, flexDirection: "row", gap: 5, paddingVertical: 8, alignItems: "center", justifyContent: "center", borderRadius: radius.sm },
   segBtnActive: { backgroundColor: colors.surface, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },

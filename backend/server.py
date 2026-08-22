@@ -2452,6 +2452,75 @@ async def delete_template(tpl_id: str, user=Depends(get_current_user)):
     return {"ok": True}
 
 
+# ---------------------------------------------------------------------------
+# Quick replies (réponses types réutilisables dans la boîte de réception)
+# ---------------------------------------------------------------------------
+DEFAULT_QUICK_REPLIES = [
+    {"title": "Arrivée (check-in)",
+     "body": "Bonjour, l'arrivée se fait à partir de 16h. Je vous transmettrai les instructions d'accès la veille de votre arrivée. Bon voyage !"},
+    {"title": "Wifi",
+     "body": "Le code Wifi est affiché dans le logement (livret d'accueil). N'hésitez pas si vous avez besoin d'aide pour vous connecter."},
+    {"title": "Parking",
+     "body": "Un parking gratuit est disponible à proximité du logement. Je vous communiquerai les détails à votre arrivée."},
+]
+
+
+class QuickReplyIn(BaseModel):
+    title: str
+    body: str
+
+
+async def _seed_quick_replies(uid: str):
+    docs = await db.quick_replies.find({"user_id": uid}, {"_id": 0}).to_list(200)
+    if not docs:
+        docs = []
+        for i, q in enumerate(DEFAULT_QUICK_REPLIES):
+            doc = {**q, "id": str(uuid.uuid4()), "user_id": uid, "order": i,
+                   "created_at": now_utc().isoformat()}
+            await db.quick_replies.insert_one(doc)
+            doc.pop("_id", None)
+            docs.append(doc)
+    docs.sort(key=lambda x: x.get("order", 100))
+    return docs
+
+
+@api_router.get("/quick-replies")
+async def list_quick_replies(user=Depends(get_current_user)):
+    if not _can_inbox(user):
+        raise HTTPException(status_code=403, detail="Accès non autorisé")
+    return await _seed_quick_replies(user["user_id"])
+
+
+@api_router.post("/quick-replies")
+async def create_quick_reply(payload: QuickReplyIn, user=Depends(get_current_user)):
+    if not payload.title.strip() or not payload.body.strip():
+        raise HTTPException(status_code=400, detail="Titre et message requis")
+    await _seed_quick_replies(user["user_id"])
+    doc = {"id": str(uuid.uuid4()), "user_id": user["user_id"],
+           "title": payload.title.strip(), "body": payload.body.strip(),
+           "order": 100, "created_at": now_utc().isoformat()}
+    await db.quick_replies.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/quick-replies/{qid}")
+async def update_quick_reply(qid: str, payload: QuickReplyIn, user=Depends(get_current_user)):
+    res = await db.quick_replies.update_one(
+        {"id": qid, "user_id": user["user_id"]},
+        {"$set": {"title": payload.title.strip(), "body": payload.body.strip()}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Réponse type introuvable")
+    return await db.quick_replies.find_one({"id": qid}, {"_id": 0})
+
+
+@api_router.delete("/quick-replies/{qid}")
+async def delete_quick_reply(qid: str, user=Depends(get_current_user)):
+    await db.quick_replies.delete_one({"id": qid, "user_id": user["user_id"]})
+    return {"ok": True}
+
+
+
 async def run_automations_for_user(uid: str):
     """Send due automatic messages via Lodgify and set the corresponding markers."""
     settings = await db.channel_settings.find_one({"user_id": uid}, {"_id": 0})
