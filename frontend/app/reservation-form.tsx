@@ -27,6 +27,27 @@ import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const PLATFORMS = ["Direct", "Airbnb", "Booking.com", "Vrbo"];
 
+function priceForDay(prop: any, dayStr: string): number | null {
+  if (!prop) return null;
+  for (const s of (prop.seasons || [])) {
+    if (s.start_date && s.end_date && dayStr >= s.start_date && dayStr <= s.end_date) return s.price;
+  }
+  return prop.base_price ?? null;
+}
+
+function computeNightsTotal(prop: any, ci: string, co: string): number {
+  if (!prop || !ci || !co) return 0;
+  let total = 0;
+  let d = new Date(ci + "T00:00:00");
+  const end = new Date(co + "T00:00:00");
+  while (d < end) {
+    const s = d.toISOString().slice(0, 10);
+    total += priceForDay(prop, s) || 0;
+    d.setDate(d.getDate() + 1);
+  }
+  return Math.round(total * 100) / 100;
+}
+
 export default function ReservationForm() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -47,13 +68,17 @@ export default function ReservationForm() {
 
   const [form, setForm] = useState({
     property_id: "",
-    guest_name: "",
+    guest_first_name: "",
+    guest_last_name: "",
     guest_email: "",
+    guest_phone: "",
     platform: "Direct",
     check_in: "",
     check_out: "",
     guests: "2",
-    total_price: "",
+    nights_total: "",
+    cleaning_fee: "",
+    tourist_tax: "",
     status: "demande",
     notes: "",
   });
@@ -68,25 +93,38 @@ export default function ReservationForm() {
           const r = list.find((x: any) => x.id === id);
           if (r) {
             setDetail(r);
+            const fn = r.guest_first_name || (r.guest_name || "").split(" ")[0] || "";
+            const ln = r.guest_last_name || (r.guest_name || "").split(" ").slice(1).join(" ") || "";
+            const fin = r.finance || {};
             setForm({
               property_id: r.property_id,
-              guest_name: r.guest_name,
+              guest_first_name: fn,
+              guest_last_name: ln,
               guest_email: r.guest_email || "",
+              guest_phone: r.guest_phone || "",
               platform: r.platform || "Direct",
               check_in: r.check_in,
               check_out: r.check_out,
               guests: String(r.guests),
-              total_price: String(r.total_price),
+              nights_total: String(r.nights_total || fin.stay || r.total_price || ""),
+              cleaning_fee: String(r.cleaning_fee || fin.fees || ""),
+              tourist_tax: String(r.tourist_tax || fin.taxes || ""),
               status: r.status,
               notes: r.notes || "",
             });
           }
         } else if (pr.length) {
+          const pid = params.property && pr.some((p: any) => p.id === params.property) ? params.property : pr[0].id;
+          const ci = params.check_in || "";
+          const co = params.check_out || "";
+          const selProp = pr.find((p: any) => p.id === pid);
+          const preNights = ci && co ? computeNightsTotal(selProp, ci, co) : 0;
           setForm((f) => ({
             ...f,
-            property_id: params.property && pr.some((p: any) => p.id === params.property) ? params.property : pr[0].id,
-            check_in: params.check_in || f.check_in,
-            check_out: params.check_out || f.check_out,
+            property_id: pid,
+            check_in: ci || f.check_in,
+            check_out: co || f.check_out,
+            nights_total: preNights ? String(preNights) : f.nights_total,
           }));
         }
       } catch {}
@@ -96,16 +134,56 @@ export default function ReservationForm() {
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  // Recalcule le prix des nuitées quand le logement ou les dates changent (création)
+  function recalcNights(next: any) {
+    if (editing) return;
+    const p = props.find((x) => x.id === next.property_id);
+    if (p && next.check_in && next.check_out) {
+      const v = computeNightsTotal(p, next.check_in, next.check_out);
+      if (v) setForm((f) => ({ ...f, nights_total: String(v) }));
+    }
+  }
+  const setDate = (k: string, v: string) => {
+    setForm((f) => {
+      const nf = { ...f, [k]: v };
+      recalcNights(nf);
+      return nf;
+    });
+  };
+  const setProperty = (v: string) => {
+    setForm((f) => {
+      const nf = { ...f, property_id: v };
+      recalcNights(nf);
+      return nf;
+    });
+  };
+
+  const num = (s: string) => parseFloat((s || "0").replace(",", ".")) || 0;
+  const totalPrice = num(form.nights_total) + num(form.cleaning_fee) + num(form.tourist_tax);
+
   const valid =
-    form.property_id && form.guest_name.trim() && form.check_in && form.check_out;
+    form.property_id && (form.guest_first_name.trim() || form.guest_last_name.trim()) && form.check_in && form.check_out;
 
   async function save() {
     if (!valid || saving) return;
     setSaving(true);
     const payload = {
-      ...form,
+      property_id: form.property_id,
+      guest_first_name: form.guest_first_name.trim(),
+      guest_last_name: form.guest_last_name.trim(),
+      guest_name: `${form.guest_first_name} ${form.guest_last_name}`.trim(),
+      guest_email: form.guest_email.trim(),
+      guest_phone: form.guest_phone.trim(),
+      platform: form.platform,
+      check_in: form.check_in,
+      check_out: form.check_out,
       guests: parseInt(form.guests) || 1,
-      total_price: parseFloat(form.total_price) || 0,
+      nights_total: num(form.nights_total),
+      cleaning_fee: num(form.cleaning_fee),
+      tourist_tax: num(form.tourist_tax),
+      total_price: totalPrice,
+      status: form.status,
+      notes: form.notes,
     };
     try {
       if (editing) await api.put(`/reservations/${id}`, payload);
@@ -257,7 +335,7 @@ export default function ReservationForm() {
           <ChipRow
             items={props.map((p) => ({ key: p.id, label: p.name }))}
             value={form.property_id}
-            onSelect={(v: string) => set("property_id", v)}
+            onSelect={setProperty}
             prefix="res-prop"
           />
 
@@ -271,8 +349,17 @@ export default function ReservationForm() {
           />
 
           <View style={{ height: spacing.lg }} />
-          <Field label="Nom du voyageur" testID="guest-name" value={form.guest_name} onChangeText={(v) => set("guest_name", v)} placeholder="Jean Dupont" />
-          <Field label="Email (optionnel)" testID="guest-email" value={form.guest_email} onChangeText={(v) => set("guest_email", v)} placeholder="jean@email.com" keyboardType="email-address" autoCapitalize="none" />
+          <Text style={styles.sectionTitle}>Voyageur</Text>
+          <View style={styles.row}>
+            <View style={{ flex: 1 }}>
+              <Field label="Prénom" testID="guest-first-name" value={form.guest_first_name} onChangeText={(v) => set("guest_first_name", v)} placeholder="Jean" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Field label="Nom" testID="guest-last-name" value={form.guest_last_name} onChangeText={(v) => set("guest_last_name", v)} placeholder="Dupont" />
+            </View>
+          </View>
+          <Field label="Téléphone" testID="guest-phone" value={form.guest_phone} onChangeText={(v) => set("guest_phone", v)} placeholder="+33 6 12 34 56 78" keyboardType="phone-pad" />
+          <Field label="Email" testID="guest-email" value={form.guest_email} onChangeText={(v) => set("guest_email", v)} placeholder="jean@email.com" keyboardType="email-address" autoCapitalize="none" />
 
           <Text style={styles.label}>Plateforme</Text>
           <ChipRow
@@ -285,22 +372,37 @@ export default function ReservationForm() {
 
           <View style={styles.row}>
             <View style={{ flex: 1 }}>
-              <DateField label="Arrivée" testID="check-in" value={form.check_in} onChange={(v) => set("check_in", v)} />
+              <DateField label="Arrivée" testID="check-in" value={form.check_in} onChange={(v) => setDate("check_in", v)} />
             </View>
             <View style={{ flex: 1 }}>
-              <DateField label="Départ" testID="check-out" value={form.check_out} onChange={(v) => set("check_out", v)} minDate={form.check_in || undefined} />
+              <DateField label="Départ" testID="check-out" value={form.check_out} onChange={(v) => setDate("check_out", v)} minDate={form.check_in || undefined} />
             </View>
           </View>
-          <View style={styles.row}>
-            <View style={{ flex: 1 }}>
-              <Field label="Voyageurs" testID="guests" value={form.guests} onChangeText={(v) => set("guests", v)} keyboardType="number-pad" />
-            </View>
-            {showPrices && (
-              <View style={{ flex: 1 }}>
-                <Field label="Prix total (€)" testID="total-price" value={form.total_price} onChangeText={(v) => set("total_price", v)} keyboardType="decimal-pad" placeholder="0" />
+          <Field label="Nombre de voyageurs" testID="guests" value={form.guests} onChangeText={(v) => set("guests", v)} keyboardType="number-pad" />
+
+          {showPrices && (
+            <>
+              <Text style={styles.sectionTitle}>Tarifs</Text>
+              <View style={styles.row}>
+                <View style={{ flex: 1 }}>
+                  <Field label="Prix des nuitées (€)" testID="nights-total" value={form.nights_total} onChangeText={(v) => set("nights_total", v)} keyboardType="decimal-pad" placeholder="0" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Field label="Frais de ménage (€)" testID="cleaning-fee" value={form.cleaning_fee} onChangeText={(v) => set("cleaning_fee", v)} keyboardType="decimal-pad" placeholder="0" />
+                </View>
               </View>
-            )}
-          </View>
+              <Field label="Taxe de séjour (€)" testID="tourist-tax" value={form.tourist_tax} onChangeText={(v) => set("tourist_tax", v)} keyboardType="decimal-pad" placeholder="0" />
+              {!editing && !!form.nights_total && (
+                <Text style={styles.priceHint}>Prix des nuitées pré-rempli d'après les tarifs par saison du logement — modifiable.</Text>
+              )}
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Total</Text>
+                <Text style={styles.totalValue}>{totalPrice.toFixed(2)} €</Text>
+              </View>
+            </>
+          )}
+
+          <View style={{ height: spacing.md }} />
           <Field label="Notes" testID="notes" value={form.notes} onChangeText={(v) => set("notes", v)} placeholder="Informations complémentaires" multiline />
 
           {canModify(user) && (
@@ -586,6 +688,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   label: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary, marginBottom: spacing.sm },
+  sectionTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.md, marginTop: spacing.sm },
+  priceHint: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: -4, marginBottom: spacing.sm, lineHeight: 17 },
+  totalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.lg, marginTop: spacing.xs },
+  totalLabel: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface },
+  totalValue: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.brandPrimary },
   chipRow: { gap: spacing.sm, paddingRight: spacing.lg },
   chip: {
     flexShrink: 0,

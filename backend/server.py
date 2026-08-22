@@ -101,11 +101,17 @@ class PropertyIn(BaseModel):
 class ReservationIn(BaseModel):
     property_id: str
     guest_name: str
+    guest_first_name: str = ""
+    guest_last_name: str = ""
     guest_email: str = ""
+    guest_phone: str = ""
     platform: str = "Direct"
     check_in: str  # YYYY-MM-DD
     check_out: str
     guests: int = 1
+    nights_total: float = 0      # prix des nuitées
+    cleaning_fee: float = 0      # frais de ménage
+    tourist_tax: float = 0       # taxe de séjour
     total_price: float = 0
     status: str = "demande"  # demande|confirmee|arrivee|depart|annulee
     notes: str = ""
@@ -380,8 +386,18 @@ async def create_reservation(payload: ReservationIn, user=Depends(get_current_us
     doc["id"] = str(uuid.uuid4())
     doc["user_id"] = user["user_id"]
     doc["created_at"] = now_utc().isoformat()
+    name = f"{doc.get('guest_first_name', '')} {doc.get('guest_last_name', '')}".strip()
+    if name:
+        doc["guest_name"] = name
+    nights = float(doc.get("nights_total") or 0)
+    fees = float(doc.get("cleaning_fee") or 0)
+    tax = float(doc.get("tourist_tax") or 0)
     total = float(doc.get("total_price") or 0)
-    doc["finance"] = {"total": total, "paid": 0.0, "due": total, "currency": "EUR"}
+    if nights or fees or tax:
+        total = round(nights + fees + tax, 2)
+        doc["total_price"] = total
+    doc["finance"] = {"total": total, "paid": 0.0, "due": total, "currency": "EUR",
+                      "stay": nights, "fees": fees, "taxes": tax}
     doc["payments"] = []
     await db.reservations.insert_one(doc)
     doc.pop("_id", None)
@@ -391,17 +407,30 @@ async def create_reservation(payload: ReservationIn, user=Depends(get_current_us
 
 @api_router.put("/reservations/{reservation_id}")
 async def update_reservation(reservation_id: str, payload: ReservationIn, user=Depends(get_current_user)):
+    data = payload.dict()
+    name = f"{data.get('guest_first_name', '')} {data.get('guest_last_name', '')}".strip()
+    if name:
+        data["guest_name"] = name
+    nights = float(data.get("nights_total") or 0)
+    fees = float(data.get("cleaning_fee") or 0)
+    tax = float(data.get("tourist_tax") or 0)
+    if nights or fees or tax:
+        data["total_price"] = round(nights + fees + tax, 2)
     res = await db.reservations.update_one(
         {"id": reservation_id, "user_id": user["user_id"]},
-        {"$set": payload.dict()},
+        {"$set": data},
     )
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Reservation not found")
     item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
-    # Réservations manuelles : garder finance.total aligné sur le prix total
+    # Réservations manuelles : garder finance.total + ventilation alignés
     if item.get("source") != "lodgify":
         fin = dict(item.get("finance") or {})
         fin["total"] = float(item.get("total_price") or 0)
+        if nights or fees or tax:
+            fin["stay"] = nights
+            fin["fees"] = fees
+            fin["taxes"] = tax
         item["finance"] = fin
         recompute_payment(item)
         await db.reservations.update_one(

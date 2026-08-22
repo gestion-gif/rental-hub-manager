@@ -6,6 +6,9 @@ import {
   Pressable,
   ScrollView,
   Dimensions,
+  Modal,
+  TextInput,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { GestureDetector, Gesture } from "react-native-gesture-handler";
@@ -64,6 +67,9 @@ export default function Planning() {
   const [anchor, setAnchor] = useState(dayjs().startOf("month"));
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [showPrices, setShowPrices] = useState(false);
+  const [editPrice, setEditPrice] = useState<any>(null);
+  const [priceInput, setPriceInput] = useState("");
+  const [savingPrice, setSavingPrice] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -109,6 +115,40 @@ export default function Planning() {
   const daysInMonth = anchor.daysInMonth();
   const days = Array.from({ length: daysInMonth }, (_, i) => monthStart.add(i, "day"));
   const todayStr = dayjs().format("YYYY-MM-DD");
+
+  function openEditPrice(dayStr: string) {
+    if (!singleProp || !canModify(user)) return;
+    const season = (singleProp.seasons || []).find(
+      (s: any) => s.start_date && s.end_date && dayStr >= s.start_date && dayStr <= s.end_date,
+    );
+    setEditPrice({
+      dayStr,
+      seasonId: season?.id || null,
+      seasonName: season?.name || "Prix de base (hors saison)",
+      range: season ? `${season.start_date} → ${season.end_date}` : "S'applique à toutes les dates sans saison",
+    });
+    setPriceInput(String(season?.price ?? singleProp.base_price ?? ""));
+  }
+
+  async function savePrice() {
+    if (!singleProp || savingPrice) return;
+    const val = parseFloat((priceInput || "0").replace(",", ".")) || 0;
+    setSavingPrice(true);
+    try {
+      const body: any = { ...singleProp };
+      if (editPrice.seasonId) {
+        body.seasons = (singleProp.seasons || []).map((s: any) =>
+          s.id === editPrice.seasonId ? { ...s, price: val } : s,
+        );
+      } else {
+        body.base_price = val;
+      }
+      const updated = await api.put(`/properties/${singleProp.id}`, body);
+      setProps((list) => list.map((p) => (p.id === singleProp.id ? updated : p)));
+      setEditPrice(null);
+    } catch {}
+    setSavingPrice(false);
+  }
 
   return (
     <View style={styles.container}>
@@ -227,6 +267,7 @@ export default function Planning() {
           todayStr={todayStr}
           showPrices={showPrices && !!singleProp}
           priceProp={singleProp}
+          onEditPrice={openEditPrice}
           onBar={(id: string) => router.push(`/reservation-form?id=${id}`)}
           onIv={(id: string) => router.push(`/intervention-form?id=${id}`)}
           onCreate={(pid: string, ci: string, co: string) =>
@@ -264,15 +305,59 @@ export default function Planning() {
           <Ionicons name="construct" size={24} color={colors.onBrandPrimary} />
         </Pressable>
       )}
+
+      <Modal visible={!!editPrice} transparent animationType="fade" onRequestClose={() => setEditPrice(null)}>
+        <Pressable style={styles.priceBackdrop} onPress={() => setEditPrice(null)}>
+          <Pressable style={styles.priceSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.priceSheetTitle}>Modifier le tarif</Text>
+            {!!editPrice && (
+              <>
+                <Text style={styles.priceSheetSeason}>{editPrice.seasonName}</Text>
+                <Text style={styles.priceSheetRange}>{editPrice.range}</Text>
+                <View style={styles.priceInputWrap}>
+                  <TextInput
+                    testID="edit-price-input"
+                    value={priceInput}
+                    onChangeText={setPriceInput}
+                    keyboardType="decimal-pad"
+                    placeholder="0"
+                    placeholderTextColor={colors.onSurfaceTertiary}
+                    style={styles.priceInput}
+                    autoFocus
+                  />
+                  <Text style={styles.priceInputUnit}>€ / nuit</Text>
+                </View>
+                <Pressable testID="edit-price-save" onPress={savePrice} disabled={savingPrice} style={[styles.priceSaveBtn, savingPrice && { opacity: 0.6 }]}>
+                  {savingPrice ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.priceSaveText}>Enregistrer</Text>}
+                </Pressable>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
-function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onBar, onIv, onCreate, bottomPad }: any) {
+function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onEditPrice, onBar, onIv, onCreate, bottomPad }: any) {
   const { user } = useAuth();
   const headH = showPrices ? DAYHEAD_H + 16 : DAYHEAD_H;
   const [sel, setSel] = useState<{ propId: string; a: number; b: number } | null>(null);
+  const [tapSel, setTapSel] = useState<{ propId: string; a: number } | null>(null);
   const dragRef = useRef<{ propId: string; a: number; b: number } | null>(null);
+
+  const jsTap = (propId: string, idx: number) => {
+    if (!canModify(user)) return;
+    setTapSel((prev) => {
+      if (!prev || prev.propId !== propId) return { propId, a: idx };
+      const lo = Math.min(prev.a, idx);
+      const hi = Math.max(prev.a, idx);
+      const ci = days[lo].format("YYYY-MM-DD");
+      const co = days[hi].add(1, "day").format("YYYY-MM-DD");
+      onCreate(propId, ci, co);
+      return null;
+    });
+  };
 
   const jsBegin = (propId: string, idx: number) => {
     dragRef.current = { propId, a: idx, b: idx };
@@ -299,7 +384,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: bottomPad }} showsVerticalScrollIndicator={false}>
       <View style={styles.dragHint}>
         <Ionicons name="hand-left-outline" size={13} color={colors.onSurfaceTertiary} />
-        <Text style={styles.dragHintText}>Maintenez puis glissez sur une ligne pour créer une réservation</Text>
+        <Text style={styles.dragHintText}>Touchez la date de début puis la date de fin pour créer une réservation (ou maintenez et glissez)</Text>
       </View>
       <View style={{ flexDirection: "row" }}>
         {/* Left fixed column */}
@@ -326,9 +411,11 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                     <Text style={[styles.dowText, isToday && styles.todayText]}>{d.format("dd")[0]}</Text>
                     <Text style={[styles.domText, isToday && styles.todayText]}>{d.date()}</Text>
                     {showPrices && (
-                      <Text style={[styles.priceText, isToday && styles.todayText]} numberOfLines={1}>
-                        {price != null ? `${Math.round(price)}€` : "—"}
-                      </Text>
+                      <Pressable testID={`price-${dStr}`} onPress={() => onEditPrice && onEditPrice(dStr)} hitSlop={4}>
+                        <Text style={[styles.priceText, isToday && styles.todayText]} numberOfLines={1}>
+                          {price != null ? `${Math.round(price)}€` : "—"}
+                        </Text>
+                      </Pressable>
                     )}
                   </View>
                 );
@@ -351,8 +438,15 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                 .onEnd(() => {
                   runOnJS(jsEnd)();
                 });
+              const tap = Gesture.Tap()
+                .maxDuration(250)
+                .onEnd((e) => {
+                  const idx = Math.max(0, Math.min(daysInMonth - 1, Math.floor(e.x / DAY_W)));
+                  runOnJS(jsTap)(p.id, idx);
+                });
+              const composed = Gesture.Exclusive(pan, tap);
               return (
-                <GestureDetector key={p.id} gesture={pan}>
+                <GestureDetector key={p.id} gesture={composed}>
                   <View style={{ width: daysInMonth * DAY_W, height: ROW_H }}>
                   {/* background cells */}
                   <View style={{ flexDirection: "row" }}>
@@ -379,6 +473,12 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                         },
                       ]}
                     />
+                  )}
+                  {/* tap start marker (tap start then end to create) */}
+                  {tapSel && tapSel.propId === p.id && (
+                    <View pointerEvents="none" style={[styles.tapStart, { left: tapSel.a * DAY_W }]}>
+                      <Text style={styles.tapStartText}>Début</Text>
+                    </View>
                   )}
                   {/* bars */}
                   {rowRes.map((r: any) => {
@@ -631,6 +731,8 @@ const styles = StyleSheet.create({
   dragHint: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: 2 },
   dragHintText: { fontFamily: font.regular, fontSize: 11, color: colors.onSurfaceTertiary },
   selBar: { position: "absolute", top: 6, bottom: 6, borderRadius: 7, backgroundColor: "rgba(10,132,255,0.22)", borderWidth: 1.5, borderColor: "#0A84FF" },
+  tapStart: { position: "absolute", top: 6, bottom: 6, width: DAY_W, borderRadius: 7, backgroundColor: "rgba(10,132,255,0.28)", borderWidth: 1.5, borderColor: "#0A84FF", alignItems: "center", justifyContent: "center" },
+  tapStartText: { fontFamily: font.semibold, fontSize: 9, color: "#0A84FF" },
   legend: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md, padding: spacing.lg },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 5 },
   legendDot: { width: 10, height: 10, borderRadius: 999 },
@@ -694,4 +796,14 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
+  priceBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: spacing.xl },
+  priceSheet: { backgroundColor: colors.surface, borderRadius: radius.xl, padding: spacing.xl },
+  priceSheetTitle: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
+  priceSheetSeason: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.brandPrimary, marginTop: spacing.md },
+  priceSheetRange: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  priceInputWrap: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.lg, marginTop: spacing.lg },
+  priceInput: { flex: 1, fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface, paddingVertical: 12 },
+  priceInputUnit: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
+  priceSaveBtn: { marginTop: spacing.lg, backgroundColor: colors.brandPrimary, borderRadius: radius.pill, paddingVertical: 14, alignItems: "center" },
+  priceSaveText: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onBrandPrimary },
 });
