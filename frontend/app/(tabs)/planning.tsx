@@ -76,6 +76,7 @@ export default function Planning() {
   const [specialPrice, setSpecialPrice] = useState("");
   const [savingSpecial, setSavingSpecial] = useState(false);
   const [blockedByProp, setBlockedByProp] = useState<Record<string, string[]>>({});
+  const [blockMode, setBlockMode] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -84,7 +85,7 @@ export default function Planning() {
         api.get("/reservations"),
         api.get("/interventions"),
       ]);
-      setProps(pr);
+      setProps((pr || []).slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "", "fr", { sensitivity: "base" })));
       setReservations(res.filter((r: any) => r.status !== "annulee"));
       setInterventions(ivs.filter((iv: any) => !iv.done));
       if (isOwner) {
@@ -126,7 +127,10 @@ export default function Planning() {
   const memberPropIds: string[] | null = activeMember ? (activeMember.property_ids || []) : null;
   const inScope = (pid: string) =>
     (selectedProp === "all" || pid === selectedProp) && (!memberPropIds || memberPropIds.includes(pid));
-  const rows = props.filter((p) => inScope(p.id));
+  const rows = props
+    .filter((p) => inScope(p.id))
+    .slice()
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "fr", { sensitivity: "base" }));
   const singleProp = rows.length === 1 ? rows[0] : null;
   const filtered = reservations.filter((r) => inScope(r.property_id));
   const filteredIvs = interventions.filter((iv) => inScope(iv.property_id));
@@ -249,6 +253,21 @@ export default function Planning() {
           </View>
         )}
 
+        {mode === "timeline" && canModify(user) && (
+          <View style={styles.priceControls}>
+            <Pressable
+              testID="toggle-block-mode"
+              onPress={() => { setBlockMode((s) => !s); if (!blockMode && priceMode) setPriceMode(false); }}
+              style={[styles.priceToggle, blockMode && styles.blockToggleOn]}
+            >
+              <Ionicons name="lock-closed-outline" size={14} color={blockMode ? "#fff" : colors.brandPrimary} />
+              <Text style={[styles.priceToggleText, blockMode && { color: "#fff" }]}>
+                {blockMode ? "Annuler le blocage" : "Bloquer des dates"}
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
         <View style={styles.segment}>
           {(["timeline", "month"] as const).map((m) => (
             <Pressable
@@ -338,6 +357,9 @@ export default function Planning() {
           onEditPrice={openEditPrice}
           priceMode={priceMode && !!singleProp}
           onPriceRange={openSpecial}
+          blockMode={blockMode}
+          onBlock={(pid: string, ci: string, co: string) =>
+            router.push(`/reservation-form?property=${pid}&check_in=${ci}&check_out=${co}&status=bloque`)}
           onBar={(id: string) => router.push(`/reservation-form?id=${id}`)}
           onIv={(id: string) => router.push(`/intervention-form?id=${id}`)}
           onCreate={(pid: string, ci: string, co: string) =>
@@ -455,7 +477,7 @@ export default function Planning() {
   );
 }
 
-function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onEditPrice, priceMode, onPriceRange, onBar, onIv, onCreate, blockedSets, bottomPad }: any) {
+function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onEditPrice, priceMode, onPriceRange, blockMode, onBlock, onBar, onIv, onCreate, blockedSets, bottomPad }: any) {
   const { user } = useAuth();
   const headH = showPrices ? DAYHEAD_H + 16 : DAYHEAD_H;
   const [sel, setSel] = useState<{ propId: string; a: number; b: number } | null>(null);
@@ -468,6 +490,10 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
       const start = days[lo].format("YYYY-MM-DD");
       const end = days[hi].format("YYYY-MM-DD");
       onPriceRange(start, end);
+    } else if (blockMode) {
+      const ci = days[lo].format("YYYY-MM-DD");
+      const co = days[hi].add(1, "day").format("YYYY-MM-DD");
+      onBlock(propId, ci, co);
     } else {
       const ci = days[lo].format("YYYY-MM-DD");
       const co = days[hi].add(1, "day").format("YYYY-MM-DD");
@@ -507,10 +533,12 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
 
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: bottomPad }} showsVerticalScrollIndicator={false}>
-      <View style={[styles.dragHint, priceMode && styles.dragHintPromo]}>
-        <Ionicons name={priceMode ? "flash" : "hand-left-outline"} size={13} color={priceMode ? colors.brandPrimary : colors.onSurfaceTertiary} />
-        <Text style={[styles.dragHintText, priceMode && { color: colors.brandPrimary, fontFamily: font.semibold }]}>
-          {priceMode
+      <View style={[styles.dragHint, (priceMode || blockMode) && styles.dragHintPromo]}>
+        <Ionicons name={blockMode ? "lock-closed" : priceMode ? "flash" : "hand-left-outline"} size={13} color={(priceMode || blockMode) ? colors.brandPrimary : colors.onSurfaceTertiary} />
+        <Text style={[styles.dragHintText, (priceMode || blockMode) && { color: colors.brandPrimary, fontFamily: font.semibold }]}>
+          {blockMode
+            ? "Mode blocage : touchez la date de début puis la date de fin pour bloquer la période (avec annotation)."
+            : priceMode
             ? "Mode tarif spécial : touchez la date de début puis la date de fin de la promo."
             : "Touchez la date de début puis la date de fin pour créer une réservation (ou maintenez et glissez)"}
         </Text>
@@ -842,6 +870,7 @@ const styles = StyleSheet.create({
   specialLabel: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary, marginTop: spacing.lg, marginBottom: 6 },
   specialNameInput: { fontFamily: font.medium, fontSize: fontSize.lg, color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: 12 },
   priceToggleOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  blockToggleOn: { backgroundColor: "#6E6E73", borderColor: "#6E6E73" },
   priceToggleText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
   priceText: { fontFamily: font.semibold, fontSize: 10, color: colors.brandPrimary, marginTop: 1 },
   segment: { flexDirection: "row", backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: 3, marginBottom: spacing.md },

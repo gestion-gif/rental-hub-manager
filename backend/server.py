@@ -3278,7 +3278,7 @@ async def owner_statement(month: str = "", start: str = "", end: str = "",
         pid = p["id"]
         reservations = await db.reservations.find(
             {"user_id": user["user_id"], "property_id": pid,
-             "check_in": {"$gte": start_d, "$lt": end_d}, "status": {"$ne": "annulee"}},
+             "check_in": {"$gte": start_d, "$lt": end_d}, "status": {"$nin": ["annulee", "bloque"]}},
             {"_id": 0}).sort("check_in", 1).to_list(1000)
         lines = []
         t_nights = t_clean = t_tax = t_comm = 0.0

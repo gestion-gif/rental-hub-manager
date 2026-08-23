@@ -42,6 +42,7 @@ DEFAULT_STATUSES = [
     {"key": "confirmee", "label": "Confirmée", "color": "#34C759"},
     {"key": "arrivee", "label": "Arrivée", "color": "#32ADE6"},
     {"key": "depart", "label": "Départ", "color": "#8E8E93"},
+    {"key": "bloque", "label": "Bloqué", "color": "#6E6E73"},
     {"key": "annulee", "label": "Annulée", "color": "#FF3B30"},
 ]
 DEFAULT_STATUS_COLORS = {s["key"]: s["color"] for s in DEFAULT_STATUSES}

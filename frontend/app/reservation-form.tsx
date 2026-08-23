@@ -64,7 +64,7 @@ export default function ReservationForm() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { stripe } = useLocalSearchParams<{ stripe?: string }>();
-  const params = useLocalSearchParams<{ property?: string; check_in?: string; check_out?: string }>();
+  const params = useLocalSearchParams<{ property?: string; check_in?: string; check_out?: string; status?: string }>();
   const editing = !!id;
   const { statuses } = usePreferences();
   const { user } = useAuth();
@@ -140,6 +140,7 @@ export default function ReservationForm() {
             property_id: pid,
             check_in: ci || f.check_in,
             check_out: co || f.check_out,
+            status: params.status || f.status,
             nights_total: preNights ? String(preNights) : f.nights_total,
             cleaning_fee: selProp?.default_cleaning_fee ? String(selProp.default_cleaning_fee) : f.cleaning_fee,
             tourist_tax: preTax ? String(preTax) : f.tourist_tax,
@@ -192,17 +193,20 @@ export default function ReservationForm() {
   const num = (s: string) => parseFloat((s || "0").replace(",", ".")) || 0;
   const totalPrice = num(form.nights_total) + num(form.cleaning_fee) + num(form.tourist_tax);
 
+  const isBlocked = form.status === "bloque";
   const valid =
-    form.property_id && (form.guest_first_name.trim() || form.guest_last_name.trim()) && form.check_in && form.check_out;
+    form.property_id && form.check_in && form.check_out &&
+    (isBlocked || form.guest_first_name.trim() || form.guest_last_name.trim());
 
   async function save() {
     if (!valid || saving) return;
     setSaving(true);
+    const gname = `${form.guest_first_name} ${form.guest_last_name}`.trim() || (isBlocked ? "Bloqué" : "");
     const payload = {
       property_id: form.property_id,
       guest_first_name: form.guest_first_name.trim(),
       guest_last_name: form.guest_last_name.trim(),
-      guest_name: `${form.guest_first_name} ${form.guest_last_name}`.trim(),
+      guest_name: gname,
       guest_email: form.guest_email.trim(),
       guest_phone: form.guest_phone.trim(),
       platform: form.platform,
