@@ -63,6 +63,7 @@ export default function Dashboard() {
   const [arrOpen, setArrOpen] = useState(false);
   const [stayOpen, setStayOpen] = useState(false);
   const [depOpen, setDepOpen] = useState(false);
+  const [stmtOpen, setStmtOpen] = useState(true);
   const [deposits, setDeposits] = useState<any[]>([]);
   const [depBusy, setDepBusy] = useState<string>("");
   const [cautionOpen, setCautionOpen] = useState(true);
@@ -297,9 +298,9 @@ export default function Dashboard() {
             )}
 
             {canModify(user) && (pendingStmts.count || 0) > 0 && (
-              <Pressable testID="stmt-pending-card" onPress={() => router.push("/statement")} style={[styles.cautionCard, styles.cautionCardUrgent]}>
+              <View style={[styles.cautionCard, styles.cautionCardUrgent]}>
                 <View style={styles.cautionHeader}>
-                  <View style={styles.cautionHeadLeft}>
+                  <Pressable testID="stmt-pending-card" onPress={() => router.push("/statement")} style={styles.cautionHeadLeft}>
                     <View style={[styles.cautionIcon, { backgroundColor: colors.error }]}>
                       <Ionicons name="document-text" size={18} color={colors.onBrandPrimary} />
                     </View>
@@ -307,11 +308,13 @@ export default function Dashboard() {
                       <Text style={styles.cautionTitle}>Relevés à envoyer</Text>
                       <Text style={styles.cautionSub}>{pendingStmts.count} relevé{pendingStmts.count > 1 ? "s" : ""} non envoyé{pendingStmts.count > 1 ? "s" : ""} · {pendingStmts.period_label}</Text>
                     </View>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color={colors.onSurfaceSecondary} />
+                  </Pressable>
+                  <Pressable testID="stmt-pending-toggle" onPress={() => setStmtOpen((o) => !o)} hitSlop={8} style={styles.stmtToggle}>
+                    <Ionicons name={stmtOpen ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurfaceSecondary} />
+                  </Pressable>
                 </View>
-                {pendingStmts.pending.slice(0, 8).map((p: any) => (
-                  <View key={p.property_id} style={styles.depRow}>
+                {stmtOpen && pendingStmts.pending.slice(0, 8).map((p: any) => (
+                  <Pressable key={p.property_id} testID={`stmt-row-${p.property_id}`} onPress={() => router.push("/statement")} style={styles.depRow}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.depGuest}>{p.property_name}</Text>
                       <Text style={styles.depMeta}>{p.owner_name || "Propriétaire ?"}{!p.has_owner_email ? " · email manquant" : ""}</Text>
@@ -320,9 +323,9 @@ export default function Dashboard() {
                       <Text style={styles.dueLabel}>Propr.</Text>
                       <Text style={styles.dueValue}>{Number(p.owner_revenue || 0).toFixed(0)} €</Text>
                     </View>
-                  </View>
+                  </Pressable>
                 ))}
-              </Pressable>
+              </View>
             )}
 
             <Pressable testID="dash-today-shortcut" onPress={() => router.push("/cleaning")} style={styles.todayCard}>
@@ -607,6 +610,7 @@ const styles = StyleSheet.create({
   dueValue: { fontFamily: font.bold, fontSize: fontSize.base, color: colors.onSurface },
   cautionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   cautionHeadLeft: { flexDirection: "row", alignItems: "center", gap: spacing.md, flex: 1 },
+  stmtToggle: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
   cautionIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.warning, alignItems: "center", justifyContent: "center" },
   cautionTitle: { fontFamily: font.bold, fontSize: fontSize.base, color: colors.onSurface },
   cautionSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 1 },

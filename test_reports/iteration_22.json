@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 22 backend: 7/7 tests PASS (100%). Tested: (1) GET /api/properties/{id}/dynamic-pricing returns days[] with base/market/suggested/factors/delta, occupancy_rate, comps_count, market_city, config; suggested is numeric >=0; every Fri/Sat between 2026-08-01..15 has 'week-end' factor; invalid dates → 400; unknown id → 404. (2) PUT /api/properties/{id} with dynamic_pricing={enabled:true, weekend_pct:20} persists; a subsequent PUT WITHOUT the dynamic_pricing key does NOT wipe it (weekend_pct=20 still returned by GET /property and by /dynamic-pricing config). (3) Property.photos preserved: PUT with photos=['a.jpg','b.jpg'] then GET returns exactly that list; PUT with photos=[] clears; original values restored after test. (4) Fix rating=0 → clamped to 1; rating=7 → 5. Frontend smoke: /login → password login works (Home reached); Home displays testID='stmt-pending-card' and 'stmt-pending-toggle' — the collapsible 'Cautions à suivre' / 'Relevés à suivre' encart is present and the chevron toggles collapse/expand. Screens /kpi, /reviews, /settings/promotions (Ajouter une promotion form) all render without red-screen. Planning multi-property price toggle and reservation-form checklist could not be re-verified via Playwright in this run due to intermittent Google reCAPTCHA/login latency after the first successful session — all their backend contracts, however, are validated in test_iter21_features.py (checklist) and test_iter22_features.py (dynamic pricing + photos). No deprecated Expo packages detected (expo-av, expo-barcode-scanner, expo-background-fetch not present). All TEST_-prefixed reviews were deleted; property photos & dynamic_pricing restored to original values (no real property data mutated).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter22_features.py",
+    "/app/test_reports/pytest/pytest_iter22.xml"
+  ],
+  "action_items": [
+    "(Optional) The web-preview login flow is occasionally flaky when the same headless browser context re-navigates to /login and the 'Se connecter avec un email et un mot de passe' reveal must be clicked before the two inputs render — first attempt always works, later attempts sometimes stay on /login. Not a product bug but consider a testID on the reveal link and the final submit button (currently only detectable by text 'Se connecter') to make automated retries reliable.",
+    "(Optional/Cleanup) DEFAULT_DYNAMIC_PRICING is loaded via {**DEFAULT_DYNAMIC_PRICING, **prop['dynamic_pricing']} which is good; consider adding a Pydantic sub-model to validate weekend_pct etc. and prevent NaN input."
+  ],
+  "critical_code_review_comments": [
+    "server.py grew to ~4931 lines — splitting into modules (pricing.py, properties.py, reservations.py, reviews.py) would improve maintainability.",
+    "PUT /api/properties/{id} correctly guards against wiping dynamic_pricing / lodgify_id / owner_id when the key is absent from payload (lines 373-378) — good pattern; document it for future added-optional fields."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter22_features.py (created)",
+    "/app/test_reports/pytest/pytest_iter22.xml (generated)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 iter22 tests)",
+    "frontend": "Partially verified: Home (stmt-pending toggle+card OK), /kpi OK, /reviews OK, /settings/promotions form OK. Planning multi-price and reservation-form checklist not re-verified in this run (see action_items)."
+  },
+  "seed_data_creation": "No permanent seed. Two TEST_iter22_* reviews created and immediately deleted; a real property was momentarily updated with photos=['a.jpg','b.jpg'] and dynamic_pricing={enabled:true, weekend_pct:20} then restored to original values in the test's finally block. No real properties or reservations were created or deleted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "QA login: qa.admin@casaneo.test / CasaneoQA2026! via POST /api/auth/login OR UI /login → click 'Se connecter avec un email et un mot de passe' first (only 2 inputs render after the click). Base URL: read frontend/.env EXPO_PUBLIC_BACKEND_URL. Iter22 regression suite at /app/backend/tests/test_iter22_features.py — reuse for future work on dynamic pricing, photos preservation, and review rating clamp. Iter21 suite at /app/backend/tests/test_iter21_features.py still passes.",
+  "rca_of_issue": "N/A (all tested contracts pass)."
+}

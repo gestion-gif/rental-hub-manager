@@ -77,6 +77,9 @@ export default function Planning() {
   const [savingSpecial, setSavingSpecial] = useState(false);
   const [blockedByProp, setBlockedByProp] = useState<Record<string, string[]>>({});
   const [blockMode, setBlockMode] = useState(false);
+  const [dynOn, setDynOn] = useState(false);
+  const [dynMap, setDynMap] = useState<Record<string, { suggested: number; delta: number }>>({});
+  const [dynInfo, setDynInfo] = useState<{ occupancy_rate: number; comps_count: number } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -139,6 +142,30 @@ export default function Planning() {
   const daysInMonth = anchor.daysInMonth();
   const days = Array.from({ length: daysInMonth }, (_, i) => monthStart.add(i, "day"));
   const todayStr = dayjs().format("YYYY-MM-DD");
+
+  useEffect(() => {
+    if (!dynOn || !singleProp) { setDynMap({}); setDynInfo(null); return; }
+    const s = monthStart.format("YYYY-MM-DD");
+    const e = anchor.endOf("month").format("YYYY-MM-DD");
+    api.get(`/properties/${singleProp.id}/dynamic-pricing?start=${s}&end=${e}`)
+      .then((r) => {
+        const m: Record<string, { suggested: number; delta: number }> = {};
+        (r.days || []).forEach((d: any) => { m[d.date] = { suggested: d.suggested, delta: d.delta }; });
+        setDynMap(m);
+        setDynInfo({ occupancy_rate: r.occupancy_rate, comps_count: r.comps_count });
+      })
+      .catch(() => { setDynMap({}); setDynInfo(null); });
+  }, [dynOn, singleProp?.id, anchor]);
+
+  async function applyDynamic(dayStr: string, price: number) {
+    if (!singleProp) return;
+    const season = { id: `dyn_${Date.now()}`, name: "Tarif dynamique", start_date: dayStr, end_date: dayStr, price };
+    const body: any = { ...singleProp, seasons: [season, ...(singleProp.seasons || [])] };
+    try {
+      const updated = await api.put(`/properties/${singleProp.id}`, body);
+      setProps((list) => list.map((p) => (p.id === singleProp.id ? updated : p)));
+    } catch {}
+  }
 
   function openEditPrice(dayStr: string) {
     if (!singleProp || !canModify(user)) return;
@@ -221,35 +248,54 @@ export default function Planning() {
           </Pressable>
         </View>
 
-        {singleProp ? (
-          <View style={styles.priceControls}>
+        <View style={styles.priceControls}>
+          <Pressable
+            testID="toggle-prices"
+            onPress={() => { setShowPrices((s) => !s); if (priceMode) setPriceMode(false); }}
+            style={[styles.priceToggle, showPrices && styles.priceToggleOn]}
+          >
+            <Ionicons name="pricetags-outline" size={14} color={showPrices ? colors.onBrandPrimary : colors.brandPrimary} />
+            <Text style={[styles.priceToggleText, showPrices && { color: colors.onBrandPrimary }]}>
+              {showPrices ? "Masquer les tarifs" : "Afficher les tarifs"}
+            </Text>
+          </Pressable>
+          {showPrices && singleProp && canModify(user) && mode === "timeline" && (
             <Pressable
-              testID="toggle-prices"
-              onPress={() => { setShowPrices((s) => !s); if (priceMode) setPriceMode(false); }}
-              style={[styles.priceToggle, showPrices && styles.priceToggleOn]}
+              testID="toggle-price-mode"
+              onPress={() => setPriceMode((s) => !s)}
+              style={[styles.priceToggle, priceMode && styles.priceToggleOn]}
             >
-              <Ionicons name="pricetags-outline" size={14} color={showPrices ? colors.onBrandPrimary : colors.brandPrimary} />
-              <Text style={[styles.priceToggleText, showPrices && { color: colors.onBrandPrimary }]}>
-                {showPrices ? "Masquer les tarifs" : "Afficher les tarifs"}
+              <Ionicons name="flash-outline" size={14} color={priceMode ? colors.onBrandPrimary : colors.brandPrimary} />
+              <Text style={[styles.priceToggleText, priceMode && { color: colors.onBrandPrimary }]}>
+                {priceMode ? "Annuler" : "Tarif spécial (promo)"}
               </Text>
             </Pressable>
-            {showPrices && canModify(user) && mode === "timeline" && (
-              <Pressable
-                testID="toggle-price-mode"
-                onPress={() => setPriceMode((s) => !s)}
-                style={[styles.priceToggle, priceMode && styles.priceToggleOn]}
-              >
-                <Ionicons name="flash-outline" size={14} color={priceMode ? colors.onBrandPrimary : colors.brandPrimary} />
-                <Text style={[styles.priceToggleText, priceMode && { color: colors.onBrandPrimary }]}>
-                  {priceMode ? "Annuler" : "Tarif spécial (promo)"}
-                </Text>
-              </Pressable>
-            )}
+          )}
+          {showPrices && singleProp && canModify(user) && mode === "timeline" && (
+            <Pressable
+              testID="toggle-dynamic"
+              onPress={() => setDynOn((s) => !s)}
+              style={[styles.priceToggle, dynOn && styles.priceToggleOn]}
+            >
+              <Ionicons name="trending-up-outline" size={14} color={dynOn ? colors.onBrandPrimary : colors.brandPrimary} />
+              <Text style={[styles.priceToggleText, dynOn && { color: colors.onBrandPrimary }]}>
+                {dynOn ? "Masquer suggestions" : "Tarifs dynamiques"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+        {dynOn && singleProp && dynInfo && (
+          <View style={styles.priceHint}>
+            <Ionicons name="trending-up" size={14} color={colors.brandPrimary} />
+            <Text style={styles.priceHintText}>
+              Suggestions (gris) basées sur {dynInfo.comps_count} logement(s) comparable(s) · occupation {dynInfo.occupancy_rate}%. Touchez un prix suggéré pour l'appliquer.
+            </Text>
           </View>
-        ) : (
+        )}
+        {showPrices && !singleProp && (
           <View style={styles.priceHint}>
             <Ionicons name="information-circle-outline" size={14} color={colors.onSurfaceTertiary} />
-            <Text style={styles.priceHintText}>Sélectionnez un logement ci-dessous pour voir et modifier les tarifs par nuit.</Text>
+            <Text style={styles.priceHintText}>Tarif/nuit affiché sur chaque ligne. Sélectionnez un logement pour modifier les tarifs.</Text>
           </View>
         )}
 
@@ -352,9 +398,11 @@ export default function Planning() {
           statusColors={statusColors}
           statuses={statuses}
           todayStr={todayStr}
-          showPrices={showPrices && !!singleProp}
+          showPrices={showPrices}
           priceProp={singleProp}
           onEditPrice={openEditPrice}
+          dynMap={dynMap}
+          onApplyDyn={applyDynamic}
           priceMode={priceMode && !!singleProp}
           onPriceRange={openSpecial}
           blockMode={blockMode}
@@ -477,9 +525,9 @@ export default function Planning() {
   );
 }
 
-function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onEditPrice, priceMode, onPriceRange, blockMode, onBlock, onBar, onIv, onCreate, blockedSets, bottomPad }: any) {
+function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onEditPrice, priceMode, onPriceRange, blockMode, onBlock, onBar, onIv, onCreate, blockedSets, bottomPad, dynMap, onApplyDyn }: any) {
   const { user } = useAuth();
-  const headH = showPrices ? DAYHEAD_H + 16 : DAYHEAD_H;
+  const headH = (showPrices && priceProp) ? DAYHEAD_H + (dynMap && Object.keys(dynMap).length ? 30 : 16) : DAYHEAD_H;
   const [sel, setSel] = useState<{ propId: string; a: number; b: number } | null>(null);
   const [tapSel, setTapSel] = useState<{ propId: string; a: number } | null>(null);
   const dragRef = useRef<{ propId: string; a: number; b: number } | null>(null);
@@ -562,16 +610,21 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                 const dStr = d.format("YYYY-MM-DD");
                 const isToday = dStr === todayStr;
                 const weekend = d.day() === 0 || d.day() === 6;
-                const price = showPrices ? priceForDay(priceProp, dStr) : null;
+                const price = (showPrices && priceProp) ? priceForDay(priceProp, dStr) : null;
                 return (
                   <View key={d.valueOf()} style={[styles.dayHead, { height: headH }, weekend && styles.weekendBg, isToday && styles.todayHead]}>
                     <Text style={[styles.dowText, isToday && styles.todayText]}>{d.format("dd")[0]}</Text>
                     <Text style={[styles.domText, isToday && styles.todayText]}>{d.date()}</Text>
-                    {showPrices && (
+                    {showPrices && priceProp && (
                       <Pressable testID={`price-${dStr}`} onPress={() => onEditPrice && onEditPrice(dStr)} hitSlop={4}>
                         <Text style={[styles.priceText, isToday && styles.todayText]} numberOfLines={1}>
                           {price != null ? `${Math.round(price)}€` : "—"}
                         </Text>
+                      </Pressable>
+                    )}
+                    {showPrices && priceProp && dynMap && dynMap[dStr] && (
+                      <Pressable testID={`dyn-${dStr}`} onPress={() => onApplyDyn && onApplyDyn(dStr, dynMap[dStr].suggested)} hitSlop={4}>
+                        <Text style={styles.dynText} numberOfLines={1}>{Math.round(dynMap[dStr].suggested)}€</Text>
                       </Pressable>
                     )}
                   </View>
@@ -582,6 +635,14 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
             {rows.map((p: any) => {
               const rowRes = filtered.filter((r: any) => r.property_id === p.id);
               const rowIvs = interventions.filter((iv: any) => iv.property_id === p.id);
+              const occ = new Set<string>();
+              if (showPrices) {
+                for (const r of rowRes) {
+                  let cur = dayjs(r.check_in);
+                  const end = dayjs(r.check_out);
+                  while (cur.isBefore(end)) { occ.add(cur.format("YYYY-MM-DD")); cur = cur.add(1, "day"); }
+                }
+              }
               const pan = Gesture.Pan()
                 .activateAfterLongPress(220)
                 .onBegin((e) => {
@@ -612,12 +673,16 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                       const dStr = d.format("YYYY-MM-DD");
                       const isToday = dStr === todayStr;
                       const blocked = blockedSets?.[p.id]?.has(dStr);
+                      const cellPrice = (showPrices && !blocked && !occ.has(dStr)) ? priceForDay(p, dStr) : null;
                       return (
                         <View
                           key={d.valueOf()}
                           style={[styles.gridCell, weekend && styles.weekendBg, isToday && styles.todayCol, blocked && styles.blockedCell]}
                         >
                           {blocked && <Ionicons name="lock-closed" size={9} color="#9AA0A6" style={styles.blockedIcon} />}
+                          {cellPrice != null && (
+                            <Text style={styles.cellPrice} numberOfLines={1}>{Math.round(cellPrice)}€</Text>
+                          )}
                         </View>
                       );
                     })}
@@ -712,6 +777,27 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
     </ScrollView>
   );
 }
+
+function ChecklistDots({ checklist }: { checklist?: any }) {
+  const items = [
+    { key: "caution", icon: "shield-checkmark" },
+    { key: "keys", icon: "key" },
+    { key: "welcome_book", icon: "book" },
+    { key: "cleaning", icon: "sparkles" },
+  ];
+  const done = items.filter((it) => checklist && checklist[it.key]).length;
+  if (done === 0 && !checklist) return null;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 4 }}>
+      {items.map((it) => {
+        const on = !!(checklist && checklist[it.key]);
+        return <Ionicons key={it.key} name={(on ? it.icon : `${it.icon}-outline`) as any} size={12} color={on ? "#17B0A6" : "#C7C7CC"} />;
+      })}
+      <Text style={{ fontSize: 10, color: "#8E8E93", marginLeft: 2 }}>{done}/4</Text>
+    </View>
+  );
+}
+
 
 function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, propMap, statusColors, single, showPrices, priceProp, onEditPrice, selectedDay, setSelectedDay, todayStr, onRes, onIv, blockedSets, bottomPad }: any) {
   const { user } = useAuth();
@@ -816,6 +902,7 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, p
                   <View style={{ flex: 1 }}>
                     <Text style={styles.detailGuest}>{guestLabel(user, r.guest_name)}</Text>
                     <Text style={styles.detailProp}>{propMap[r.property_id]?.name || "Logement"}</Text>
+                    <ChecklistDots checklist={r.checklist} />
                   </View>
                   <StatusBadge status={r.status} />
                 </Pressable>
@@ -873,6 +960,7 @@ const styles = StyleSheet.create({
   blockToggleOn: { backgroundColor: "#6E6E73", borderColor: "#6E6E73" },
   priceToggleText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
   priceText: { fontFamily: font.semibold, fontSize: 10, color: colors.brandPrimary, marginTop: 1 },
+  dynText: { fontFamily: font.semibold, fontSize: 10, color: "#9AA0A6", marginTop: 1, textDecorationLine: "underline" },
   segment: { flexDirection: "row", backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: 3, marginBottom: spacing.md },
   segBtn: { flex: 1, flexDirection: "row", gap: 5, paddingVertical: 8, alignItems: "center", justifyContent: "center", borderRadius: radius.sm },
   segBtnActive: { backgroundColor: colors.surface, shadowColor: "#000", shadowOpacity: 0.06, shadowRadius: 3, elevation: 1 },
@@ -909,6 +997,7 @@ const styles = StyleSheet.create({
   weekendBg: { backgroundColor: colors.surfaceSecondary },
   todayCol: { backgroundColor: "rgba(28,28,30,0.06)" },
   gridCell: { width: DAY_W, height: ROW_H, borderRightWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
+  cellPrice: { position: "absolute", bottom: 3, alignSelf: "center", fontFamily: font.medium, fontSize: 9, color: colors.onSurfaceTertiary },
   blockedCell: { backgroundColor: "#EDEEF0" },
   blockedIcon: { position: "absolute", top: 3, alignSelf: "center", opacity: 0.7 },
   blockedBadge: { position: "absolute", top: 3, right: 3, opacity: 0.8 },

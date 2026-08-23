@@ -1,0 +1,33 @@
+{
+  "summary": "Backend 12/12 (100%) and frontend smoke on 5 new screens PASS. Tested: (1) GET /api/analytics/kpi by month & date range — all required totals keys present, occupancy_all, per_property[], top_by_revenue[], top_by_occupancy[], period_label; QA admin gets 200 (has view_revenue_charts). (2) PATCH /api/reservations/{id}/checklist returns 4 keys (caution,keys,welcome_book,cleaning), partial patch merges correctly, 404 on unknown id, and checklist is preserved after a full PUT /api/reservations/{id} (field not in ReservationIn). (3) Reviews CRUD + summary — rating clamped to [1..5], avg_all updates, all created reviews cleaned. (4) Promotions CRUD — percentage amount clamped to 100 (150→100), fixed not clamped (250 kept), 'none' calc_type accepted, PUT/DELETE 404 handling; test data cleaned. (5) Preferences — online_checkin: guests_count remains true even if sent false, empty custom_questions filtered, ids auto-generated; monthly_report_enabled=false / review_request_enabled=true / review_request_days=2 persist through GET; days clamped to [0..30]; restored to defaults after test. UI smoke: /kpi (Mois/Trimestre + nav), /reviews (note moyenne + FAB +), /settings/promotions (Ajouter une promotion), /settings/reports (2 toggles), /settings/online-checkin all render without errors. No deprecated Expo packages detected (expo-av/expo-barcode-scanner/expo-background-fetch not present).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/reviews", "issue": "rating=0 is not clamped to 1: server code `int(rating) or 5` treats 0 as falsy and returns default rating=5. Boundary edge case only — rating=-1 correctly clamps to 1. Suggest `max(1, min(5, int(rating if rating is not None else 5)))`. Reference: /app/backend/server.py:4007 and 4022."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iter21_features.py", "/app/test_reports/pytest/pytest_iter21.xml"],
+  "action_items": [
+    "(Minor) Fix rating=0 edge case in POST /api/reviews and PUT /api/reviews/{id} — replace `int(x or 5)` with an explicit None check so 0 clamps to 1 as per spec 'rating borné 1..5'."
+  ],
+  "critical_code_review_comments": [
+    "server.py is very large (~4800 lines) — consider splitting into modules (reviews.py, promotions.py, preferences.py, analytics.py) for maintainability.",
+    "The rating clamp pattern `int(doc.get('rating') or 5)` is present in both POST and PUT of /api/reviews; extract into a helper `_clamp_rating` and reuse."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter21_features.py (created)",
+    "/app/test_reports/pytest/pytest_iter21.xml (generated)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (5/5 screens render, no red-screen, all key CTAs visible)"},
+  "seed_data_creation": "No permanent seed; all TEST_-prefixed data (1 reservation, 3 reviews, 3 promotions) was cleaned up. Preferences were restored to their pre-test values (monthly_report_enabled=true, review_request_enabled=false, review_request_days=1, online_checkin.enabled=false).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "QA credentials: qa.admin@casaneo.test / CasaneoQA2026!. Login via POST /api/auth/login. Base URL from frontend/.env EXPO_PUBLIC_BACKEND_URL. Regression suite for iteration 21 features at /app/backend/tests/test_iter21_features.py — reuse for future changes on KPI, checklist, reviews, promotions, and preferences flags.",
+  "rca_of_issue": "Rating=0 edge case: `int(x or 5)` — when x is 0 (Python-falsy), `x or 5` evaluates to 5, so rating=0 bypasses the max(1,...) clamp and stores 5 instead of 1. Not blocking (all real UI inputs use star selectors starting at 1)."
+}

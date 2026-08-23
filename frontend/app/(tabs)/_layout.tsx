@@ -98,9 +98,21 @@ function CustomDrawer(props: any) {
         </Pressable>
 
         {canSeeRevenue(user) && (
+          <Pressable testID="drawer-kpi" onPress={() => goStack("/kpi")} style={styles.item}>
+            <Ionicons name="speedometer-outline" size={20} color={colors.onSurfaceSecondary} />
+            <Text style={styles.itemText}>Tableau de bord</Text>
+          </Pressable>
+        )}
+        {canSeeRevenue(user) && (
           <Pressable testID="drawer-analytics" onPress={() => goStack("/analytics")} style={styles.item}>
             <Ionicons name="stats-chart-outline" size={20} color={colors.onSurfaceSecondary} />
             <Text style={styles.itemText}>Statistiques</Text>
+          </Pressable>
+        )}
+        {canSeeRevenue(user) && (
+          <Pressable testID="drawer-reviews" onPress={() => goStack("/reviews")} style={styles.item}>
+            <Ionicons name="star-outline" size={20} color={colors.onSurfaceSecondary} />
+            <Text style={styles.itemText}>Avis voyageurs</Text>
           </Pressable>
         )}
         {canSeeSettings(user) && (

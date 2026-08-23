@@ -106,8 +106,10 @@ class PropertyIn(BaseModel):
     regional_tax_pct: float = 0        # taxe additionnelle régionale en % du prix des nuitées
     key_instructions: str = ""         # code boîte à clés / instructions de récupération
     key_photos: List[str] = []         # chemins des photos (boîte à clés, emplacement)
+    photos: List[str] = []             # galerie photos du logement (jusqu'à 30)
     lodgify_id: Optional[str] = None
     owner_id: Optional[str] = None
+    dynamic_pricing: Optional[dict] = None   # config tarification dynamique (par logement)
 
 
 class ReservationIn(BaseModel):
@@ -372,6 +374,8 @@ async def update_property(property_id: str, payload: PropertyIn, user=Depends(ge
         data.pop("lodgify_id", None)
     if data.get("owner_id") is None:
         data.pop("owner_id", None)
+    if data.get("dynamic_pricing") is None:
+        data.pop("dynamic_pricing", None)
     res = await db.properties.update_one(
         {"id": property_id, "user_id": user["user_id"]},
         {"$set": data},
@@ -837,6 +841,30 @@ async def payments_pending(user=Depends(get_current_user)):
 
 
 
+
+
+
+CHECKLIST_KEYS = ["caution", "keys", "welcome_book", "cleaning"]
+
+
+class ChecklistIn(BaseModel):
+    checklist: dict
+
+
+@api_router.patch("/reservations/{reservation_id}/checklist")
+async def set_reservation_checklist(reservation_id: str, payload: ChecklistIn, user=Depends(get_current_user)):
+    """Met à jour la check-list d'arrivée d'une réservation (caution, clés, livret, ménage).
+    Le champ `checklist` est hors ReservationIn → préservé par le PUT principal."""
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    current = {k: bool((r.get("checklist") or {}).get(k)) for k in CHECKLIST_KEYS}
+    for k in CHECKLIST_KEYS:
+        if k in (payload.checklist or {}):
+            current[k] = bool(payload.checklist[k])
+    await db.reservations.update_one({"id": reservation_id, "user_id": uid}, {"$set": {"checklist": current}})
+    return {"checklist": current}
 
 
 
@@ -1661,6 +1689,142 @@ async def analytics_kpi(month: str = "", start: str = "", end: str = "",
     }
 
 
+# ---------------------------------------------------------------------------
+# Tarification dynamique (suggestions par logement) — occupation + comparables
+# ---------------------------------------------------------------------------
+DEFAULT_DYNAMIC_PRICING = {
+    "enabled": False,
+    "weekend_pct": 15,        # majoration vendredi/samedi
+    "high_season_pct": 20,    # majoration si la date tombe dans une saison "haute"
+    "lead_long_days": 45,     # au-delà → anticipation longue
+    "lead_long_pct": 8,       # majoration anticipation longue
+    "lead_last_days": 7,      # en deçà → dernière minute
+    "lead_last_pct": -10,     # remise dernière minute
+    "occ_high_pct": 12,       # majoration si occupation forte
+    "occ_low_pct": -10,       # remise si occupation faible
+    "market_weight": 40,      # % de poids du marché (comparables) vs prix de base
+    "min_price": 0,
+    "max_price": 0,
+}
+
+
+def _price_for_day(prop: dict, day_str: str):
+    for s in (prop.get("seasons") or []):
+        if s.get("start_date") and s.get("end_date") and s["start_date"] <= day_str <= s["end_date"]:
+            return float(s.get("price") or 0)
+    return float(prop.get("base_price") or 0)
+
+
+def _is_high_season(prop: dict, day_str: str) -> bool:
+    base = float(prop.get("base_price") or 0)
+    for s in (prop.get("seasons") or []):
+        if s.get("start_date") and s.get("end_date") and s["start_date"] <= day_str <= s["end_date"]:
+            return float(s.get("price") or 0) > base
+    return False
+
+
+@api_router.get("/properties/{property_id}/dynamic-pricing")
+async def dynamic_pricing(property_id: str, start: str = "", end: str = "", user=Depends(get_current_user)):
+    """Suggestions de prix/nuit (à valider) basées sur : prix des logements comparables
+    du même secteur (même ville, capacité proche), taux d'occupation du logement, et
+    règles (anticipation longue, haute saison, week-end). Retour par jour."""
+    uid = user["user_id"]
+    prop = await db.properties.find_one(
+        {"id": property_id, "user_id": uid, **_prop_scope(user)}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    cfg = {**DEFAULT_DYNAMIC_PRICING, **((prop.get("dynamic_pricing") or {}))}
+
+    try:
+        sd = date.fromisoformat(start) if start else date.today().replace(day=1)
+        ed = date.fromisoformat(end) if end else (sd + timedelta(days=31))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Dates invalides (YYYY-MM-DD)")
+    if ed < sd:
+        ed = sd + timedelta(days=31)
+    ed = min(ed, sd + timedelta(days=95))  # borne de sécurité
+
+    # Comparables : même ville (sinon tout le portefeuille), capacité ±2, hors soi-même
+    city = (prop.get("city") or prop.get("location") or "").strip().lower()
+    cap = int(prop.get("capacity") or 0)
+    all_props = await db.properties.find({"user_id": uid}, {"_id": 0}).to_list(500)
+    comps = []
+    for p in all_props:
+        if p["id"] == property_id:
+            continue
+        pcity = (p.get("city") or p.get("location") or "").strip().lower()
+        if city and pcity and city != pcity:
+            continue
+        if cap and p.get("capacity") and abs(int(p["capacity"]) - cap) > 2:
+            continue
+        comps.append(p)
+    if not comps:  # repli : tout le portefeuille (hors soi)
+        comps = [p for p in all_props if p["id"] != property_id]
+
+    # Occupation prospective du logement (30 prochains jours à partir de sd)
+    win_end = sd + timedelta(days=30)
+    occ_res = await db.reservations.find(
+        {"user_id": uid, "property_id": property_id, "status": {"$nin": ["annulee"]},
+         "check_in": {"$lt": win_end.isoformat()}, "check_out": {"$gt": sd.isoformat()}}, {"_id": 0}).to_list(500)
+    booked = 0
+    for r in occ_res:
+        try:
+            ci = max(date.fromisoformat(r["check_in"]), sd)
+            co = min(date.fromisoformat(r["check_out"]), win_end)
+            if co > ci:
+                booked += (co - ci).days
+        except Exception:
+            pass
+    occ_rate = round(min(booked / 30 * 100, 100))
+
+    mw = max(0.0, min(1.0, float(cfg["market_weight"]) / 100.0))
+    today = date.today()
+    days = []
+    cur = sd
+    while cur < ed:
+        dstr = cur.isoformat()
+        base = _price_for_day(prop, dstr)
+        comp_prices = [_price_for_day(c, dstr) for c in comps if _price_for_day(c, dstr) > 0]
+        market = round(sum(comp_prices) / len(comp_prices), 2) if comp_prices else base
+        ref = base * (1 - mw) + market * mw
+        factors = []
+        adj = 0.0
+        # Week-end
+        if cur.weekday() in (4, 5):  # vendredi, samedi
+            adj += float(cfg["weekend_pct"]); factors.append("week-end")
+        # Haute saison
+        if _is_high_season(prop, dstr):
+            adj += float(cfg["high_season_pct"]); factors.append("haute saison")
+        # Anticipation
+        lead = (cur - today).days
+        if lead >= int(cfg["lead_long_days"]):
+            adj += float(cfg["lead_long_pct"]); factors.append("anticipation")
+        elif 0 <= lead <= int(cfg["lead_last_days"]):
+            adj += float(cfg["lead_last_pct"]); factors.append("dernière minute")
+        # Occupation
+        if occ_rate >= 70:
+            adj += float(cfg["occ_high_pct"]); factors.append("forte occupation")
+        elif occ_rate <= 30:
+            adj += float(cfg["occ_low_pct"]); factors.append("faible occupation")
+        suggested = ref * (1 + adj / 100.0)
+        if float(cfg["min_price"]) > 0:
+            suggested = max(suggested, float(cfg["min_price"]))
+        if float(cfg["max_price"]) > 0:
+            suggested = min(suggested, float(cfg["max_price"]))
+        suggested = round(suggested)
+        days.append({"date": dstr, "base": round(base), "market": round(market),
+                     "suggested": suggested, "factors": factors,
+                     "delta": suggested - round(base)})
+        cur += timedelta(days=1)
+
+    return {
+        "property_id": property_id, "config": cfg, "occupancy_rate": occ_rate,
+        "comps_count": len(comps), "market_city": prop.get("city") or prop.get("location") or "",
+        "days": days,
+    }
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -1821,6 +1985,9 @@ class PreferencesIn(BaseModel):
     ai_auto_draft: Optional[bool] = None
     company: Optional[dict] = None
     online_checkin: Optional[dict] = None
+    monthly_report_enabled: Optional[bool] = None
+    review_request_enabled: Optional[bool] = None
+    review_request_days: Optional[int] = None
 
 
 async def _ai_auto_draft_enabled(uid: str) -> bool:
@@ -1840,6 +2007,9 @@ async def get_preferences(user=Depends(get_current_user)):
         "ai_auto_draft": bool((doc or {}).get("ai_auto_draft", True)),
         "company": _build_company(doc),
         "online_checkin": _build_checkin(doc),
+        "monthly_report_enabled": bool((doc or {}).get("monthly_report_enabled", True)),
+        "review_request_enabled": bool((doc or {}).get("review_request_enabled", False)),
+        "review_request_days": int((doc or {}).get("review_request_days", 1)),
     }
 
 
@@ -1912,6 +2082,13 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
             "custom_questions": custom,
         }
 
+    if payload.monthly_report_enabled is not None:
+        set_doc["monthly_report_enabled"] = bool(payload.monthly_report_enabled)
+    if payload.review_request_enabled is not None:
+        set_doc["review_request_enabled"] = bool(payload.review_request_enabled)
+    if payload.review_request_days is not None:
+        set_doc["review_request_days"] = max(0, min(30, int(payload.review_request_days)))
+
     await db.preferences.update_one({"user_id": uid}, {"$set": set_doc}, upsert=True)
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     statuses = _build_statuses(doc)
@@ -1923,6 +2100,9 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "ai_auto_draft": bool((doc or {}).get("ai_auto_draft", True)),
         "company": _build_company(doc),
         "online_checkin": _build_checkin(doc),
+        "monthly_report_enabled": bool((doc or {}).get("monthly_report_enabled", True)),
+        "review_request_enabled": bool((doc or {}).get("review_request_enabled", False)),
+        "review_request_days": int((doc or {}).get("review_request_days", 1)),
     }
 
 
@@ -3905,6 +4085,248 @@ async def owner_statement_pending_send(month: str = "", user=Depends(get_current
 
 
 # ---------------------------------------------------------------------------
+# Avis voyageurs (guest reviews) — suivi des notes par logement
+# ---------------------------------------------------------------------------
+class ReviewIn(BaseModel):
+    property_id: str
+    reservation_id: str = ""
+    guest_name: str = ""
+    rating: int = 5           # 1..5
+    comment: str = ""
+    date: str = ""            # YYYY-MM-DD (défaut aujourd'hui)
+    platform: str = ""
+
+
+@api_router.get("/reviews")
+async def list_reviews(property_id: str = "", user=Depends(get_current_user)):
+    uid = user["user_id"]
+    q = {"user_id": uid, **_prop_scope(user, "property_id")}
+    if property_id:
+        q["property_id"] = property_id
+    items = await db.reviews.find(q, {"_id": 0}).sort("date", -1).to_list(2000)
+    return items
+
+
+@api_router.get("/reviews/summary")
+async def reviews_summary(user=Depends(get_current_user)):
+    """Note moyenne + nombre d'avis par logement (+ moyenne globale)."""
+    uid = user["user_id"]
+    props = await db.properties.find(
+        {"user_id": uid, **_prop_scope(user)}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    reviews = await db.reviews.find(
+        {"user_id": uid, **_prop_scope(user, "property_id")}, {"_id": 0}).to_list(5000)
+    by_prop: dict = {}
+    for rv in reviews:
+        by_prop.setdefault(rv["property_id"], []).append(float(rv.get("rating") or 0))
+    per_property = []
+    all_ratings = []
+    for p in props:
+        rs = by_prop.get(p["id"], [])
+        all_ratings += rs
+        per_property.append({
+            "property_id": p["id"], "property_name": p.get("name", "Logement"),
+            "count": len(rs),
+            "avg": round(sum(rs) / len(rs), 2) if rs else 0,
+        })
+    per_property.sort(key=lambda x: (-x["avg"], -x["count"]))
+    return {
+        "per_property": per_property,
+        "total_reviews": len(all_ratings),
+        "avg_all": round(sum(all_ratings) / len(all_ratings), 2) if all_ratings else 0,
+    }
+
+
+@api_router.post("/reviews")
+async def create_review(payload: ReviewIn, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    prop = await db.properties.find_one(
+        {"id": payload.property_id, "user_id": uid, **_prop_scope(user)}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Logement introuvable")
+    doc = payload.dict()
+    doc["rating"] = max(1, min(5, int(doc.get("rating") if doc.get("rating") is not None else 5)))
+    doc["date"] = doc.get("date") or date.today().isoformat()
+    doc["property_name"] = prop.get("name", "")
+    doc["id"] = str(uuid.uuid4())
+    doc["user_id"] = uid
+    doc["created_at"] = now_utc().isoformat()
+    await db.reviews.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/reviews/{review_id}")
+async def update_review(review_id: str, payload: ReviewIn, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    data = payload.dict()
+    data["rating"] = max(1, min(5, int(data.get("rating") if data.get("rating") is not None else 5)))
+    res = await db.reviews.update_one({"id": review_id, "user_id": uid}, {"$set": data})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Avis introuvable")
+    item = await db.reviews.find_one({"id": review_id}, {"_id": 0})
+    return item
+
+
+@api_router.delete("/reviews/{review_id}")
+async def delete_review(review_id: str, user=Depends(get_current_user)):
+    await db.reviews.delete_one({"id": review_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Promotions (codes promo / réductions par logement)
+# ---------------------------------------------------------------------------
+class PromotionIn(BaseModel):
+    name: str
+    description: str = ""
+    photo_path: str = ""
+    require_code: bool = False
+    code: str = ""
+    calc_type: str = "none"        # none | fixed | percentage
+    amount: float = 0
+    period_enabled: bool = False
+    start_date: str = ""           # YYYY-MM-DD
+    end_date: str = ""
+    property_ids: List[str] = []
+    enabled: bool = True
+
+
+def _clean_promotion(data: dict) -> dict:
+    data["name"] = str(data.get("name") or "").strip() or "Promotion"
+    data["calc_type"] = data.get("calc_type") if data.get("calc_type") in ("none", "fixed", "percentage") else "none"
+    try:
+        amt = float(data.get("amount") or 0)
+    except Exception:
+        amt = 0
+    if data["calc_type"] == "percentage":
+        amt = max(0.0, min(100.0, amt))
+    data["amount"] = round(max(0.0, amt), 2)
+    data["require_code"] = bool(data.get("require_code"))
+    data["code"] = str(data.get("code") or "").strip()
+    data["period_enabled"] = bool(data.get("period_enabled"))
+    data["property_ids"] = [str(x) for x in (data.get("property_ids") or [])]
+    data["enabled"] = bool(data.get("enabled", True))
+    return data
+
+
+@api_router.get("/promotions")
+async def list_promotions(user=Depends(get_current_user)):
+    return await db.promotions.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@api_router.post("/promotions")
+async def create_promotion(payload: PromotionIn, user=Depends(get_current_user)):
+    doc = _clean_promotion(payload.dict())
+    doc["id"] = str(uuid.uuid4())
+    doc["user_id"] = user["user_id"]
+    doc["created_at"] = now_utc().isoformat()
+    await db.promotions.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/promotions/{promotion_id}")
+async def update_promotion(promotion_id: str, payload: PromotionIn, user=Depends(get_current_user)):
+    data = _clean_promotion(payload.dict())
+    res = await db.promotions.update_one({"id": promotion_id, "user_id": user["user_id"]}, {"$set": data})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Promotion introuvable")
+    return await db.promotions.find_one({"id": promotion_id}, {"_id": 0})
+
+
+@api_router.delete("/promotions/{promotion_id}")
+async def delete_promotion(promotion_id: str, user=Depends(get_current_user)):
+    await db.promotions.delete_one({"id": promotion_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+
+
+# ---------------------------------------------------------------------------
+# Rapport d'activité mensuel (récap global tous logements) — PDF/email
+# ---------------------------------------------------------------------------
+def _monthly_report_html(period_label: str, kpi: dict, company: dict = None, logo_url: str = "") -> str:
+    """Récap global (tous logements) : synthèse conciergerie + tableau par logement."""
+    m = _money
+    t = kpi.get("totals") or {}
+    occ = kpi.get("occupancy_all", 0)
+
+    def kpi_card(lbl, val, color="#2A6F9E"):
+        return (
+            "<td style='padding:10px;width:33%;vertical-align:top'>"
+            "<div style='background:#F0F6FB;border-radius:12px;padding:12px'>"
+            f"<div style='font-size:12px;color:#666'>{escape(lbl)}</div>"
+            f"<div style='font-size:20px;font-weight:800;color:{color};margin-top:4px'>{val}</div>"
+            "</div></td>"
+        )
+
+    rows = "".join(
+        "<tr>"
+        f"<td style='padding:6px 4px;color:#333'>{escape(str(p.get('name') or ''))}</td>"
+        f"<td style='padding:6px 4px;text-align:right'>{p.get('reservations', 0)}</td>"
+        f"<td style='padding:6px 4px;text-align:right'>{p.get('occupancy', 0)}%</td>"
+        f"<td style='padding:6px 4px;text-align:right;font-weight:600'>{m(p.get('concierge_revenue'))}</td>"
+        f"<td style='padding:6px 4px;text-align:right;color:#2A6F9E;font-weight:600'>{m(p.get('owner_revenue'))}</td>"
+        "</tr>"
+        for p in (kpi.get("per_property") or [])
+    )
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:640px;margin:auto;padding:16px'>"
+        f"{_company_header_html(company or {}, logo_url)}"
+        f"<h2 style='color:#111;margin:0 0 4px'>Rapport d'activité — {escape(period_label)}</h2>"
+        f"<p style='color:#777;margin:0 0 12px'>{kpi.get('properties_count', 0)} logement(s) · "
+        f"{t.get('reservations', 0)} réservation(s) · occupation moyenne {occ}%</p>"
+        "<table style='width:100%;border-collapse:collapse;margin-bottom:8px'><tr>"
+        + kpi_card("Revenu conciergerie", m(t.get("concierge_revenue")))
+        + kpi_card("Revenu propriétaires", m(t.get("owner_revenue")))
+        + kpi_card("Frais de gestion", m(t.get("management_fee")))
+        + "</tr></table>"
+        "<table style='width:100%;border-collapse:collapse;font-size:13px;margin-top:12px'>"
+        "<tr style='color:#2A6F9E;font-weight:700;border-bottom:2px solid #2A6F9E'>"
+        "<td style='padding:6px 4px'>Logement</td>"
+        "<td style='padding:6px 4px;text-align:right'>Rés.</td>"
+        "<td style='padding:6px 4px;text-align:right'>Occ.</td>"
+        "<td style='padding:6px 4px;text-align:right'>Conciergerie</td>"
+        "<td style='padding:6px 4px;text-align:right'>Propriétaire</td></tr>"
+        f"{rows}"
+        "</table>"
+        "<p style='color:#aaa;font-size:12px;margin-top:24px'>Édité via Casanéo</p>"
+        "</div>"
+    )
+
+
+class MonthlyReportIn(BaseModel):
+    month: str = ""
+    base_url: Optional[str] = None
+
+
+@api_router.post("/reports/monthly-activity/send")
+async def send_monthly_report(payload: MonthlyReportIn, user=Depends(get_current_user)):
+    """Génère et envoie par email au gestionnaire le récap global du mois (défaut : mois écoulé)."""
+    if not _can(user, "view_revenue_charts"):
+        raise HTTPException(status_code=403, detail="Accès aux revenus non autorisé")
+    uid = user["user_id"]
+    month = payload.month
+    if not month:
+        today = now_utc().date()
+        prev = today.replace(day=1) - timedelta(days=1)
+        month = f"{prev.year:04d}-{prev.month:02d}"
+    kpi = await analytics_kpi(month=month, user=user)
+    u = await db.users.find_one({"user_id": uid}, {"_id": 0})
+    email = (u or {}).get("email", "").strip()
+    if not email:
+        return {"sent": False, "reason": "no_manager_email"}
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
+    company = _build_company(prefs)
+    logo_url = _logo_url_from_base(
+        payload.base_url or (await db.channel_settings.find_one({"user_id": uid}) or {}).get("public_base_url", ""), company)
+    label = kpi.get("period_label") or month
+    html = _monthly_report_html(label, kpi, company, logo_url)
+    await send_email(to=email, subject=f"Casanéo — Rapport d'activité {label}", html=html)
+    return {"sent": True, "to": email, "period_label": label}
+
+
+
+# ---------------------------------------------------------------------------
 # Message templates + markers (couleurs automatiques + envois programmés)
 # ---------------------------------------------------------------------------
 DEFAULT_TEMPLATES = [
@@ -4130,6 +4552,34 @@ async def run_automations_for_user(uid: str):
                 await db.reservations.update_one(
                     {"user_id": uid, "id": r["id"]},
                     {"$set": {"markers": list(markers), "marker_color": marker_color_for(list(markers), tmap)}})
+        # Demande d'avis automatique après le départ (X jours après le check-out)
+        prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0}) or {}
+        if prefs.get("review_request_enabled"):
+            rdays = int(prefs.get("review_request_days") or 1)
+            for r in reservations:
+                if r.get("review_request_sent_at"):
+                    continue
+                try:
+                    co = date.fromisoformat(r["check_out"]) if r.get("check_out") else None
+                except Exception:
+                    co = None
+                if not co or today < co + timedelta(days=rdays) or today > co + timedelta(days=rdays + 14):
+                    continue  # hors fenêtre (trop tôt ou trop ancien)
+                prop = pmap.get(r.get("property_id")) or {}
+                guest = r.get("guest_name") or ""
+                pname = r.get("property_name") or prop.get("name") or "notre logement"
+                body = (f"Bonjour {guest},".rstrip(",") + "\n"
+                        f"Merci d'avoir séjourné à {pname} ! Nous espérons que tout s'est bien passé. "
+                        f"Si vous avez un instant, votre avis nous aiderait beaucoup. À bientôt !")
+                try:
+                    await adapter.send_message(http, r["lodgify_id"], body, "Demande d'avis")
+                    await db.reservations.update_one(
+                        {"user_id": uid, "id": r["id"]},
+                        {"$set": {"review_request_sent_at": now_utc().isoformat()}})
+                    sent += 1
+                except Exception:
+                    pass
+
     return sent
 
 
@@ -4316,6 +4766,7 @@ async def startup():
     asyncio.create_task(_lodgify_auto_sync_loop())
     asyncio.create_task(_ai_draft_loop())
     asyncio.create_task(_statement_reminder_loop())
+    asyncio.create_task(_monthly_report_loop())
 
 
 async def _lodgify_auto_sync_loop():
@@ -4426,5 +4877,54 @@ async def _statement_reminder_loop():
         except Exception:
             logger.exception("statement reminder loop error")
         await asyncio.sleep(6 * 3600)
+async def _monthly_report_loop():
+    """Début de mois : envoie au gestionnaire le rapport d'activité du mois écoulé
+    (récap global tous logements). Envoi unique par mois (reminders_sent kind=report)."""
+    await asyncio.sleep(120)
+    while True:
+        try:
+            today = now_utc().date()
+            if today.day <= 3:
+                cur_month = f"{today.year:04d}-{today.month:02d}"
+                prev = today.replace(day=1) - timedelta(days=1)
+                prev_month = f"{prev.year:04d}-{prev.month:02d}"
+                owners = await db.users.find({}, {"_id": 0, "user_id": 1, "email": 1}).to_list(1000)
+                for u in owners:
+                    uid = u.get("user_id")
+                    email = (u.get("email") or "").strip()
+                    if not uid or not email:
+                        continue
+                    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0}) or {}
+                    if not prefs.get("monthly_report_enabled", True):
+                        continue
+                    already = await db.reminders_sent.find_one({"user_id": uid, "month": cur_month, "kind": "report"})
+                    if already:
+                        continue
+                    fake = {"user_id": uid, "role": "owner", "allowed_property_ids": None, "permissions": []}
+                    try:
+                        kpi = await analytics_kpi(month=prev_month, user=fake)
+                    except Exception:
+                        continue
+                    if (kpi.get("totals") or {}).get("reservations", 0) == 0:
+                        continue
+                    company = _build_company(prefs)
+                    base = (await db.channel_settings.find_one({"user_id": uid}) or {}).get("public_base_url", "")
+                    logo_url = _logo_url_from_base(base, company)
+                    label = kpi.get("period_label") or prev_month
+                    html = _monthly_report_html(label, kpi, company, logo_url)
+                    try:
+                        await send_email(to=email, subject=f"Casanéo — Rapport d'activité {label}", html=html)
+                    except Exception as e:
+                        logger.warning("email rapport mensuel échoué: %s", e)
+                    await db.reminders_sent.update_one(
+                        {"user_id": uid, "month": cur_month, "kind": "report"},
+                        {"$set": {"user_id": uid, "month": cur_month, "kind": "report",
+                                  "sent_at": now_utc().isoformat()}}, upsert=True)
+        except Exception:
+            logger.exception("monthly report loop error")
+        await asyncio.sleep(6 * 3600)
+
+
+
 async def shutdown_db_client():
     client.close()

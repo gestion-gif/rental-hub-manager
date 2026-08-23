@@ -79,6 +79,7 @@ export default function ReservationForm() {
   const [cautionValidated, setCautionValidated] = useState(false);
   const [cvBusy, setCvBusy] = useState(false);
   const [cvMsg, setCvMsg] = useState<string | null>(null);
+  const [checklist, setChecklist] = useState({ caution: false, keys: false, welcome_book: false, cleaning: false });
 
   const [form, setForm] = useState({
     property_id: "",
@@ -108,6 +109,7 @@ export default function ReservationForm() {
           if (r) {
             setDetail(r);
             setCautionValidated(!!r.caution_validated);
+            setChecklist({ caution: false, keys: false, welcome_book: false, cleaning: false, ...(r.checklist || {}) });
             const fn = r.guest_first_name || (r.guest_name || "").split(" ")[0] || "";
             const ln = r.guest_last_name || (r.guest_name || "").split(" ").slice(1).join(" ") || "";
             const fin = r.finance || {};
@@ -348,6 +350,17 @@ export default function ReservationForm() {
     }
   }
 
+  async function toggleChecklistItem(key: "caution" | "keys" | "welcome_book" | "cleaning") {
+    const next = { ...checklist, [key]: !checklist[key] };
+    setChecklist(next);
+    try {
+      await api.patch(`/reservations/${id}/checklist`, { checklist: { [key]: next[key] } });
+    } catch {
+      setChecklist(checklist); // revert
+    }
+  }
+
+
   async function sendKeysNow() {
     if (cvBusy) return;
     setCvBusy(true);
@@ -524,6 +537,36 @@ export default function ReservationForm() {
               </View>
             )
           )}
+          {editing && canModify(user) && (
+            <View style={styles.clCard} testID="checklist-card">
+              <View style={styles.clHead}>
+                <Ionicons name="checkbox-outline" size={18} color={colors.brandPrimary} />
+                <Text style={styles.clTitle}>Check-list d'arrivée</Text>
+                <View style={{ flex: 1 }} />
+                <Text style={styles.clCount}>
+                  {Object.values(checklist).filter(Boolean).length}/4
+                </Text>
+              </View>
+              {([
+                { key: "caution", label: "Caution", icon: "shield-checkmark-outline" },
+                { key: "keys", label: "Clés", icon: "key-outline" },
+                { key: "welcome_book", label: "Livret d'accueil", icon: "book-outline" },
+                { key: "cleaning", label: "Ménage", icon: "sparkles-outline" },
+              ] as const).map((it) => {
+                const on = (checklist as any)[it.key];
+                return (
+                  <Pressable key={it.key} testID={`checklist-${it.key}`} onPress={() => toggleChecklistItem(it.key)} style={styles.clRow}>
+                    <View style={[styles.clBox, on && styles.clBoxOn]}>
+                      {on && <Ionicons name="checkmark" size={14} color="#fff" />}
+                    </View>
+                    <Ionicons name={it.icon as any} size={17} color={on ? colors.brandPrimary : colors.onSurfaceTertiary} />
+                    <Text style={[styles.clLabel, on && styles.clLabelOn]}>{it.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+
           <Text style={styles.label}>Logement</Text>
           <Picker
             testID="res-prop-picker"
@@ -870,6 +913,15 @@ function ChipRow({ items, value, onSelect, prefix }: any) {
 
 const styles = StyleSheet.create({
   cvCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
+  clCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
+  clHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
+  clTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
+  clCount: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
+  clRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 10 },
+  clBox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  clBoxOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  clLabel: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary },
+  clLabelOn: { color: colors.onSurface },
   cvHead: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   cvTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
   cvSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 3, lineHeight: 17 },

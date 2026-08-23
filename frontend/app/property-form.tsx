@@ -53,6 +53,8 @@ export default function PropertyForm() {
   const [ownerId, setOwnerId] = useState("");
   const [keyInstructions, setKeyInstructions] = useState("");
   const [keyPhotos, setKeyPhotos] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [uploadingKeys, setUploadingKeys] = useState(false);
 
   useEffect(() => {
@@ -91,6 +93,7 @@ export default function PropertyForm() {
         setOwnerId(p.owner_id || "");
         setKeyInstructions(p.key_instructions || "");
         setKeyPhotos(p.key_photos || []);
+        setPhotos(p.photos || []);
       } catch {}
       setLoading(false);
     })();
@@ -116,6 +119,29 @@ export default function PropertyForm() {
     setUploadingKeys(false);
   }
 
+  const MAX_PHOTOS = 30;
+  async function pickPhotos() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const remaining = MAX_PHOTOS - photos.length;
+    if (remaining <= 0) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
+      quality: 0.6,
+    });
+    if (result.canceled) return;
+    setUploadingPhotos(true);
+    for (const asset of result.assets.slice(0, remaining)) {
+      try {
+        const name = asset.fileName || `photo_${Date.now()}.jpg`;
+        const path = await uploadFile(asset.uri, name, asset.mimeType || "image/jpeg");
+        setPhotos((p) => (p.length >= MAX_PHOTOS ? p : [...p, path]));
+      } catch {}
+    }
+    setUploadingPhotos(false);
+  }
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const toggle = (arr: string[], setArr: (v: string[]) => void, val: string) =>
@@ -148,6 +174,7 @@ export default function PropertyForm() {
       regional_tax_pct: parseFloat(form.regional_tax_pct) || 0,
       key_instructions: keyInstructions.trim(),
       key_photos: keyPhotos,
+      photos,
       rooms,
       amenities,
       seasons: existing.current.seasons || [],
@@ -203,6 +230,28 @@ export default function PropertyForm() {
         <Field label={owners.length > 0 ? "Propriétaire (nom libre)" : "Propriétaire"} testID="prop-owner" value={form.owner} onChangeText={(v) => set("owner", v)} placeholder="Nom du propriétaire" />
         <Field label="Localisation (résumé)" testID="prop-location" value={form.location} onChangeText={(v) => set("location", v)} placeholder="Nice, France" />
         <Field label="URL de la photo" testID="prop-image" value={form.image_url} onChangeText={(v) => set("image_url", v)} placeholder="https://..." autoCapitalize="none" />
+
+        <SectionLabel text={`Photos du logement (${photos.length}/30)`} />
+        <Text style={styles.helper}>Ajoutez jusqu'à 30 photos par téléchargement depuis votre galerie.</Text>
+        <View style={styles.photoGrid}>
+          {photos.map((p, i) => (
+            <View key={p} style={styles.photoWrap}>
+              <Image source={{ uri: fileUrl(p) }} style={styles.photo} contentFit="cover" />
+              <Pressable
+                testID={`remove-photo-${i}`}
+                onPress={() => setPhotos((ph) => ph.filter((x) => x !== p))}
+                style={styles.photoDel}
+              >
+                <Ionicons name="close-circle" size={20} color="#fff" />
+              </Pressable>
+            </View>
+          ))}
+          {photos.length < 30 && (
+            <Pressable testID="add-photo" onPress={pickPhotos} style={styles.addPhoto} disabled={uploadingPhotos}>
+              {uploadingPhotos ? <ActivityIndicator color={colors.brandPrimary} /> : <Ionicons name="images-outline" size={26} color={colors.onSurfaceSecondary} />}
+            </Pressable>
+          )}
+        </View>
 
         <SectionLabel text="Adresse" />
         <Field label="Adresse" testID="prop-address" value={form.address} onChangeText={(v) => set("address", v)} placeholder="12 rue des Oliviers" />
