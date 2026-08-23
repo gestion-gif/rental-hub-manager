@@ -37,6 +37,9 @@ export default function Statement() {
   const [feeModal, setFeeModal] = useState<any>(null);
   const [feeInput, setFeeInput] = useState("");
   const [savingFee, setSavingFee] = useState(false);
+  const [commModal, setCommModal] = useState<any>(null);
+  const [commInput, setCommInput] = useState("");
+  const [savingComm, setSavingComm] = useState(false);
 
   const month = anchor.format("YYYY-MM");
 
@@ -85,6 +88,21 @@ export default function Statement() {
       load();
     } catch {}
     setSavingFee(false);
+  }
+
+  async function saveComm(reset = false) {
+    if (!commModal || savingComm) return;
+    setSavingComm(true);
+    try {
+      await api.put("/statement-commission", {
+        property_id: commModal.property_id,
+        month,
+        commission: reset ? null : (parseFloat((commInput || "0").replace(",", ".")) || 0),
+      });
+      setCommModal(null);
+      load();
+    } catch {}
+    setSavingComm(false);
   }
 
   function shareStatement(s: any) {
@@ -210,7 +228,22 @@ export default function Statement() {
                   <Row label="Nuitées (base voyageurs)" value={money(t.nights)} />
                   <Row label="Frais de ménage (conciergerie)" value={money(t.cleaning)} />
                   <Row label="Taxe de séjour (à reverser)" value={money(t.tax)} muted />
-                  {t.commission > 0 && <Row label="Commissions plateforme" value={`-${money(t.commission)}`} />}
+                  <View style={styles.brRow}>
+                    <View style={styles.commLabelWrap}>
+                      <Text style={styles.brLabel}>Commissions OTA</Text>
+                      {editable ? (
+                        <Pressable
+                          testID={`stmt-comm-${s.property_id}`}
+                          onPress={() => { setCommModal(s); setCommInput(String(t.commission || "")); }}
+                          style={styles.commEditPill}
+                        >
+                          <Ionicons name="pencil" size={10} color={colors.brandPrimary} />
+                          <Text style={styles.commEditText}>{t.commission_override != null ? "modifié" : "modifier"}</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                    <Text style={styles.brValue}>-{money(t.commission)}</Text>
+                  </View>
                   <Row label={`Frais de gestion (${s.management_fee_pct}%)`} value={money(t.management_fee)} />
                 </View>
 
@@ -293,6 +326,29 @@ export default function Statement() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Edit OTA commission modal */}
+      <Modal visible={!!commModal} transparent animationType="fade" onRequestClose={() => setCommModal(null)}>
+        <Pressable style={styles.backdrop} onPress={() => setCommModal(null)}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.sheetTitle}>Commissions OTA</Text>
+            <Text style={styles.sheetSub}>{commModal?.property_name} · {anchor.format("MMMM YYYY")}</Text>
+            <Text style={styles.fieldLabel}>Montant des commissions (€)</Text>
+            <TextInput testID="comm-input" value={commInput} onChangeText={setCommInput} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.onSurfaceTertiary} style={styles.input} autoFocus />
+            <Text style={styles.feeHint}>
+              Déduit du revenu propriétaire. Valeur automatique (plateformes) : {money(commModal?.totals?.commission_auto || 0)}.
+            </Text>
+            <Pressable testID="comm-save" onPress={() => saveComm(false)} disabled={savingComm} style={[styles.saveBtn, savingComm && { opacity: 0.6 }]}>
+              {savingComm ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.saveText}>Enregistrer</Text>}
+            </Pressable>
+            {commModal?.totals?.commission_override != null && (
+              <Pressable testID="comm-reset" onPress={() => saveComm(true)} disabled={savingComm} style={styles.resetBtn}>
+                <Text style={styles.resetText}>Revenir au calcul automatique</Text>
+              </Pressable>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -346,6 +402,9 @@ const styles = StyleSheet.create({
   breakdown: { marginTop: spacing.md, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md },
   brRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 4 },
   brLabel: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceSecondary, flex: 1 },
+  commLabelWrap: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flex: 1 },
+  commEditPill: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: colors.brandPrimary + "14", paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.pill },
+  commEditText: { fontFamily: font.semibold, fontSize: 10, color: colors.brandPrimary },
   brValue: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
   expBox: { marginTop: spacing.md },
   expHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
@@ -376,4 +435,6 @@ const styles = StyleSheet.create({
   chargeTextOn: { color: colors.onBrandPrimary },
   saveBtn: { marginTop: spacing.lg, backgroundColor: colors.brandPrimary, borderRadius: radius.pill, paddingVertical: 14, alignItems: "center" },
   saveText: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onBrandPrimary },
+  resetBtn: { marginTop: spacing.md, paddingVertical: 10, alignItems: "center" },
+  resetText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
 });

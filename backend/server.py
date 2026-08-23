@@ -2763,7 +2763,14 @@ async def owner_statement(month: str, property_id: str = "", user=Depends(get_cu
 
         pct = float(p.get("management_fee_pct") or 0)
         mgmt_fee = round(t_nights * pct / 100.0, 2)
-        owner_revenue = round(t_nights - mgmt_fee - t_comm - owner_exp, 2)
+        # Commission OTA : override manuel éventuel (par logement/mois) sinon somme auto
+        ov = await db.statement_overrides.find_one(
+            {"user_id": user["user_id"], "property_id": pid, "month": month}, {"_id": 0})
+        comm_override = None
+        if ov and ov.get("commission") is not None:
+            comm_override = round(float(ov.get("commission") or 0), 2)
+        eff_comm = comm_override if comm_override is not None else round(t_comm, 2)
+        owner_revenue = round(t_nights - mgmt_fee - eff_comm - owner_exp, 2)
         concierge_revenue = round(mgmt_fee + t_clean - concierge_exp, 2)
 
         statements.append({
@@ -2771,7 +2778,8 @@ async def owner_statement(month: str, property_id: str = "", user=Depends(get_cu
             "management_fee_pct": pct, "reservations_count": len(lines), "lines": lines,
             "totals": {
                 "nights": round(t_nights, 2), "cleaning": round(t_clean, 2),
-                "tax": round(t_tax, 2), "commission": round(t_comm, 2),
+                "tax": round(t_tax, 2), "commission": eff_comm,
+                "commission_auto": round(t_comm, 2), "commission_override": comm_override,
                 "management_fee": mgmt_fee, "owner_expenses": owner_exp,
                 "concierge_expenses": concierge_exp,
                 "owner_revenue": owner_revenue, "concierge_revenue": concierge_revenue,
@@ -2780,6 +2788,25 @@ async def owner_statement(month: str, property_id: str = "", user=Depends(get_cu
             "expenses": expenses,
         })
     return {"month": month, "statements": statements}
+
+
+class CommissionOverrideIn(BaseModel):
+    property_id: str
+    month: str
+    commission: Optional[float] = None   # None => revenir à la valeur automatique
+
+
+@api_router.put("/statement-commission")
+async def set_statement_commission(payload: CommissionOverrideIn, user=Depends(get_current_user)):
+    """Fixe (ou réinitialise) la commission OTA du relevé pour un logement/mois."""
+    uid = user["user_id"]
+    q = {"user_id": uid, "property_id": payload.property_id, "month": payload.month}
+    if payload.commission is None:
+        await db.statement_overrides.delete_one(q)
+        return {"commission_override": None}
+    val = round(float(payload.commission), 2)
+    await db.statement_overrides.update_one(q, {"$set": {**q, "commission": val}}, upsert=True)
+    return {"commission_override": val}
 
 
 # ---------------------------------------------------------------------------
