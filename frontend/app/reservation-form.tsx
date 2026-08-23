@@ -126,6 +126,8 @@ export default function ReservationForm() {
             check_in: ci || f.check_in,
             check_out: co || f.check_out,
             nights_total: preNights ? String(preNights) : f.nights_total,
+            cleaning_fee: selProp?.default_cleaning_fee ? String(selProp.default_cleaning_fee) : f.cleaning_fee,
+            tourist_tax: selProp?.default_tourist_tax ? String(selProp.default_tourist_tax) : f.tourist_tax,
           }));
         }
       } catch {}
@@ -157,6 +159,17 @@ export default function ReservationForm() {
       recalcNights(nf);
       return nf;
     });
+    // Pré-remplir les frais par défaut du logement (création uniquement)
+    if (!editing) {
+      const p = props.find((x) => x.id === v);
+      if (p) {
+        setForm((f) => ({
+          ...f,
+          cleaning_fee: p.default_cleaning_fee ? String(p.default_cleaning_fee) : f.cleaning_fee,
+          tourist_tax: p.default_tourist_tax ? String(p.default_tourist_tax) : f.tourist_tax,
+        }));
+      }
+    }
   };
 
   const num = (s: string) => parseFloat((s || "0").replace(",", ".")) || 0;

@@ -1,0 +1,27 @@
+{
+  "summary": "Casanéo iteration 16 (retest after canSeePrices admin bypass fix in /app/frontend/src/permissions.ts). Frontend-only verification with QA admin (qa.admin@casaneo.test / role=member, member_role=admin). Pre-conditions set via backend PUT /api/properties/{id}: property Cosy Cocoon (d4b761bc…) → default_cleaning_fee=60, default_tourist_tax=3; property Chic & Cosy (f28dec85…) → default_cleaning_fee=80, default_tourist_tax=5. UI flow: login via 'Se connecter avec un email et un mot de passe' → /calendar (Réservations) → add-reservation-fab → reservation-form. Results: (1) 'Tarifs' section is NOW VISIBLE for the admin member — cleaning-fee & tourist-tax fields render (canSeePrices fix confirmed). (2) Selecting Cosy Cocoon pre-fills cleaning-fee='60' and tourist-tax='3' as expected. (3) Switching to Chic & Cosy updates the two fields to '80' and '5' respectively (setProperty pre-fill path L156-173 works). (4) Switching back to Cosy Cocoon updates them back to '60' and '3' (round-trip OK). All defaults restored to original (0/0) after the test. No react-native / deprecated-package issues detected in the touched code paths.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/it16_p1.png",
+    "/app/test_reports/it16_p2.png",
+    "/app/backend/tests/test_calendar_prices_defaults.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "reservation-form.tsx L129-130 & L168-169 still uses truthy check `p.default_cleaning_fee ? String(...) : f.cleaning_fee`. A property with default=0 would fall back to the previous field value instead of showing '0'. Low priority (0 is semantically 'no default'), but consider `p.default_cleaning_fee != null` for robustness (already flagged in iter15).",
+    "permissions.ts canSeePrices() admin bypass is consistent with canModify() — good."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only retest)", "frontend": "100% (3/3 assertions: P1 pre-fill, P2 update on change, round-trip back to P1)"},
+  "seed_data_creation": "Temporarily set default_cleaning_fee/default_tourist_tax on two existing properties (Cosy Cocoon: 60/3, Chic & Cosy: 80/5) via PUT /api/properties/{id}. Both restored to 0/0 at end of test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Fix verified. To reproduce: login qa.admin@casaneo.test / CasaneoQA2026! → navigate to /calendar → tap add-reservation-fab → in res-prop-picker select a property that has default_cleaning_fee/default_tourist_tax set → assert testID cleaning-fee & tourist-tax inputs equal those defaults; then select another property with different defaults and re-check values update.",
+  "rca_of_issue": "Fix applied at /app/frontend/src/permissions.ts:146 — canSeePrices() now returns true early when memberRole(user)==='admin', mirroring canModify(). This unblocks the Tarifs section render (reservation-form.tsx:398) for member=admin users whose permissions array is empty, and lets the default-fees pre-fill (L129-130 initial load, L156-173 on picker change) be observed and edited in the UI."
+}

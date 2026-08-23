@@ -1,0 +1,34 @@
+{
+  "summary": "Casanéo iteration 15 (4 fixes) tested backend + frontend with QA admin (qa.admin@casaneo.test). Backend: 6/6 pytest cases pass — /api/auth/login (200 with correct creds, 401 with bad password), GET/PUT /api/properties persists default_cleaning_fee/default_tourist_tax, and promo season inserted at the head of property.seasons persists and remains first (correct primacy). Frontend: Login flow via 'Se connecter avec un email et un mot de passe' works. Calendrier: with 'Tous les logements' → hint 'Sélectionnez un logement…' visible and no prices; selecting a single logement (Cosy Cocoon) → 'Masquer les tarifs' active by default, price-<date> cells render prices in Réglette header and month-price-<date> cells render in Mois view. Tapping a price opens the 'Modifier le tarif' modal, edit + save via testID edit-price-save persists (verified prices switched from 95€ → 137€ after PUT). Toggle 'Tarif spécial (promo)' switches mode ('Annuler' label + promo hint). Property-form default fees (prop-default-cleaning / prop-default-tax) persist via PUT — reloaded form shows saved values 60 and 3. ISSUE FOUND: Réservation-form does NOT render cleaning-fee/tourist-tax fields for the QA admin user because canSeePrices() in /app/frontend/src/permissions.ts requires 'view_booking_amount' in permissions and does not bypass admin members — QA admin has member_role='admin' but permissions=[]. Consequence: the 'default fees pre-fill in a new reservation' cannot be verified via the UI for the admin QA account, and admins without explicit permission cannot see/edit prices when creating reservations. Pre-fill code path itself (reservation-form.tsx L129-130 & L168-169) is correct.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "reservation-form.tsx", "issue": "cleaning-fee & tourist-tax fields hidden for member with role=admin because canSeePrices() requires 'view_booking_amount' permission and has no admin bypass. Blocks verification & use of default-fees pre-fill for admin members.", "testID": "cleaning-fee,tourist-tax", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_calendar_prices_defaults.py",
+    "/app/test_reports/pytest/pytest_iter15_calendar.xml"
+  ],
+  "action_items": [
+    "In /app/frontend/src/permissions.ts, update canSeePrices() to bypass admin members: `if (user.role === 'member' && memberRole(user) === 'admin') return true;` before the permission check. This aligns with canModify() and unblocks admins from seeing/editing reservation Tarifs (cleaning-fee, tourist-tax, nights-total) — required for the default-fees pre-fill to be observable/usable for QA admin.",
+    "Optionally seed 'view_booking_amount' into the QA admin member.permissions in Mongo as a workaround for testing until the bypass fix ships."
+  ],
+  "critical_code_review_comments": [
+    "server.py stays at 2944 lines — still an outlier; consider splitting the properties/reservations/members/notifications modules in a follow-up (already noted in iter14).",
+    "planning.tsx implementation is clean; special-price prepends to seasons list ensuring primacy — verified in test test_put_property_promo_season_persists_and_prime.",
+    "reservation-form.tsx pre-fill uses `p.default_cleaning_fee ? String(...) : f.cleaning_fee` which will keep the previous value if the property default is 0. That's a soft edge case (0 is falsy), consider `p.default_cleaning_fee != null` guard for future robustness."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_calendar_prices_defaults.py"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "5/6 flows verified (default-fees pre-fill blocked by canSeePrices bug for admin member)"},
+  "seed_data_creation": "None. Used the existing QA admin account and existing property Cosy Cocoon (d4b761bc-...). All test-time mutations (default_cleaning_fee, default_tourist_tax, promo season) were restored to their original values at the end of each test.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend suite: pytest /app/backend/tests/test_calendar_prices_defaults.py -v. Uses BASE_URL from frontend/.env and QA admin creds from /app/memory/test_credentials.md. To re-test the reservation-form pre-fill after the canSeePrices fix, replay the flow: (1) login as qa.admin@casaneo.test, (2) property-form for property d4b761bc-7fde-47a8-810f-92ff83a48973 → set prop-default-cleaning=60 & prop-default-tax=3 → save-property, (3) reservation-form?property=<pid> → assert testID cleaning-fee value == '60' and tourist-tax value == '3', (4) restore defaults to empty. Do NOT trigger Lodgify endpoints.",
+  "rca_of_issue": "canSeePrices(user) in /app/frontend/src/permissions.ts:144 gates the 'Tarifs' section render (reservation-form.tsx line 398). It returns true only for the Google owner (role !== 'member') OR members whose permissions array explicitly includes 'view_booking_amount'. QA admin member has member_role='admin' but permissions=[] (verified via GET /api/auth/me). Result: showPrices=false in reservation-form → cleaning-fee/tourist-tax inputs not rendered. Fix: add an admin bypass at the top of canSeePrices() consistent with canModify()."
+}

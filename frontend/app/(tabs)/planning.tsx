@@ -66,10 +66,15 @@ export default function Planning() {
   const [selectedMember, setSelectedMember] = useState<string>("all");
   const [anchor, setAnchor] = useState(dayjs().startOf("month"));
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
-  const [showPrices, setShowPrices] = useState(false);
+  const [showPrices, setShowPrices] = useState(true);
+  const [priceMode, setPriceMode] = useState(false);
   const [editPrice, setEditPrice] = useState<any>(null);
   const [priceInput, setPriceInput] = useState("");
   const [savingPrice, setSavingPrice] = useState(false);
+  const [special, setSpecial] = useState<any>(null);
+  const [specialName, setSpecialName] = useState("Promo");
+  const [specialPrice, setSpecialPrice] = useState("");
+  const [savingSpecial, setSavingSpecial] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -150,6 +155,35 @@ export default function Planning() {
     setSavingPrice(false);
   }
 
+  function openSpecial(ci: string, coInclusive: string) {
+    if (!singleProp || !canModify(user)) return;
+    setSpecial({ start: ci, end: coInclusive });
+    setSpecialName("Promo");
+    setSpecialPrice(String(singleProp.base_price ?? ""));
+  }
+
+  async function saveSpecial() {
+    if (!singleProp || savingSpecial || !special) return;
+    const val = parseFloat((specialPrice || "0").replace(",", ".")) || 0;
+    setSavingSpecial(true);
+    try {
+      const season = {
+        id: `promo_${Date.now()}`,
+        name: (specialName || "Promo").trim() || "Promo",
+        start_date: special.start,
+        end_date: special.end,
+        price: val,
+      };
+      // On place le tarif spécial en tête pour qu'il prime sur les autres saisons
+      const body: any = { ...singleProp, seasons: [season, ...(singleProp.seasons || [])] };
+      const updated = await api.put(`/properties/${singleProp.id}`, body);
+      setProps((list) => list.map((p) => (p.id === singleProp.id ? updated : p)));
+      setSpecial(null);
+      setPriceMode(false);
+    } catch {}
+    setSavingSpecial(false);
+  }
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -168,17 +202,36 @@ export default function Planning() {
           </Pressable>
         </View>
 
-        {singleProp && (
-          <Pressable
-            testID="toggle-prices"
-            onPress={() => setShowPrices((s) => !s)}
-            style={[styles.priceToggle, showPrices && styles.priceToggleOn]}
-          >
-            <Ionicons name="pricetags-outline" size={14} color={showPrices ? colors.onBrandPrimary : colors.brandPrimary} />
-            <Text style={[styles.priceToggleText, showPrices && { color: colors.onBrandPrimary }]}>
-              {showPrices ? "Masquer les tarifs" : "Afficher les tarifs par saison"}
-            </Text>
-          </Pressable>
+        {singleProp ? (
+          <View style={styles.priceControls}>
+            <Pressable
+              testID="toggle-prices"
+              onPress={() => { setShowPrices((s) => !s); if (priceMode) setPriceMode(false); }}
+              style={[styles.priceToggle, showPrices && styles.priceToggleOn]}
+            >
+              <Ionicons name="pricetags-outline" size={14} color={showPrices ? colors.onBrandPrimary : colors.brandPrimary} />
+              <Text style={[styles.priceToggleText, showPrices && { color: colors.onBrandPrimary }]}>
+                {showPrices ? "Masquer les tarifs" : "Afficher les tarifs"}
+              </Text>
+            </Pressable>
+            {showPrices && canModify(user) && mode === "timeline" && (
+              <Pressable
+                testID="toggle-price-mode"
+                onPress={() => setPriceMode((s) => !s)}
+                style={[styles.priceToggle, priceMode && styles.priceToggleOn]}
+              >
+                <Ionicons name="flash-outline" size={14} color={priceMode ? colors.onBrandPrimary : colors.brandPrimary} />
+                <Text style={[styles.priceToggleText, priceMode && { color: colors.onBrandPrimary }]}>
+                  {priceMode ? "Annuler" : "Tarif spécial (promo)"}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        ) : (
+          <View style={styles.priceHint}>
+            <Ionicons name="information-circle-outline" size={14} color={colors.onSurfaceTertiary} />
+            <Text style={styles.priceHintText}>Sélectionnez un logement ci-dessous pour voir et modifier les tarifs par nuit.</Text>
+          </View>
         )}
 
         <View style={styles.segment}>
@@ -268,6 +321,8 @@ export default function Planning() {
           showPrices={showPrices && !!singleProp}
           priceProp={singleProp}
           onEditPrice={openEditPrice}
+          priceMode={priceMode && !!singleProp}
+          onPriceRange={openSpecial}
           onBar={(id: string) => router.push(`/reservation-form?id=${id}`)}
           onIv={(id: string) => router.push(`/intervention-form?id=${id}`)}
           onCreate={(pid: string, ci: string, co: string) =>
@@ -338,16 +393,70 @@ export default function Planning() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal visible={!!special} transparent animationType="fade" onRequestClose={() => setSpecial(null)}>
+        <Pressable style={styles.priceBackdrop} onPress={() => setSpecial(null)}>
+          <Pressable style={styles.priceSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.priceSheetTitle}>Tarif spécial</Text>
+            {!!special && (
+              <>
+                <Text style={styles.priceSheetSeason}>{singleProp?.name}</Text>
+                <Text style={styles.priceSheetRange}>
+                  Du {dayjs(special.start).format("DD MMM")} au {dayjs(special.end).format("DD MMM YYYY")}
+                </Text>
+                <Text style={styles.specialLabel}>Nom (promo, événement…)</Text>
+                <TextInput
+                  testID="special-name-input"
+                  value={specialName}
+                  onChangeText={setSpecialName}
+                  placeholder="Promo"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  style={styles.specialNameInput}
+                />
+                <View style={styles.priceInputWrap}>
+                  <TextInput
+                    testID="special-price-input"
+                    value={specialPrice}
+                    onChangeText={setSpecialPrice}
+                    keyboardType="decimal-pad"
+                    placeholder="0"
+                    placeholderTextColor={colors.onSurfaceTertiary}
+                    style={styles.priceInput}
+                    autoFocus
+                  />
+                  <Text style={styles.priceInputUnit}>€ / nuit</Text>
+                </View>
+                <Pressable testID="special-price-save" onPress={saveSpecial} disabled={savingSpecial} style={[styles.priceSaveBtn, savingSpecial && { opacity: 0.6 }]}>
+                  {savingSpecial ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.priceSaveText}>Appliquer le tarif spécial</Text>}
+                </Pressable>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
-function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onEditPrice, onBar, onIv, onCreate, bottomPad }: any) {
+function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onEditPrice, priceMode, onPriceRange, onBar, onIv, onCreate, bottomPad }: any) {
   const { user } = useAuth();
   const headH = showPrices ? DAYHEAD_H + 16 : DAYHEAD_H;
   const [sel, setSel] = useState<{ propId: string; a: number; b: number } | null>(null);
   const [tapSel, setTapSel] = useState<{ propId: string; a: number } | null>(null);
   const dragRef = useRef<{ propId: string; a: number; b: number } | null>(null);
+
+  const emitRange = (propId: string, lo: number, hi: number) => {
+    if (priceMode) {
+      // Tarif spécial : plage inclusive (les deux jours reçoivent le prix)
+      const start = days[lo].format("YYYY-MM-DD");
+      const end = days[hi].format("YYYY-MM-DD");
+      onPriceRange(start, end);
+    } else {
+      const ci = days[lo].format("YYYY-MM-DD");
+      const co = days[hi].add(1, "day").format("YYYY-MM-DD");
+      onCreate(propId, ci, co);
+    }
+  };
 
   const jsTap = (propId: string, idx: number) => {
     if (!canModify(user)) return;
@@ -355,9 +464,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
       if (!prev || prev.propId !== propId) return { propId, a: idx };
       const lo = Math.min(prev.a, idx);
       const hi = Math.max(prev.a, idx);
-      const ci = days[lo].format("YYYY-MM-DD");
-      const co = days[hi].add(1, "day").format("YYYY-MM-DD");
-      onCreate(propId, ci, co);
+      emitRange(propId, lo, hi);
       return null;
     });
   };
@@ -378,16 +485,18 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
     if (!d) return;
     const lo = Math.min(d.a, d.b);
     const hi = Math.max(d.a, d.b);
-    const ci = days[lo].format("YYYY-MM-DD");
-    const co = days[hi].add(1, "day").format("YYYY-MM-DD");
-    onCreate(d.propId, ci, co);
+    emitRange(d.propId, lo, hi);
   };
 
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: bottomPad }} showsVerticalScrollIndicator={false}>
-      <View style={styles.dragHint}>
-        <Ionicons name="hand-left-outline" size={13} color={colors.onSurfaceTertiary} />
-        <Text style={styles.dragHintText}>Touchez la date de début puis la date de fin pour créer une réservation (ou maintenez et glissez)</Text>
+      <View style={[styles.dragHint, priceMode && styles.dragHintPromo]}>
+        <Ionicons name={priceMode ? "flash" : "hand-left-outline"} size={13} color={priceMode ? colors.brandPrimary : colors.onSurfaceTertiary} />
+        <Text style={[styles.dragHintText, priceMode && { color: colors.brandPrimary, fontFamily: font.semibold }]}>
+          {priceMode
+            ? "Mode tarif spécial : touchez la date de début puis la date de fin de la promo."
+            : "Touchez la date de début puis la date de fin pour créer une réservation (ou maintenez et glissez)"}
+        </Text>
       </View>
       <View style={{ flexDirection: "row" }}>
         {/* Left fixed column */}
@@ -699,7 +808,13 @@ const styles = StyleSheet.create({
     width: 38, height: 38, borderRadius: 19,
     backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center",
   },
-  priceToggle: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.brandPrimary + "12", borderWidth: 1, borderColor: colors.brandPrimary + "33", marginBottom: spacing.md },
+  priceToggle: { flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", paddingVertical: 6, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.brandPrimary + "12", borderWidth: 1, borderColor: colors.brandPrimary + "33" },
+  priceControls: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.md },
+  priceHint: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.surfaceSecondary, paddingVertical: 8, paddingHorizontal: spacing.md, borderRadius: radius.md, marginBottom: spacing.md },
+  priceHintText: { flex: 1, fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  dragHintPromo: { backgroundColor: colors.brandPrimary + "12", marginHorizontal: spacing.lg, borderRadius: radius.md, paddingVertical: 6 },
+  specialLabel: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary, marginTop: spacing.lg, marginBottom: 6 },
+  specialNameInput: { fontFamily: font.medium, fontSize: fontSize.lg, color: colors.onSurface, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: 12 },
   priceToggleOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   priceToggleText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
   priceText: { fontFamily: font.semibold, fontSize: 10, color: colors.brandPrimary, marginTop: 1 },

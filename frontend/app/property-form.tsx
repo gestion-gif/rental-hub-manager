@@ -40,6 +40,8 @@ export default function PropertyForm() {
     description: "",
     welcome_book_url: "",
     management_fee_pct: "",
+    default_cleaning_fee: "",
+    default_tourist_tax: "",
   });
   const [rooms, setRooms] = useState<string[]>([]);
   const [amenities, setAmenities] = useState<string[]>([]);
@@ -72,6 +74,8 @@ export default function PropertyForm() {
           description: p.description || "",
           welcome_book_url: p.welcome_book_url || "",
           management_fee_pct: p.management_fee_pct ? String(p.management_fee_pct) : "",
+          default_cleaning_fee: p.default_cleaning_fee ? String(p.default_cleaning_fee) : "",
+          default_tourist_tax: p.default_tourist_tax ? String(p.default_tourist_tax) : "",
         });
         setRooms(p.rooms || []);
         setAmenities(p.amenities || []);
@@ -106,6 +110,8 @@ export default function PropertyForm() {
       description: form.description.trim(),
       welcome_book_url: form.welcome_book_url.trim(),
       management_fee_pct: parseFloat(form.management_fee_pct) || 0,
+      default_cleaning_fee: parseFloat(form.default_cleaning_fee) || 0,
+      default_tourist_tax: parseFloat(form.default_tourist_tax) || 0,
       rooms,
       amenities,
       seasons: existing.current.seasons || [],
@@ -195,6 +201,15 @@ export default function PropertyForm() {
         <SectionLabel text="Gestion / Conciergerie" />
         <Field label="Frais de gestion (%)" testID="prop-mgmt-fee" value={form.management_fee_pct} onChangeText={(v) => set("management_fee_pct", v)} keyboardType="decimal-pad" placeholder="20" />
         <Text style={styles.helper}>Appliqué sur le montant des nuitées pour le relevé propriétaire.</Text>
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Field label="Frais de ménage par défaut (€)" testID="prop-default-cleaning" value={form.default_cleaning_fee} onChangeText={(v) => set("default_cleaning_fee", v)} keyboardType="decimal-pad" placeholder="50" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Field label="Taxe de séjour par défaut (€)" testID="prop-default-tax" value={form.default_tourist_tax} onChangeText={(v) => set("default_tourist_tax", v)} keyboardType="decimal-pad" placeholder="15" />
+          </View>
+        </View>
+        <Text style={styles.helper}>Pré-remplis automatiquement à la création d'une réservation.</Text>
 
         <SectionLabel text="Descriptif" />
         <Field

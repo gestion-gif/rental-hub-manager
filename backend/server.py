@@ -95,6 +95,8 @@ class PropertyIn(BaseModel):
     ical_links: List[IcalLink] = []
     welcome_book_url: str = ""
     management_fee_pct: float = 0
+    default_cleaning_fee: float = 0    # frais de ménage par défaut
+    default_tourist_tax: float = 0     # taxe de séjour par défaut
     lodgify_id: Optional[str] = None
     owner_id: Optional[str] = None
 

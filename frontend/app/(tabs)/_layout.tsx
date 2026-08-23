@@ -9,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { api } from "@/src/api";
 import { useAuth } from "@/src/context/AuthContext";
-import { canSeeRevenue, canSeeInbox, canSeeSettings } from "@/src/permissions";
+import { canSeeRevenue, canSeeInbox, canSeeSettings, canModify } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const ITEMS = [
@@ -19,6 +19,7 @@ const ITEMS = [
   { name: "properties", label: "Logements", icon: "business-outline" },
   { name: "statement", label: "Relevé propriétaires", icon: "document-text-outline", revenue: true },
   { name: "assistant", label: "Assistant IA", icon: "sparkles-outline" },
+  { name: "integrations", label: "Intégrations", icon: "link-outline", admin: true },
 ];
 
 function CustomDrawer(props: any) {
@@ -62,6 +63,7 @@ function CustomDrawer(props: any) {
 
         {ITEMS.map((it) => {
           if ((it as any).revenue && !canSeeRevenue(user)) return null;
+          if ((it as any).admin && !canModify(user)) return null;
           const active = current === it.name;
           return (
             <React.Fragment key={it.name}>
@@ -135,6 +137,7 @@ export default function DrawerLayout() {
       <Drawer.Screen name="properties" />
       <Drawer.Screen name="statement" />
       <Drawer.Screen name="assistant" />
+      <Drawer.Screen name="integrations" />
     </Drawer>
   );
 }

@@ -143,6 +143,7 @@ export function canSeeGuestName(user: any): boolean {
 
 export function canSeePrices(user: any): boolean {
   if (!user || user.role !== "member") return true;
+  if (memberRole(user) === "admin") return true; // les administrateurs voient toujours les prix
   const p = user.permissions || [];
   return p.includes("view_booking_amount") && !p.includes("hide_booking_prices");
 }
