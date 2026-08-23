@@ -1,0 +1,43 @@
+{
+  "summary": "Casanéo iteration 19 — 3 new features end-to-end (backend + frontend): (1) PATCH /api/channel/sync-interval clamps 5..1440 & persists via GET /api/channel/status.sync_interval_min; (2) GET /api/deposits/pending returns future non-Airbnb reservations whose property has deposit_link set and no deposit_link_sent_at; (3) POST /api/reservations/{id}/send-deposit-link safely returns {sent:false, reason:'no_messaging'} on manual reservations (source!='lodgify' → NO real Lodgify send-message). Backend pytest 9/9 PASS (test_deposits_sync_interval.py): TestSyncInterval (4/4: status shape, valid 15/30/60/120/240 all persist, 1→5 clamp, 9999→1440 clamp), TestDepositsFlow (4/4: deposit_link persistence on Cosy Cocoon, manual reservation appears in /deposits/pending, send-deposit-link returns no_messaging, still listed after failed send), TestSendDepositLinkGuards (1/1: unknown rid → 404). Frontend (QA admin, 390x844): (a) Dashboard shows 'Cautions à envoyer' card with testID caution-toggle, deposit-row-<rid>, send-deposit-<rid>; tapping Envoyer on the seeded MANUAL Direct reservation does NOT remove the row (correct: no_messaging → row stays) and does not crash. (b) /settings/api-key shows 'Synchronisation automatique' section with chips testIDs sync-interval-15/-30/-60/-120/-240; tapping 1 h chip → backgroundColor becomes brandPrimary (rgb(28,28,30)) while 30 stays white; after page reload the 60-chip remains highlighted (persistence confirmed via GET /channel/status). (c) /property-form?id=<Cosy Cocoon> shows testID prop-deposit-link with the seeded value, round-trip via PUT confirmed. (d) /reservation-form?id=<manual Direct> displays the testID send-deposit-link button ('Envoyer le lien de caution au voyageur') alongside caution-validated-toggle. All test seed data cleaned up: manual reservation deleted, deposit_link restored to '', sync_interval_min restored to 30, /deposits/pending no longer contains the test rid.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_deposits_sync_interval.py",
+    "/app/backend/tests/setup_ui_seed.py",
+    "/app/backend/tests/cleanup_ui_seed.py",
+    "/app/test_reports/pytest/pytest_iter19_deposits.xml",
+    "/app/test_reports/it19_dashboard.png",
+    "/app/test_reports/it19_after_send.png",
+    "/app/test_reports/it19_api_key_top.png",
+    "/app/test_reports/it19_sync_60.png",
+    "/app/test_reports/it19_sync_reloaded.png",
+    "/app/test_reports/it19_prop_deposit.png",
+    "/app/test_reports/it19_res_form_deposit.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py L721-748 send_deposit_link correctly gates real Lodgify send behind (source=='lodgify' AND thread_uid AND lodgify_id) AND (channel_settings.api_key). Manual reservation (source=None, thread_uid=None) short-circuits with no_messaging and NO httpx call — safe guardrail confirmed by pytest + UI Envoyer tap without any Lodgify message.",
+    "server.py L751-779 deposits_pending: correct filter (deposit_link not empty on property, status!='annulee', check_in>=today, platform!='Airbnb', deposit_link_sent_at empty). Respects _prop_scope(user) for member accounts. ✔",
+    "server.py L1737-1743 set_sync_interval clamps minutes to [5..1440] before writing; robust against negative/absent/oversized inputs. ✔",
+    "index.tsx L214-245: 'Cautions à envoyer' card only mounts when canModify(user) && deposits.length>0 — read-only members won't see it. sendDeposit removes the row on success and shows FR Alert on no_deposit_link / no_messaging / no_channel. ✔",
+    "api-key.tsx L83-99: chip active state uses Number(status.sync_interval_min || 30) === m, resilient to null; disabling all chips during savingInt prevents concurrent writes. ✔",
+    "index.tsx L98: on RN web, Alert.alert may not fire a browser 'dialog' event (uses a custom modal), so the alert message wasn't captured by page.on('dialog', ...). The absence of removal from the deposits list is the observable proof of no_messaging path. Not a bug — just a note for future UI test authors."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_deposits_sync_interval.py",
+    "/app/backend/tests/setup_ui_seed.py",
+    "/app/backend/tests/cleanup_ui_seed.py"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (all testIDs verified: caution-toggle, deposit-row-<id>, send-deposit-<id>, sync-interval-{15,30,60,120,240}, prop-deposit-link, send-deposit-link)"},
+  "seed_data_creation": "Temporarily set deposit_link on Cosy Cocoon (pid d4b761bc-7fde-47a8-810f-92ff83a48973) → 'https://pay.test.casaneo/qa-frontend-caution'; created 1 MANUAL Direct future reservation (rid 50423fdf-e341-45b7-8eb8-f21ea11b8567, check_in +10d) on that property; changed sync_interval_min during tests. All restored: reservation DELETEd, deposit_link back to '', sync_interval_min back to 30. Verified /deposits/pending no longer contains the seed rid.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reproduce: (a) backend `EXPO_PUBLIC_BACKEND_URL=<url> pytest backend/tests/test_deposits_sync_interval.py -v -o addopts=''` — 9/9 pass in ~3s; (b) frontend: `python backend/tests/setup_ui_seed.py` to seed → login qa.admin@casaneo.test / CasaneoQA2026! → dashboard shows caution-toggle + deposit-row-<rid> + send-deposit-<rid>; /settings/api-key chips sync-interval-15/-30/-60/-120/-240; /property-form?id=<pid> field prop-deposit-link; /reservation-form?id=<rid> button send-deposit-link. ALWAYS run `python backend/tests/cleanup_ui_seed.py` afterwards. NEVER call send-deposit-link, send-keys or caution-validated(true) on a real Lodgify reservation (source=='lodgify' with thread_uid) — will send a real message to a real guest.",
+  "rca_of_issue": "N/A — all 3 new features (auto-cleanup on Lodgify sync tested in earlier iteration via curl removed=21 per user, /deposits/pending listing + Envoyer per row, adjustable sync interval + persistence) verified. Guardrails in server.py L732 (source/thread_uid/lodgify_id check) and L735 (channel_settings.api_key check) confirmed to short-circuit before any real send_message call — no risk of contacting real Lodgify guests via automated tests."
+}

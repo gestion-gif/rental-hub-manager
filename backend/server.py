@@ -742,7 +742,41 @@ async def send_deposit_link(reservation_id: str, user=Depends(get_current_user))
     adapter = LodgifyAdapter(settings["api_key"])
     async with httpx.AsyncClient(timeout=30) as http:
         await adapter.send_message(http, r["lodgify_id"], body, "Caution")
+    await db.reservations.update_one(
+        {"id": reservation_id, "user_id": uid},
+        {"$set": {"deposit_link_sent_at": now_utc().isoformat()}})
     return {"sent": True, "reason": "sent"}
+
+
+@api_router.get("/deposits/pending")
+async def deposits_pending(user=Depends(get_current_user)):
+    """Arrivées à venir (hors Airbnb) dont le lien de caution n'a pas encore été envoyé."""
+    uid = user["user_id"]
+    props = await db.properties.find(
+        {"user_id": uid, "deposit_link": {"$nin": [None, ""]}, **_prop_scope(user)},
+        {"_id": 0, "id": 1, "name": 1}).to_list(2000)
+    if not props:
+        return []
+    prop_ids = [p["id"] for p in props]
+    pname = {p["id"]: p["name"] for p in props}
+    today = date.today().isoformat()
+    q = {
+        "user_id": uid,
+        "property_id": {"$in": prop_ids},
+        "status": {"$nin": ["annulee"]},
+        "check_in": {"$gte": today},
+        "deposit_link_sent_at": {"$in": [None, ""]},
+        "platform": {"$ne": "Airbnb"},
+    }
+    res = await db.reservations.find(
+        q, {"_id": 0, "id": 1, "guest_name": 1, "property_id": 1, "check_in": 1, "platform": 1}
+    ).sort("check_in", 1).to_list(500)
+    return [
+        {"reservation_id": r["id"], "guest_name": r.get("guest_name", ""),
+         "property_name": pname.get(r["property_id"], ""), "check_in": r.get("check_in"),
+         "platform": r.get("platform", "")}
+        for r in res
+    ]
 
 
 
@@ -1692,7 +1726,21 @@ async def channel_status(user=Depends(get_current_user)):
         "mapped_count": mapped,
         "connected_at": doc.get("connected_at"),
         "last_sync": doc.get("last_sync"),
+        "sync_interval_min": int(doc.get("sync_interval_min") or 30),
     }
+
+
+class SyncIntervalIn(BaseModel):
+    minutes: int
+
+
+@api_router.patch("/channel/sync-interval")
+async def set_sync_interval(payload: SyncIntervalIn, user=Depends(get_current_user)):
+    # Bornes de sécurité : entre 5 min et 24 h
+    minutes = max(5, min(1440, int(payload.minutes or 30)))
+    await db.channel_settings.update_one(
+        {"user_id": user["user_id"]}, {"$set": {"sync_interval_min": minutes}})
+    return {"sync_interval_min": minutes}
 
 
 @api_router.post("/channel/disconnect")
@@ -1761,6 +1809,7 @@ async def run_channel_sync(uid: str):
 
     imported = updated = unmapped = conversations = 0
     unread_candidates = []
+    seen_ids = set()
     today = date.today()
     for b in bookings:
         lp_id = str(b.get("property_id"))
@@ -1799,6 +1848,7 @@ async def run_channel_sync(uid: str):
         check_in = b.get("arrival")
         check_out = b.get("departure")
         lodgify_key = str(b.get("id"))
+        seen_ids.add(lodgify_key)
         thread_uid = b.get("thread_uid")
         notes = strip_html(b.get("notes") or "")
         subt = b.get("subtotals") or {}
@@ -1934,9 +1984,22 @@ async def run_channel_sync(uid: str):
 
     await db.channel_settings.update_one(
         {"user_id": uid}, {"$set": {"last_sync": now_utc().isoformat()}})
+
+    # Nettoyage : supprimer les DEMANDES synchronisées de Lodgify qui n'y existent plus
+    # (enquêtes expirées/refusées). On ne touche jamais aux réservations manuelles ni confirmées.
+    removed = 0
+    if bookings:
+        stale = await db.reservations.find(
+            {"user_id": uid, "source": "lodgify", "status": "demande"},
+            {"_id": 0, "id": 1, "lodgify_id": 1}).to_list(5000)
+        for s in stale:
+            if str(s.get("lodgify_id")) not in seen_ids:
+                await db.reservations.delete_one({"user_id": uid, "id": s["id"]})
+                removed += 1
     return {
         "imported": imported, "updated": updated, "unmapped": unmapped,
         "conversations": conversations, "total": len(bookings), "unread": unread_count,
+        "removed": removed,
     }
 
 
@@ -3089,19 +3152,36 @@ async def startup():
 
 
 async def _lodgify_auto_sync_loop():
-    """Synchronise automatiquement les réservations Lodgify de chaque utilisateur toutes les 30 min."""
+    """Synchronise automatiquement les réservations Lodgify de chaque utilisateur.
+    Tick toutes les 5 min ; chaque utilisateur est synchronisé selon son intervalle réglable
+    (channel_settings.sync_interval_min, défaut 30 min)."""
     await asyncio.sleep(90)  # laisser le serveur démarrer
     while True:
         try:
-            uids = await db.channel_settings.distinct("user_id")
-            for uid in uids:
+            settings = await db.channel_settings.find(
+                {}, {"_id": 0, "user_id": 1, "last_sync": 1, "sync_interval_min": 1, "api_key": 1}).to_list(1000)
+            now = now_utc()
+            for s in settings:
+                if not s.get("api_key"):
+                    continue
+                interval = int(s.get("sync_interval_min") or 30)
+                due = True
+                ls = s.get("last_sync")
+                if ls:
+                    try:
+                        last = datetime.fromisoformat(ls)
+                        due = (now - last) >= timedelta(minutes=interval)
+                    except Exception:
+                        due = True
+                if not due:
+                    continue
                 try:
-                    await run_channel_sync(uid)
+                    await run_channel_sync(s["user_id"])
                 except Exception:
-                    logger.exception("lodgify auto-sync error for %s", uid)
+                    logger.exception("lodgify auto-sync error for %s", s.get("user_id"))
         except Exception:
             logger.exception("lodgify auto-sync loop error")
-        await asyncio.sleep(1800)
+        await asyncio.sleep(300)
 
 
 

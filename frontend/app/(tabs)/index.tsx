@@ -23,7 +23,7 @@ import { MenuButton } from "@/src/components/MenuButton";
 import StatusBadge from "@/src/components/StatusBadge";
 import { getInterventionType } from "@/src/interventionTypes";
 import { InterventionIcon } from "@/src/components/InterventionIcon";
-import { canSeeRevenue, canSeeOccupancy, canSeeCurrentStays, canSeeInbox, guestLabel } from "@/src/permissions";
+import { canSeeRevenue, canSeeOccupancy, canSeeCurrentStays, canSeeInbox, canModify, guestLabel } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 type Dash = {
@@ -63,6 +63,9 @@ export default function Dashboard() {
   const [arrOpen, setArrOpen] = useState(false);
   const [stayOpen, setStayOpen] = useState(false);
   const [depOpen, setDepOpen] = useState(false);
+  const [deposits, setDeposits] = useState<any[]>([]);
+  const [depBusy, setDepBusy] = useState<string>("");
+  const [cautionOpen, setCautionOpen] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -73,10 +76,33 @@ export default function Dashboard() {
       setData(d);
       setUnread(u?.count || 0);
       api.get("/notifications/count").then((n) => setDrafts(n?.count || 0)).catch(() => {});
+      if (canModify(user)) {
+        api.get("/deposits/pending").then((list) => setDeposits(list || [])).catch(() => setDeposits([]));
+      }
     } catch {}
     setLoading(false);
     setRefreshing(false);
-  }, []);
+  }, [user]);
+
+  async function sendDeposit(rid: string) {
+    if (depBusy) return;
+    setDepBusy(rid);
+    try {
+      const res = await api.post(`/reservations/${rid}/send-deposit-link`, {});
+      if (res.sent) {
+        setDeposits((list) => list.filter((d) => d.reservation_id !== rid));
+      } else {
+        const reason = res.reason || "";
+        Alert.alert("Envoi impossible",
+          reason === "no_deposit_link" ? "Ajoutez le lien de caution sur la fiche logement."
+          : reason === "no_messaging" || reason === "no_channel" ? "Réservation hors Lodgify (pas de messagerie voyageur)."
+          : "Envoi impossible.");
+      }
+    } catch {
+      Alert.alert("Erreur", "Envoi impossible.");
+    }
+    setDepBusy("");
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -183,6 +209,39 @@ export default function Dashboard() {
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.brandPrimary} />
               </Pressable>
+            )}
+
+            {canModify(user) && deposits.length > 0 && (
+              <View style={styles.cautionCard}>
+                <Pressable testID="caution-toggle" onPress={() => setCautionOpen((o) => !o)} style={styles.cautionHeader}>
+                  <View style={styles.cautionHeadLeft}>
+                    <View style={styles.cautionIcon}>
+                      <Ionicons name="shield-checkmark" size={18} color={colors.onBrandPrimary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cautionTitle}>Cautions à envoyer</Text>
+                      <Text style={styles.cautionSub}>{deposits.length} arrivée{deposits.length > 1 ? "s" : ""} sans lien de caution envoyé</Text>
+                    </View>
+                  </View>
+                  <Ionicons name={cautionOpen ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurfaceSecondary} />
+                </Pressable>
+                {cautionOpen && deposits.map((d) => (
+                  <View key={d.reservation_id} style={styles.depRow} testID={`deposit-row-${d.reservation_id}`}>
+                    <Pressable style={{ flex: 1 }} onPress={() => router.push(`/reservation-form?id=${d.reservation_id}`)}>
+                      <Text style={styles.depGuest}>{guestLabel(user, d.guest_name)}</Text>
+                      <Text style={styles.depMeta}>{d.property_name} · {dayjs(d.check_in).format("DD MMM")} · {d.platform || "Direct"}</Text>
+                    </Pressable>
+                    <Pressable testID={`send-deposit-${d.reservation_id}`} onPress={() => sendDeposit(d.reservation_id)} disabled={depBusy === d.reservation_id} style={[styles.depSendBtn, depBusy === d.reservation_id && { opacity: 0.6 }]}>
+                      {depBusy === d.reservation_id ? <ActivityIndicator size="small" color={colors.onBrandPrimary} /> : (
+                        <>
+                          <Ionicons name="paper-plane" size={13} color={colors.onBrandPrimary} />
+                          <Text style={styles.depSendText}>Envoyer</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
             )}
 
             <Pressable testID="dash-today-shortcut" onPress={() => router.push("/cleaning")} style={styles.todayCard}>
@@ -457,6 +516,17 @@ const styles = StyleSheet.create({
   },
   draftBannerTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
   draftBannerSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
+  cautionCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.warning + "55", borderRadius: radius.lg, padding: spacing.md, marginTop: spacing.lg },
+  cautionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  cautionHeadLeft: { flexDirection: "row", alignItems: "center", gap: spacing.md, flex: 1 },
+  cautionIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.warning, alignItems: "center", justifyContent: "center" },
+  cautionTitle: { fontFamily: font.bold, fontSize: fontSize.base, color: colors.onSurface },
+  cautionSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 1 },
+  depRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingTop: spacing.md, marginTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  depGuest: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  depMeta: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 1 },
+  depSendBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.brandPrimary, borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 8 },
+  depSendText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onBrandPrimary },
   todayIcon: {
     width: 44,
     height: 44,

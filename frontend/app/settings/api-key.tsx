@@ -17,12 +17,23 @@ export default function ApiKeyScreen() {
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [savingInt, setSavingInt] = useState(false);
 
   const load = useCallback(async () => {
     try { setStatus(await api.get("/channel/status")); } catch {}
     setLoading(false);
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  async function changeInterval(minutes: number) {
+    if (savingInt) return;
+    setSavingInt(true);
+    try {
+      const r = await api.patch("/channel/sync-interval", { minutes });
+      setStatus((s: any) => ({ ...s, sync_interval_min: r.sync_interval_min }));
+    } catch {}
+    setSavingInt(false);
+  }
 
   async function connect() {
     if (!apiKey.trim()) return;
@@ -67,6 +78,26 @@ export default function ApiKeyScreen() {
               <Text style={styles.connMeta}>{status.properties_count} logement(s) Lodgify · {status.mapped_count} lié(s)</Text>
               {!!status.last_sync && <Text style={styles.connMeta}>Dernière synchro : {new Date(status.last_sync).toLocaleString("fr-FR")}</Text>}
               <View style={{ height: spacing.md }} />
+              <Text style={styles.intervalLabel}>Synchronisation automatique</Text>
+              <Text style={styles.intervalHint}>Vos réservations Lodgify se mettent à jour automatiquement à cette fréquence.</Text>
+              <View style={styles.chipsRow}>
+                {[15, 30, 60, 120, 240].map((m) => {
+                  const active = Number(status.sync_interval_min || 30) === m;
+                  const lbl = m < 60 ? `${m} min` : `${m / 60} h`;
+                  return (
+                    <Pressable
+                      key={m}
+                      testID={`sync-interval-${m}`}
+                      onPress={() => changeInterval(m)}
+                      disabled={savingInt}
+                      style={[styles.chip, active && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>{lbl}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={{ height: spacing.md }} />
               <PrimaryButton testID="disconnect-key" label="Déconnecter" onPress={disconnect} loading={busy === "disc"} variant="danger" />
             </View>
           )}
@@ -93,6 +124,13 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.success },
   connStatus: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
   connMeta: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceSecondary, marginTop: 2 },
+  intervalLabel: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  intervalHint: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2, marginBottom: spacing.sm },
+  chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  chip: { paddingHorizontal: spacing.md, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  chipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  chipText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  chipTextActive: { color: colors.onBrandPrimary },
   label: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.xs },
   hint: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
   msg: { fontFamily: font.medium, fontSize: fontSize.base, marginTop: spacing.md, textAlign: "center" },
