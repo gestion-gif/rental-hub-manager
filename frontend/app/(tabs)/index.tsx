@@ -68,6 +68,7 @@ export default function Dashboard() {
   const [cautionOpen, setCautionOpen] = useState(true);
   const [payments, setPayments] = useState<any[]>([]);
   const [payOpen, setPayOpen] = useState(true);
+  const [pendingStmts, setPendingStmts] = useState<any>({ count: 0, pending: [], period_label: "" });
 
   const load = useCallback(async () => {
     try {
@@ -81,6 +82,7 @@ export default function Dashboard() {
       if (canModify(user)) {
         api.get("/deposits/pending").then((list) => setDeposits(list || [])).catch(() => setDeposits([]));
         api.get("/payments/pending").then((list) => setPayments(list || [])).catch(() => setPayments([]));
+        api.get("/owner-statement/pending-send").then((r) => setPendingStmts(r || { count: 0, pending: [] })).catch(() => setPendingStmts({ count: 0, pending: [] }));
       }
     } catch {}
     setLoading(false);
@@ -292,6 +294,35 @@ export default function Dashboard() {
                   </Pressable>
                 ))}
               </View>
+            )}
+
+            {canModify(user) && (pendingStmts.count || 0) > 0 && (
+              <Pressable testID="stmt-pending-card" onPress={() => router.push("/statement")} style={[styles.cautionCard, styles.cautionCardUrgent]}>
+                <View style={styles.cautionHeader}>
+                  <View style={styles.cautionHeadLeft}>
+                    <View style={[styles.cautionIcon, { backgroundColor: colors.error }]}>
+                      <Ionicons name="document-text" size={18} color={colors.onBrandPrimary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cautionTitle}>Relevés à envoyer</Text>
+                      <Text style={styles.cautionSub}>{pendingStmts.count} relevé{pendingStmts.count > 1 ? "s" : ""} non envoyé{pendingStmts.count > 1 ? "s" : ""} · {pendingStmts.period_label}</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={colors.onSurfaceSecondary} />
+                </View>
+                {pendingStmts.pending.slice(0, 8).map((p: any) => (
+                  <View key={p.property_id} style={styles.depRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.depGuest}>{p.property_name}</Text>
+                      <Text style={styles.depMeta}>{p.owner_name || "Propriétaire ?"}{!p.has_owner_email ? " · email manquant" : ""}</Text>
+                    </View>
+                    <View style={styles.dueWrap}>
+                      <Text style={styles.dueLabel}>Propr.</Text>
+                      <Text style={styles.dueValue}>{Number(p.owner_revenue || 0).toFixed(0)} €</Text>
+                    </View>
+                  </View>
+                ))}
+              </Pressable>
             )}
 
             <Pressable testID="dash-today-shortcut" onPress={() => router.push("/cleaning")} style={styles.todayCard}>

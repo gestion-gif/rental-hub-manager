@@ -79,6 +79,8 @@ export default function RootLayout() {
                 <Stack.Screen name="settings/ical" />
                 <Stack.Screen name="property/[id]" />
                 <Stack.Screen name="channel-manager" />
+                <Stack.Screen name="rooms" />
+                <Stack.Screen name="room-availability" />
                 <Stack.Screen name="cleaning" />
                 <Stack.Screen name="inbox" />
                 <Stack.Screen name="inbox/[thread]" />

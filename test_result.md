@@ -438,4 +438,28 @@ frontend:
 
 agent_communication:
     -agent: "main"
-    -message: "Iteration 13. Tester UNIQUEMENT le backend. Auth owner: insérer users + user_sessions (user_id isolé ex test_iter13) + 2 properties, header Bearer. TESTS: 1) POST /api/members {email:'x@test.com', property_ids:[P1]} puis GET /properties avec Bearer owner -> voit P1+P2. 2) Flux invite: set members.invite_token_hash=sha256('rawtok...') dans Mongo (via motor), POST /api/auth/accept-invite {token:'rawtok...', password:'MotDePasse123'} -> renvoie session_token; pw<8 -> 422; token inconnu -> 400. 3) POST /api/auth/login {email,password} -> session; mauvais pw -> 401. 4) Avec le session_token MEMBRE, GET /api/properties -> UNIQUEMENT P1; GET /api/reservations, /api/dashboard, /api/interventions -> scopés à P1. 5) POST /api/members/{id}/invite {origin_url:'https://x'} avec email='delivered@resend.dev' -> {ok:true} (email réel Emergent). NE PAS envoyer d'email à un vrai voyageur. Backend base localhost:8001. pwdlib/argon2 installé."
+    -message: "Iteration 20 (backend uniquement). Auth: se connecter en membre admin via POST /api/auth/login {email:'qa.admin@casaneo.test', password:'CasaneoQA2026!'} -> session_token; header Authorization: Bearer <token>. Cet admin a accès complet (24 logements, write autorisé). Backend base localhost:8001. TESTS À FAIRE (NOUVELLES FONCTIONS): \n1) GET /api/owner-statement?month=2026-07 -> statements[] avec period_key='2026-07', period_label, last_sent_at (peut être null). \n2) GET /api/owner-statement?start=2026-06-01&end=2026-08-31 -> period_key='2026-06-01_2026-08-31', period_label '01/06/2026 → 31/08/2026', réservations agrégées sur le trimestre. Dates invalides -> 400 ; end<start -> 400. \n3) GET /api/owner-statement/pending-send (sans param -> mois écoulé) -> {month, period_label, count, pending:[{property_name, owner_name, has_owner_email, owner_revenue}]}. \n4) Rooms CRUD: prendre un property_id via GET /api/properties. POST /api/properties/{pid}/rooms {name:'Chambre test', max_guests:4} -> 200 id. GET /api/properties/{pid}/rooms -> liste. PUT /api/rooms/{id} {name:'X', max_guests:2, count_of_rooms:1}. DELETE /api/rooms/{id} -> ok. \n5) RatePlans CRUD: POST /api/properties/{pid}/rate-plans {name:'Flex', base_price:120, min_stay:2}. PUT /api/rate-plans/{id}. DELETE. \n6) Availability: créer une room, POST /api/rooms/{id}/availability {date_from:'2026-07-01', date_to:'2026-07-05', is_available:true, min_stay:2} -> {days:5}. GET /api/rooms/{id}/availability?start=2026-07-01&end=2026-07-31 -> 5 docs. (nettoyer en supprimant la room). \n7) Channex: GET /api/channex/status -> connected true (staging, 0 logements) [déjà connecté]. GET /api/channex/properties -> {count:0, properties:[]}. POST /api/channex/import -> {imported_properties:0,...} (compte vide). GET /api/channex/sync-logs -> liste d'événements. \nIMPORTANT — NE PAS APPELER /api/owner-statement/email NI /api/owner-statement/email-all (ces endpoints envoient de VRAIS emails à de vrais propriétaires; déjà validés en mock). Ne pas tester Google OAuth. Ne pas modifier les .env."
+
+backend_iteration_20:
+  - task: "Relevé période (mois/trimestre/plage) + pending-send"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    priority: "high"
+    needs_retesting: true
+  - task: "Rooms / RatePlans / Availability CRUD (modèle aligné Channex)"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py"
+    priority: "high"
+    needs_retesting: true
+  - task: "Channex foundation (connect/status/properties/import/sync-logs)"
+    implemented: true
+    working: "NA"
+    file: "backend/server.py, backend/channex.py"
+    priority: "medium"
+    needs_retesting: true
+
+previous_agent_communication:
+    -agent: "main"
+    -message: "Iteration 13 (voir historique ci-dessus)."

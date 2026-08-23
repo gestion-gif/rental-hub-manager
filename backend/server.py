@@ -1877,6 +1877,209 @@ async def channex_sync_logs(user=Depends(get_current_user)):
     return {"logs": logs}
 
 
+# ---------------------------------------------------------------------------
+# Rooms / RatePlans / Availability (modèle aligné Channex, coexiste avec Lodgify)
+# ---------------------------------------------------------------------------
+class RoomIn(BaseModel):
+    name: str
+    max_guests: int = 2
+    count_of_rooms: int = 1
+    channex_room_type_id: Optional[str] = None
+
+
+class RatePlanIn(BaseModel):
+    name: str
+    room_id: Optional[str] = None
+    base_price: float = 0
+    min_stay: int = 1
+    closed: bool = False
+    channex_rate_plan_id: Optional[str] = None
+
+
+async def _assert_property(uid, property_id):
+    prop = await db.properties.find_one({"id": property_id, "user_id": uid}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Logement introuvable")
+    return prop
+
+
+@api_router.get("/properties/{property_id}/rooms")
+async def list_rooms(property_id: str, user=Depends(get_current_user)):
+    await _assert_property(user["user_id"], property_id)
+    rooms = await db.rooms.find({"user_id": user["user_id"], "property_id": property_id}, {"_id": 0}).to_list(200)
+    return {"rooms": rooms}
+
+
+@api_router.post("/properties/{property_id}/rooms")
+async def create_room(property_id: str, payload: RoomIn, user=Depends(get_current_user)):
+    await _assert_property(user["user_id"], property_id)
+    doc = payload.dict()
+    doc.update({"id": str(uuid.uuid4()), "user_id": user["user_id"], "property_id": property_id,
+                "created_at": now_utc().isoformat()})
+    await db.rooms.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/rooms/{room_id}")
+async def update_room(room_id: str, payload: RoomIn, user=Depends(get_current_user)):
+    r = await db.rooms.find_one({"id": room_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Chambre introuvable")
+    await db.rooms.update_one({"id": room_id}, {"$set": payload.dict()})
+    return {**r, **payload.dict()}
+
+
+@api_router.delete("/rooms/{room_id}")
+async def delete_room(room_id: str, user=Depends(get_current_user)):
+    res = await db.rooms.delete_one({"id": room_id, "user_id": user["user_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Chambre introuvable")
+    await db.rate_plans.delete_many({"room_id": room_id, "user_id": user["user_id"]})
+    await db.availability.delete_many({"room_id": room_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+
+@api_router.get("/properties/{property_id}/rate-plans")
+async def list_rate_plans(property_id: str, user=Depends(get_current_user)):
+    await _assert_property(user["user_id"], property_id)
+    plans = await db.rate_plans.find({"user_id": user["user_id"], "property_id": property_id}, {"_id": 0}).to_list(200)
+    return {"rate_plans": plans}
+
+
+@api_router.post("/properties/{property_id}/rate-plans")
+async def create_rate_plan(property_id: str, payload: RatePlanIn, user=Depends(get_current_user)):
+    await _assert_property(user["user_id"], property_id)
+    doc = payload.dict()
+    doc.update({"id": str(uuid.uuid4()), "user_id": user["user_id"], "property_id": property_id,
+                "created_at": now_utc().isoformat()})
+    await db.rate_plans.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/rate-plans/{plan_id}")
+async def update_rate_plan(plan_id: str, payload: RatePlanIn, user=Depends(get_current_user)):
+    p = await db.rate_plans.find_one({"id": plan_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Tarif introuvable")
+    await db.rate_plans.update_one({"id": plan_id}, {"$set": payload.dict()})
+    return {**p, **payload.dict()}
+
+
+@api_router.delete("/rate-plans/{plan_id}")
+async def delete_rate_plan(plan_id: str, user=Depends(get_current_user)):
+    res = await db.rate_plans.delete_one({"id": plan_id, "user_id": user["user_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Tarif introuvable")
+    return {"ok": True}
+
+
+class AvailabilitySetIn(BaseModel):
+    date_from: str
+    date_to: str            # inclus
+    is_available: bool = True
+    min_stay: Optional[int] = None
+    closed: bool = False
+
+
+@api_router.get("/rooms/{room_id}/availability")
+async def get_availability(room_id: str, start: str, end: str, user=Depends(get_current_user)):
+    docs = await db.availability.find(
+        {"user_id": user["user_id"], "room_id": room_id,
+         "date": {"$gte": start, "$lte": end}}, {"_id": 0}).sort("date", 1).to_list(1000)
+    return {"availability": docs}
+
+
+@api_router.post("/rooms/{room_id}/availability")
+async def set_availability(room_id: str, payload: AvailabilitySetIn, user=Depends(get_current_user)):
+    room = await db.rooms.find_one({"id": room_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not room:
+        raise HTTPException(status_code=404, detail="Chambre introuvable")
+    try:
+        d = datetime.fromisoformat(payload.date_from).date()
+        end = datetime.fromisoformat(payload.date_to).date()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Dates invalides (YYYY-MM-DD)")
+    n = 0
+    while d <= end and n < 800:
+        ds = d.isoformat()
+        await db.availability.update_one(
+            {"user_id": user["user_id"], "room_id": room_id, "date": ds},
+            {"$set": {"user_id": user["user_id"], "room_id": room_id, "date": ds,
+                      "is_available": payload.is_available, "closed": payload.closed,
+                      "min_stay": payload.min_stay}},
+            upsert=True)
+        d += timedelta(days=1); n += 1
+    return {"ok": True, "days": n}
+
+
+@api_router.post("/channex/import")
+async def channex_import(user=Depends(get_current_user)):
+    """Importe les logements Channex → Property + Room + RatePlan (idempotent par channex_id).
+    Conserve les IDs Lodgify existants (mapping provider-neutre)."""
+    uid = user["user_id"]
+    adapter, doc = await get_channex_adapter(uid)
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channex non connecté")
+    imported_props = imported_rooms = imported_rates = 0
+    async with httpx.AsyncClient(timeout=60) as http:
+        raw_props = await adapter.list_properties(http)
+        for rp in raw_props:
+            cp = map_channex_property(rp)
+            cid = cp["channex_id"]
+            existing = await db.properties.find_one({"user_id": uid, "channex_id": cid}, {"_id": 0})
+            if existing:
+                pid = existing["id"]
+            else:
+                pid = str(uuid.uuid4())
+                await db.properties.insert_one({
+                    "id": pid, "user_id": uid, "name": cp["title"],
+                    "channex_id": cid, "location": cp.get("city") or "",
+                    "base_price": 0, "capacity": 2, "bedrooms": 1,
+                    "seasons": [], "ical_links": [],
+                    "created_at": now_utc().isoformat(),
+                })
+                imported_props += 1
+            rooms = await adapter.list_room_types(http, cid)
+            for rr in rooms:
+                cr = map_channex_room(rr)
+                rtid = cr["channex_room_type_id"]
+                ex_room = await db.rooms.find_one({"user_id": uid, "channex_room_type_id": rtid}, {"_id": 0})
+                if ex_room:
+                    room_id = ex_room["id"]
+                else:
+                    room_id = str(uuid.uuid4())
+                    await db.rooms.insert_one({
+                        "id": room_id, "user_id": uid, "property_id": pid,
+                        "name": cr["title"], "channex_room_type_id": rtid,
+                        "max_guests": cr.get("occ_adults") or 2,
+                        "count_of_rooms": cr.get("count_of_rooms") or 1,
+                        "created_at": now_utc().isoformat(),
+                    })
+                    imported_rooms += 1
+            rates = await adapter.list_rate_plans(http, cid)
+            for rpn in rates:
+                crp = map_channex_rate_plan(rpn)
+                rpid = crp["channex_rate_plan_id"]
+                ex_rate = await db.rate_plans.find_one({"user_id": uid, "channex_rate_plan_id": rpid}, {"_id": 0})
+                if not ex_rate:
+                    linked = await db.rooms.find_one(
+                        {"user_id": uid, "channex_room_type_id": crp.get("channex_room_type_id")}, {"_id": 0, "id": 1})
+                    await db.rate_plans.insert_one({
+                        "id": str(uuid.uuid4()), "user_id": uid, "property_id": pid,
+                        "room_id": (linked or {}).get("id"), "name": crp["title"],
+                        "channex_rate_plan_id": rpid, "base_price": 0, "min_stay": 1,
+                        "closed": False, "created_at": now_utc().isoformat(),
+                    })
+                    imported_rates += 1
+    await _sync_log(uid, "import", "success",
+                    f"{imported_props} logements, {imported_rooms} chambres, {imported_rates} tarifs")
+    return {"ok": True, "imported_properties": imported_props,
+            "imported_rooms": imported_rooms, "imported_rate_plans": imported_rates}
+
+
+
 class ChannelConnectIn(BaseModel):
     api_key: str
     provider: str = "lodgify"
@@ -2921,24 +3124,44 @@ def _res_amounts(r: dict) -> dict:
             "tax": round(tax, 2), "commission": round(commission, 2)}
 
 
+def _resolve_period(month: str = "", start: str = "", end: str = ""):
+    """Retourne (start_date, end_date_exclusive, period_key, period_label).
+    Soit un mois (YYYY-MM), soit une plage explicite start..end (YYYY-MM-DD, end inclus)."""
+    if start and end:
+        try:
+            sd = datetime.fromisoformat(start).date()
+            ed = datetime.fromisoformat(end).date()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Dates invalides (YYYY-MM-DD)")
+        if ed < sd:
+            raise HTTPException(status_code=400, detail="La date de fin précède la date de début")
+        end_excl = (ed + timedelta(days=1)).isoformat()
+        key = f"{sd.isoformat()}_{ed.isoformat()}"
+        label = f"{sd.strftime('%d/%m/%Y')} → {ed.strftime('%d/%m/%Y')}"
+        return sd.isoformat(), end_excl, key, label
+    try:
+        y, m = month.split("-")
+        sd = f"{int(y):04d}-{int(m):02d}-01"
+        nm = int(m) + 1
+        ny = int(y) + (1 if nm > 12 else 0)
+        nm = 1 if nm > 12 else nm
+        ed_excl = f"{ny:04d}-{nm:02d}-01"
+    except Exception:
+        raise HTTPException(status_code=400, detail="Mois invalide (YYYY-MM)")
+    return sd, ed_excl, month, month
+
+
 @api_router.get("/owner-statement")
-async def owner_statement(month: str, property_id: str = "", user=Depends(get_current_user)):
-    """Relevé mensuel par logement : ventilation + revenus conciergerie/propriétaire.
+async def owner_statement(month: str = "", start: str = "", end: str = "",
+                          property_id: str = "", user=Depends(get_current_user)):
+    """Relevé par logement sur un mois OU une plage de dates : ventilation + revenus.
 
     Règles: frais de gestion = % logement x nuitées ; ménage -> conciergerie ;
     taxe de séjour -> reversée à la commune ; revenu propriétaire = nuitées -
     frais de gestion - commissions plateforme - dépenses propriétaire.
-    Réservations retenues : arrivée (check_in) dans le mois, hors annulées.
+    Réservations retenues : arrivée (check_in) dans la période, hors annulées.
     """
-    try:
-        y, m = month.split("-")
-        start = f"{int(y):04d}-{int(m):02d}-01"
-        nm = int(m) + 1
-        ny = int(y) + (1 if nm > 12 else 0)
-        nm = 1 if nm > 12 else nm
-        end = f"{ny:04d}-{nm:02d}-01"
-    except Exception:
-        raise HTTPException(status_code=400, detail="Mois invalide (YYYY-MM)")
+    start_d, end_d, period_key, period_label = _resolve_period(month, start, end)
 
     pq = {"user_id": user["user_id"], **_prop_scope(user, "id")}
     if property_id:
@@ -2950,7 +3173,7 @@ async def owner_statement(month: str, property_id: str = "", user=Depends(get_cu
         pid = p["id"]
         reservations = await db.reservations.find(
             {"user_id": user["user_id"], "property_id": pid,
-             "check_in": {"$gte": start, "$lt": end}, "status": {"$ne": "annulee"}},
+             "check_in": {"$gte": start_d, "$lt": end_d}, "status": {"$ne": "annulee"}},
             {"_id": 0}).sort("check_in", 1).to_list(1000)
         lines = []
         t_nights = t_clean = t_tax = t_comm = 0.0
@@ -2974,15 +3197,15 @@ async def owner_statement(month: str, property_id: str = "", user=Depends(get_cu
                 "check_out": r.get("check_out"), **a,
             })
         expenses = await db.statement_expenses.find(
-            {"user_id": user["user_id"], "property_id": pid, "month": month}, {"_id": 0}).to_list(500)
+            {"user_id": user["user_id"], "property_id": pid, "month": period_key}, {"_id": 0}).to_list(500)
         owner_exp = round(sum(float(e.get("amount") or 0) for e in expenses if e.get("charge_to") == "owner"), 2)
         concierge_exp = round(sum(float(e.get("amount") or 0) for e in expenses if e.get("charge_to") == "concierge"), 2)
 
         pct = float(p.get("management_fee_pct") or 0)
         mgmt_fee = round(t_nights * pct / 100.0, 2)
-        # Commission OTA : override manuel éventuel (par logement/mois) sinon somme auto
+        # Commission OTA : override manuel éventuel (par logement/période) sinon somme auto
         ov = await db.statement_overrides.find_one(
-            {"user_id": user["user_id"], "property_id": pid, "month": month}, {"_id": 0})
+            {"user_id": user["user_id"], "property_id": pid, "month": period_key}, {"_id": 0})
         comm_override = None
         if ov and ov.get("commission") is not None:
             comm_override = round(float(ov.get("commission") or 0), 2)
@@ -2991,7 +3214,7 @@ async def owner_statement(month: str, property_id: str = "", user=Depends(get_cu
         concierge_revenue = round(mgmt_fee + t_clean - concierge_exp, 2)
 
         send_log = await db.statement_sends.find_one(
-            {"user_id": user["user_id"], "property_id": pid, "month": month}, {"_id": 0})
+            {"user_id": user["user_id"], "property_id": pid, "month": period_key}, {"_id": 0})
 
         statements.append({
             "property_id": pid, "property_name": p.get("name"), "owner": p.get("owner"),
@@ -3010,7 +3233,7 @@ async def owner_statement(month: str, property_id: str = "", user=Depends(get_cu
             },
             "expenses": expenses,
         })
-    return {"month": month, "statements": statements}
+    return {"month": period_key, "period_key": period_key, "period_label": period_label, "statements": statements}
 
 
 class CommissionOverrideIn(BaseModel):
@@ -3124,12 +3347,14 @@ def _month_label(month: str) -> str:
         return month
 
 
-def _statement_html(month: str, s: dict, company: dict = None, logo_url: str = "") -> str:
+def _statement_html(month: str, s: dict, company: dict = None, logo_url: str = "",
+                    period_label: str = None) -> str:
     """Relevé complet pour UN logement (en-tête société + corps + pied)."""
+    lbl = period_label or _month_label(month)
     return (
         "<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:16px'>"
         f"{_company_header_html(company or {}, logo_url)}"
-        f"<h2 style='color:#111;margin:0 0 4px'>Relevé de gestion — {escape(_month_label(month))}</h2>"
+        f"<h2 style='color:#111;margin:0 0 4px'>Relevé de gestion — {escape(lbl)}</h2>"
         f"{_statement_body_html(month, s)}"
         "<p style='color:#aaa;font-size:12px;margin-top:24px'>Édité via Casanéo</p>"
         "</div>"
@@ -3137,8 +3362,10 @@ def _statement_html(month: str, s: dict, company: dict = None, logo_url: str = "
 
 
 def _combined_statement_html(month: str, statements: list, owner_name: str,
-                             company: dict = None, logo_url: str = "") -> str:
-    """Relevé regroupant TOUS les logements d'un même propriétaire pour le mois."""
+                             company: dict = None, logo_url: str = "",
+                             period_label: str = None) -> str:
+    """Relevé regroupant TOUS les logements d'un même propriétaire pour la période."""
+    lbl = period_label or _month_label(month)
     g_owner = round(sum((st["totals"].get("owner_revenue") or 0) for st in statements), 2)
     g_conc = round(sum((st["totals"].get("concierge_revenue") or 0) for st in statements), 2)
     bodies = "<div style='height:1px;background:#eee;margin:20px 0'></div>".join(
@@ -3158,7 +3385,7 @@ def _combined_statement_html(month: str, statements: list, owner_name: str,
     return (
         "<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:16px'>"
         f"{_company_header_html(company or {}, logo_url)}"
-        f"<h2 style='color:#111;margin:0 0 4px'>Relevé de gestion — {escape(_month_label(month))}</h2>"
+        f"<h2 style='color:#111;margin:0 0 4px'>Relevé de gestion — {escape(lbl)}</h2>"
         + (f"<p style='color:#555;margin:0 0 8px'>Propriétaire : {escape(str(owner_name))}</p>" if owner_name else "")
         + bodies
         + total_block
@@ -3168,7 +3395,9 @@ def _combined_statement_html(month: str, statements: list, owner_name: str,
 
 
 class StatementEmailIn(BaseModel):
-    month: str
+    month: str = ""
+    start: str = ""
+    end: str = ""
     property_id: str
     base_url: Optional[str] = None
 
@@ -3208,38 +3437,42 @@ async def email_owner_statement(payload: StatementEmailIn, user=Depends(get_curr
             owner_name = owner.get("name") or owner_name
     if not owner_email:
         return {"sent": False, "reason": "no_owner_email"}
-    data = await owner_statement(month=payload.month, property_id=payload.property_id, user=user)
+    data = await owner_statement(month=payload.month, start=payload.start, end=payload.end,
+                                 property_id=payload.property_id, user=user)
     stmts = data.get("statements") or []
     if not stmts:
         return {"sent": False, "reason": "no_data"}
     s = stmts[0]
+    period_key = data.get("period_key")
+    period_label = data.get("period_label")
     prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     company = _build_company(prefs)
     logo_url = _logo_url_from_base(payload.base_url or (await db.channel_settings.find_one({"user_id": uid}) or {}).get("public_base_url", ""), company)
-    try:
-        y, mo = payload.month.split("-")
-        subject = f"Relevé {mo}/{y} — {s.get('property_name')}"
-    except Exception:
-        subject = f"Relevé {payload.month} — {s.get('property_name')}"
-    html = _statement_html(payload.month, s, company, logo_url)
+    subject = f"Relevé {period_label} — {s.get('property_name')}"
+    html = _statement_html(payload.month, s, company, logo_url, period_label)
     await send_email(to=owner_email, subject=subject, html=html)
-    await _record_statement_send(uid, payload.property_id, payload.month, owner_email)
+    await _record_statement_send(uid, payload.property_id, period_key, owner_email)
     return {"sent": True, "to": owner_email, "owner_name": owner_name}
 
 
 class StatementEmailAllIn(BaseModel):
-    month: str
+    month: str = ""
+    start: str = ""
+    end: str = ""
     base_url: Optional[str] = None
 
 
 @api_router.post("/owner-statement/email-all")
 async def email_all_owner_statements(payload: StatementEmailAllIn, user=Depends(get_current_user)):
-    """Envoie à chaque propriétaire UN SEUL email regroupant tous ses logements pour le mois."""
+    """Envoie à chaque propriétaire UN SEUL email regroupant tous ses logements pour la période."""
     uid = user["user_id"]
-    data = await owner_statement(month=payload.month, property_id="", user=user)
+    data = await owner_statement(month=payload.month, start=payload.start, end=payload.end,
+                                 property_id="", user=user)
     stmts = data.get("statements") or []
     if not stmts:
         return {"sent": 0, "results": [], "reason": "no_data"}
+    period_key = data.get("period_key")
+    period_label = data.get("period_label")
 
     # Regroupe les logements par propriétaire (owner_id)
     prop_ids = [s["property_id"] for s in stmts]
@@ -3257,7 +3490,6 @@ async def email_all_owner_statements(payload: StatementEmailAllIn, user=Depends(
     company = _build_company(prefs)
     logo_url = _logo_url_from_base(payload.base_url or (await db.channel_settings.find_one({"user_id": uid}) or {}).get("public_base_url", ""), company)
 
-    y, mo = (payload.month.split("-") + ["", ""])[:2]
     results = []
     sent = 0
     for grp in groups.values():
@@ -3272,14 +3504,53 @@ async def email_all_owner_statements(payload: StatementEmailAllIn, user=Depends(
         if not owner_email:
             results.append({"owner_name": owner_name or "?", "properties": names, "sent": False, "reason": "no_owner_email"})
             continue
-        subject = f"Relevé {mo}/{y} — {owner_name}" if owner_name else f"Relevé {mo}/{y}"
-        html = _combined_statement_html(payload.month, grp["statements"], owner_name, company, logo_url)
+        subject = f"Relevé {period_label} — {owner_name}" if owner_name else f"Relevé {period_label}"
+        html = _combined_statement_html(payload.month, grp["statements"], owner_name, company, logo_url, period_label)
         await send_email(to=owner_email, subject=subject, html=html)
         for st in grp["statements"]:
-            await _record_statement_send(uid, st["property_id"], payload.month, owner_email)
+            await _record_statement_send(uid, st["property_id"], period_key, owner_email)
         sent += 1
         results.append({"owner_name": owner_name, "properties": names, "sent": True, "to": owner_email})
     return {"sent": sent, "results": results}
+
+
+@api_router.get("/owner-statement/pending-send")
+async def owner_statement_pending_send(month: str = "", user=Depends(get_current_user)):
+    """Relevés du mois écoulé (par défaut) non encore envoyés au propriétaire.
+    Un logement est 'à envoyer' s'il a des réservations sur la période, un propriétaire
+    avec email, et aucun enregistrement d'envoi (statement_sends) pour cette période."""
+    uid = user["user_id"]
+    if not month:
+        today = now_utc().date()
+        first = today.replace(day=1)
+        prev = first - timedelta(days=1)
+        month = f"{prev.year:04d}-{prev.month:02d}"
+    data = await owner_statement(month=month, property_id="", user=user)
+    stmts = data.get("statements") or []
+    period_key = data.get("period_key")
+    period_label = data.get("period_label")
+    pending = []
+    for s in stmts:
+        if (s.get("reservations_count") or 0) == 0:
+            continue
+        if s.get("last_sent_at"):
+            continue
+        # propriétaire avec email ?
+        prop = await db.properties.find_one({"id": s["property_id"], "user_id": uid}, {"_id": 0})
+        owner_email = ""
+        owner_name = (prop or {}).get("owner") or ""
+        if prop and prop.get("owner_id"):
+            owner = await db.owners.find_one({"id": prop["owner_id"], "user_id": uid}, {"_id": 0})
+            if owner:
+                owner_email = (owner.get("email") or "").strip()
+                owner_name = owner.get("name") or owner_name
+        pending.append({
+            "property_id": s["property_id"], "property_name": s.get("property_name"),
+            "owner_name": owner_name, "has_owner_email": bool(owner_email),
+            "owner_revenue": s["totals"].get("owner_revenue"),
+        })
+    return {"month": month, "period_key": period_key, "period_label": period_label,
+            "count": len(pending), "pending": pending}
 
 
 

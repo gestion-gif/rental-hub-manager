@@ -290,6 +290,21 @@ export default function PropertyDetail() {
             <Ionicons name="chevron-forward" size={20} color={colors.onSurfaceTertiary} />
           </Pressable>
 
+          <Pressable
+            testID="open-rooms"
+            onPress={() => router.push(`/rooms?property=${id}`)}
+            style={styles.cmRow}
+          >
+            <View style={styles.cmIcon}>
+              <Ionicons name="bed-outline" size={20} color={colors.brandPrimary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.itemTitle}>Chambres & tarifs</Text>
+              <Text style={styles.itemSub}>Unités vendables et plans tarifaires (modèle Channex)</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.onSurfaceTertiary} />
+          </Pressable>
+
           <PrimaryButton
             testID="ai-pricing-link"
             label="Suggestions de prix par IA"

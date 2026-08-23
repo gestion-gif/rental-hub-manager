@@ -19,6 +19,8 @@ export default function ChannexSettings() {
   const [connecting, setConnecting] = useState(false);
   const [props, setProps] = useState<any[]>([]);
   const [loadingProps, setLoadingProps] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [reconfig, setReconfig] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
 
   const load = useCallback(async () => {
@@ -41,11 +43,25 @@ export default function ChannexSettings() {
       const r = await api.post("/channex/connect", { api_key: apiKey.trim(), environment: env });
       setApiKey("");
       Alert.alert("Connecté", `Channex connecté (${r.environment}). ${r.properties_count} logement(s) détecté(s).`);
+      setReconfig(false);
       await load();
     } catch (e: any) {
       Alert.alert("Échec de connexion", e?.message || "Clé ou environnement invalide.");
     }
     setConnecting(false);
+  }
+
+  async function importChannex() {
+    if (importing) return;
+    setImporting(true);
+    try {
+      const r = await api.post("/channex/import", {});
+      Alert.alert("Import terminé", `${r.imported_properties} logement(s), ${r.imported_rooms} chambre(s), ${r.imported_rate_plans} tarif(s) importés dans Casanéo.`);
+      await load();
+    } catch (e: any) {
+      Alert.alert("Erreur", e?.message || "Import impossible.");
+    }
+    setImporting(false);
   }
 
   async function refreshProps() {
@@ -91,7 +107,7 @@ export default function ChannexSettings() {
             Connectez votre compte Channex en lecture seule. Cette intégration n'affecte pas Lodgify (les deux peuvent coexister).
           </Text>
 
-          {status.connected ? (
+          {status.connected && !reconfig ? (
             <>
               <View style={styles.statusCard}>
                 <View style={styles.statusRow}>
@@ -112,6 +128,15 @@ export default function ChannexSettings() {
                     <Text style={styles.dangerText}>Déconnecter</Text>
                   </Pressable>
                 </View>
+                <Pressable testID="channex-import" onPress={importChannex} disabled={importing || (status.properties_count || 0) === 0} style={[styles.importBtn, ((status.properties_count || 0) === 0) && { opacity: 0.5 }]}>
+                  {importing ? <ActivityIndicator size="small" color="#fff" /> : (
+                    <><Ionicons name="download-outline" size={16} color="#fff" /><Text style={styles.importText}>Importer dans Casanéo (logements, chambres, tarifs)</Text></>
+                  )}
+                </Pressable>
+                <Pressable testID="channex-reconfig" onPress={() => { setEnv((status.environment === "production" ? "production" : "staging")); setReconfig(true); }} style={styles.reconfigBtn}>
+                  <Ionicons name="settings-outline" size={14} color={colors.brandPrimary} />
+                  <Text style={styles.reconfigText}>Changer de clé / passer en production</Text>
+                </Pressable>
               </View>
 
               {status.properties_count === 0 && (
@@ -175,6 +200,11 @@ export default function ChannexSettings() {
               <Pressable testID="channex-connect" onPress={connect} disabled={connecting} style={[styles.primaryBtnFull, connecting && { opacity: 0.6 }]}>
                 {connecting ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.primaryBtnText}>Tester & connecter</Text>}
               </Pressable>
+              {reconfig && (
+                <Pressable testID="channex-cancel-reconfig" onPress={() => setReconfig(false)} style={styles.reconfigBtn}>
+                  <Text style={styles.reconfigText}>Annuler</Text>
+                </Pressable>
+              )}
             </View>
           )}
         </KeyboardAwareScrollView>
@@ -212,6 +242,10 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
   dangerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: "#E5484D", borderRadius: radius.md, paddingVertical: 12, paddingHorizontal: 16 },
   dangerText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: "#E5484D" },
+  importBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#17B0A6", borderRadius: radius.md, paddingVertical: 12, marginTop: spacing.sm },
+  importText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: "#fff", flexShrink: 1 },
+  reconfigBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 10, marginTop: 4 },
+  reconfigText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.brandPrimary },
   hintCard: { flexDirection: "row", gap: 8, backgroundColor: "#EAF3FA", borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
   hintText: { flex: 1, fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceSecondary, lineHeight: 19 },
   listCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md },

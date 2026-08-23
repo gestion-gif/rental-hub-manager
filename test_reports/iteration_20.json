@@ -1,0 +1,32 @@
+{
+  "summary": "Casanéo iteration 20 — 4 backend features validated end-to-end (23/23 pytest PASS, ~3.5s). (1) GET /api/owner-statement?month=2026-07 → period_key='2026-07', period_label='2026-07', last_sent_at present (null when never sent) on every statement. (2) GET /api/owner-statement?start=2026-06-01&end=2026-08-31 → period_key='2026-06-01_2026-08-31', period_label='01/06/2026 → 31/08/2026'; end<start → 400 'La date de fin précède la date de début'; dates invalides → 400 'Dates invalides (YYYY-MM-DD)'; mois invalide → 400 'Mois invalide (YYYY-MM)'. (3) GET /api/owner-statement/pending-send (no param) → defaults to previous month (currently 2026-07 since server clock is Aug 2026), returns {month, period_key, period_label, count, pending:[{property_id, property_name, owner_name, has_owner_email(bool), owner_revenue}]}, 20 lodgings pending on QA admin scope (24 total → 4 already excluded because no reservations); explicit ?month=2026-07 works too. (4) Rooms CRUD (POST/GET/PUT/DELETE on /api/properties/{pid}/rooms and /api/rooms/{id}), RatePlans CRUD (POST/PUT/DELETE), Availability POST /api/rooms/{id}/availability {2026-09-01..2026-09-05, min_stay:2} → {ok:true, days:5}, GET returns 5 docs with is_available=true & min_stay=2, dates invalides → 400, room inconnu → 404, PUT/DELETE inconnu → 404. Verified cascade cleanup: DELETE /api/rooms/{id} wipes availability + rate_plans (empty list on GET after). (5) Channex foundation: /channex/status → connected=true, environment='staging', properties_count=0; /channex/properties → count=0, []; POST /channex/import → {ok:true, imported_properties:0, imported_rooms:0, imported_rate_plans:0} (attendu, compte staging vide); /channex/sync-logs returns list with provider='channex' entries. NOT called: /owner-statement/email, /owner-statement/email-all (real email risk). All TEST_QA_* rooms/rate-plans cleaned up after test run (verified via API list — 0 residuals).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_owner_channex_rooms.py",
+    "/app/test_reports/pytest/pytest_iter20.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py L3127-3151 _resolve_period: handles both YYYY-MM and start/end explicit range, returns end_excl=(end+1d) for correct half-open Mongo $lt query. period_key for month uses raw 'YYYY-MM' (dual field for backward compat via statement_expenses/statement_overrides), and for range uses '<start>_<end>' — statement_expenses / statement_overrides lookups keyed on month=period_key still work for month-mode but silently return empty on range-mode (expected: no per-day expense overrides for arbitrary ranges).",
+    "server.py L3517-3553 pending-send: default previous month computed via first-day-of-current − 1 day (correct for any month). Filters out statements with reservations_count==0 and already-sent (last_sent_at). Includes has_owner_email (bool) so UI can show badge, and owner_revenue for sorting.",
+    "server.py L1899-1975 _assert_property gate on all Rooms/RatePlans POST/GET → 404 if property doesn't belong to user (or is out of member's _prop_scope). DELETE /rooms/{id} cascade-deletes db.rate_plans + db.availability filtered by user_id — good multi-tenant scoping.",
+    "server.py L1994-2014 set_availability: loops date_from..date_to with 800-day cap safety and upserts one doc per day; is_available/closed/min_stay all overwritten each call — idempotent.",
+    "channex.py L34-47: 3-retry backoff on 429/5xx, maps 401/403 to a friendly FR 400 'Clé API Channex invalide', 404 to 'API Channex introuvable (vérifiez l'environnement staging/production)'. Clean error surface.",
+    "server.py L2065-2075 channex/import: idempotent by channex_id (property), channex_room_type_id (room), channex_rate_plan_id (rate). No update-in-place on already-imported rows (only inserts new) — expected behaviour for foundation; if a Channex title changes it won't propagate on re-import (may want to add later)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_owner_channex_rooms.py"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Per test class, creates TEST_QA_Room_<hex> + TEST_QA_Rate_<hex> on Cosy Cocoon (pid d4b761bc-…) and a second TEST_QA_RoomCascade for cascade-delete verification. All resources DELETEd in fixture teardown; post-run verification via GET /properties/{pid}/rooms and /rate-plans shows 0 TEST_QA_* residuals. NO calls to /owner-statement/email or /owner-statement/email-all, NO Channex writes (only status/properties/import/sync-logs which are read-only on an empty staging account).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reproduce: `cd /app && python -m pytest backend/tests/test_owner_channex_rooms.py -v --tb=short --junitxml=/app/test_reports/pytest/pytest_iter20.xml -o addopts=''` — 23/23 pass in ~3.5s. Uses QA admin login (qa.admin@casaneo.test / CasaneoQA2026!). Server clock currently Aug 2026 so /owner-statement/pending-send default → 2026-07. NEVER call /owner-statement/email* (real emails to real owners) and NEVER call /channex/disconnect (breaks staging connection). To add new Rooms/RatePlans/Availability tests, follow the room_and_rate class fixture pattern — it creates then teardowns per class. Channex staging account is intentionally empty (0 properties) so import always returns imported_*=0.",
+  "rca_of_issue": "N/A — all 4 features (owner statement month/range, pending-send alert, Rooms/RatePlans/Availability CRUD, Channex read-only foundation) work as specified. No bugs found."
+}

@@ -48,10 +48,27 @@ export default function Statement() {
   const [emailAllBusy, setEmailAllBusy] = useState(false);
   const [company, setCompany] = useState<any>({});
   const [previewStmt, setPreviewStmt] = useState<any>(null);
+  const [periodMode, setPeriodMode] = useState<"month" | "quarter" | "range">("month");
+  const [qAnchor, setQAnchor] = useState(dayjs().startOf("month"));
+  const [rangeStart, setRangeStart] = useState(dayjs().startOf("month").subtract(2, "month"));
+  const [rangeEnd, setRangeEnd] = useState(dayjs().startOf("month"));
+  const [periodLabel, setPeriodLabel] = useState("");
+  const [periodKey, setPeriodKey] = useState("");
 
   const month = anchor.format("YYYY-MM");
   const LOGO_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/assets/casaneo-logo.png`;
   const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+
+  function periodParams(): any {
+    if (periodMode === "month") return { month };
+    if (periodMode === "quarter") {
+      const q = Math.floor(qAnchor.month() / 3);
+      const s = dayjs().year(qAnchor.year()).month(q * 3).startOf("month");
+      const e = s.add(2, "month").endOf("month");
+      return { start: s.format("YYYY-MM-DD"), end: e.format("YYYY-MM-DD") };
+    }
+    return { start: rangeStart.startOf("month").format("YYYY-MM-DD"), end: rangeEnd.endOf("month").format("YYYY-MM-DD") };
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,12 +76,16 @@ export default function Statement() {
       const pr = await api.get("/properties");
       setProps(pr);
       try { const prefs = await api.get("/preferences"); setCompany(prefs.company || {}); } catch {}
+      const p = periodParams();
+      const base = p.month ? `month=${p.month}` : `start=${p.start}&end=${p.end}`;
       const q = selectedProp !== "all" ? `&property_id=${selectedProp}` : "";
-      const res = await api.get(`/owner-statement?month=${month}${q}`);
+      const res = await api.get(`/owner-statement?${base}${q}`);
       setData(res.statements || []);
+      setPeriodLabel(res.period_label || "");
+      setPeriodKey(res.period_key || res.month || "");
     } catch {}
     setLoading(false);
-  }, [month, selectedProp]);
+  }, [month, selectedProp, periodMode, qAnchor, rangeStart, rangeEnd]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -73,7 +94,7 @@ export default function Statement() {
     try {
       await api.post("/statement-expenses", {
         property_id: expModal.property_id,
-        month,
+        month: periodKey || month,
         label: expLabel.trim(),
         amount: parseFloat((expAmount || "0").replace(",", ".")) || 0,
         charge_to: expCharge,
@@ -116,7 +137,7 @@ export default function Statement() {
     try {
       await api.put("/statement-commission", {
         property_id: commModal.property_id,
-        month,
+        month: periodKey || month,
         commission: reset ? null : (parseFloat((commInput || "0").replace(",", ".")) || 0),
       });
       setCommModal(null);
@@ -155,7 +176,7 @@ export default function Statement() {
     const reg = (t.tax_regional || 0) > 0 ? row("Taxe add. régionale (à reverser)", money(t.tax_regional)) : "";
     return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:16px">
       ${companyHeaderHtml()}
-      <h2 style="color:#111;margin:0 0 4px">Relevé de gestion — ${dayjs(month).format("MMMM YYYY")}</h2>
+      <h2 style="color:#111;margin:0 0 4px">Relevé de gestion — ${periodLabel || dayjs(month).format("MMMM YYYY")}</h2>
       <h3 style="color:#2A6F9E;margin:12px 0 4px">${s.property_name}</h3>
       <p style="color:#777;margin:0 0 6px">${s.reservations_count} réservation(s) · Frais de gestion ${s.management_fee_pct}%${s.owner ? " · Propriétaire : " + s.owner : ""}</p>
       <table style="width:100%;border-collapse:collapse;font-size:14px">
@@ -191,7 +212,7 @@ export default function Statement() {
     if (emailBusy) return;
     setEmailBusy(s.property_id);
     try {
-      const res = await api.post("/owner-statement/email", { month, property_id: s.property_id, base_url: BASE_URL });
+      const res = await api.post("/owner-statement/email", { ...periodParams(), property_id: s.property_id, base_url: BASE_URL });
       if (res.sent) {
         Alert.alert("Relevé envoyé", `Le relevé a été envoyé à ${res.owner_name || "le propriétaire"} (${res.to}).`);
       } else if (res.reason === "no_owner_email") {
@@ -209,7 +230,7 @@ export default function Statement() {
     if (emailAllBusy) return;
     Alert.alert(
       "Envoyer à tous les propriétaires",
-      `Chaque propriétaire recevra un seul email regroupant tous ses logements pour ${dayjs(month).format("MMMM YYYY")}.`,
+      `Chaque propriétaire recevra un seul email regroupant tous ses logements pour ${periodLabel || dayjs(month).format("MMMM YYYY")}.`,
       [
         { text: "Annuler", style: "cancel" },
         { text: "Envoyer", onPress: doEmailAll },
@@ -220,7 +241,7 @@ export default function Statement() {
   async function doEmailAll() {
     setEmailAllBusy(true);
     try {
-      const res = await api.post("/owner-statement/email-all", { month, base_url: BASE_URL });
+      const res = await api.post("/owner-statement/email-all", { ...periodParams(), base_url: BASE_URL });
       const results = res.results || [];
       const ok = results.filter((r: any) => r.sent);
       const skipped = results.filter((r: any) => !r.sent);
@@ -238,7 +259,7 @@ export default function Statement() {
   function statementLines(s: any) {
     const t = s.totals;
     return [
-      `Relevé ${dayjs(month).format("MMMM YYYY")} — ${s.property_name}`,
+      `Relevé ${periodLabel || dayjs(month).format("MMMM YYYY")} — ${s.property_name}`,
       s.owner ? `Propriétaire : ${s.owner}` : "",
       ``,
       `Réservations : ${s.reservations_count}`,
@@ -282,15 +303,55 @@ export default function Statement() {
             </Pressable>
           )}
         </View>
-        <View style={styles.monthNav}>
-          <Pressable testID="stmt-prev" onPress={() => setAnchor((a) => a.subtract(1, "month"))} style={styles.navBtn}>
-            <Ionicons name="chevron-back" size={20} color={colors.onSurface} />
-          </Pressable>
-          <Text style={styles.monthLabel}>{anchor.format("MMMM YYYY")}</Text>
-          <Pressable testID="stmt-next" onPress={() => setAnchor((a) => a.add(1, "month"))} style={styles.navBtn}>
-            <Ionicons name="chevron-forward" size={20} color={colors.onSurface} />
-          </Pressable>
+        <View style={styles.modeRow}>
+          {([["month", "Mois"], ["quarter", "Trimestre"], ["range", "Plage"]] as const).map(([k, lbl]) => (
+            <Pressable key={k} testID={`stmt-mode-${k}`} onPress={() => setPeriodMode(k)} style={[styles.modeChip, periodMode === k && styles.modeChipOn]}>
+              <Text style={[styles.modeChipText, periodMode === k && styles.modeChipTextOn]}>{lbl}</Text>
+            </Pressable>
+          ))}
         </View>
+        {periodMode === "month" && (
+          <View style={styles.monthNav}>
+            <Pressable testID="stmt-prev" onPress={() => setAnchor((a) => a.subtract(1, "month"))} style={styles.navBtn}>
+              <Ionicons name="chevron-back" size={20} color={colors.onSurface} />
+            </Pressable>
+            <Text style={styles.monthLabel}>{anchor.format("MMMM YYYY")}</Text>
+            <Pressable testID="stmt-next" onPress={() => setAnchor((a) => a.add(1, "month"))} style={styles.navBtn}>
+              <Ionicons name="chevron-forward" size={20} color={colors.onSurface} />
+            </Pressable>
+          </View>
+        )}
+        {periodMode === "quarter" && (
+          <View style={styles.monthNav}>
+            <Pressable testID="stmt-q-prev" onPress={() => setQAnchor((a) => a.subtract(3, "month"))} style={styles.navBtn}>
+              <Ionicons name="chevron-back" size={20} color={colors.onSurface} />
+            </Pressable>
+            <Text style={styles.monthLabel}>T{Math.floor(qAnchor.month() / 3) + 1} {qAnchor.year()}</Text>
+            <Pressable testID="stmt-q-next" onPress={() => setQAnchor((a) => a.add(3, "month"))} style={styles.navBtn}>
+              <Ionicons name="chevron-forward" size={20} color={colors.onSurface} />
+            </Pressable>
+          </View>
+        )}
+        {periodMode === "range" && (
+          <View style={styles.rangeRow}>
+            <View style={styles.rangeField}>
+              <Text style={styles.rangeLabel}>Du</Text>
+              <View style={styles.rangeStepper}>
+                <Pressable testID="stmt-rs-prev" onPress={() => setRangeStart((d) => d.subtract(1, "month"))} hitSlop={8}><Ionicons name="chevron-back" size={16} color={colors.onSurface} /></Pressable>
+                <Text style={styles.rangeVal}>{rangeStart.format("MMM YYYY")}</Text>
+                <Pressable testID="stmt-rs-next" onPress={() => setRangeStart((d) => d.add(1, "month"))} hitSlop={8}><Ionicons name="chevron-forward" size={16} color={colors.onSurface} /></Pressable>
+              </View>
+            </View>
+            <View style={styles.rangeField}>
+              <Text style={styles.rangeLabel}>Au</Text>
+              <View style={styles.rangeStepper}>
+                <Pressable testID="stmt-re-prev" onPress={() => setRangeEnd((d) => d.subtract(1, "month"))} hitSlop={8}><Ionicons name="chevron-back" size={16} color={colors.onSurface} /></Pressable>
+                <Text style={styles.rangeVal}>{rangeEnd.format("MMM YYYY")}</Text>
+                <Pressable testID="stmt-re-next" onPress={() => setRangeEnd((d) => d.add(1, "month"))} hitSlop={8}><Ionicons name="chevron-forward" size={16} color={colors.onSurface} /></Pressable>
+              </View>
+            </View>
+          </View>
+        )}
         <PropertyPicker value={selectedProp} items={props} onSelect={setSelectedProp} testID="stmt-prop-picker" />
       </View>
 
@@ -300,7 +361,7 @@ export default function Statement() {
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 100 }} showsVerticalScrollIndicator={false}>
           {selectedProp === "all" && data.length > 1 && (
             <View style={styles.grandCard}>
-              <Text style={styles.grandTitle}>Total du mois — {data.length} logements</Text>
+              <Text style={styles.grandTitle}>Total — {data.length} logements</Text>
               <SummaryLine label="Revenu propriétaires" value={money(grand.owner)} accent />
               <SummaryLine label="Revenu conciergerie" value={money(grand.concierge)} accent />
               <SummaryLine label="Taxe de séjour à reverser" value={money(grand.tax)} />
@@ -467,7 +528,7 @@ export default function Statement() {
                     </View>
                   </View>
                   <View style={styles.previewRule} />
-                  <Text style={styles.previewH2}>Relevé de gestion — {dayjs(month).format("MMMM YYYY")}</Text>
+                  <Text style={styles.previewH2}>Relevé de gestion — {periodLabel || dayjs(month).format("MMMM YYYY")}</Text>
                   <Text style={styles.previewH3}>{s.property_name}</Text>
                   <Text style={styles.previewMeta}>{s.reservations_count} réservation(s) · Frais de gestion {s.management_fee_pct}%{s.owner ? " · Propriétaire : " + s.owner : ""}</Text>
                   {(s.lines || []).length > 0 && <Text style={styles.previewSection}>Réservations</Text>}
@@ -510,7 +571,7 @@ export default function Statement() {
         <Pressable style={styles.backdrop} onPress={() => setExpModal(null)}>
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.sheetTitle}>Nouvelle dépense</Text>
-            <Text style={styles.sheetSub}>{expModal?.property_name} · {anchor.format("MMMM YYYY")}</Text>
+            <Text style={styles.sheetSub}>{expModal?.property_name} · {periodLabel || anchor.format("MMMM YYYY")}</Text>
             <Text style={styles.fieldLabel}>Libellé</Text>
             <TextInput testID="exp-label" value={expLabel} onChangeText={setExpLabel} placeholder="Ex : Réparation chauffe-eau" placeholderTextColor={colors.onSurfaceTertiary} style={styles.input} />
             <Text style={styles.fieldLabel}>Montant (€)</Text>
@@ -551,7 +612,7 @@ export default function Statement() {
         <Pressable style={styles.backdrop} onPress={() => setCommModal(null)}>
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
             <Text style={styles.sheetTitle}>Commissions OTA</Text>
-            <Text style={styles.sheetSub}>{commModal?.property_name} · {anchor.format("MMMM YYYY")}</Text>
+            <Text style={styles.sheetSub}>{commModal?.property_name} · {periodLabel || anchor.format("MMMM YYYY")}</Text>
             <Text style={styles.fieldLabel}>Montant des commissions (€)</Text>
             <TextInput testID="comm-input" value={commInput} onChangeText={setCommInput} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.onSurfaceTertiary} style={styles.input} autoFocus />
             <Text style={styles.feeHint}>
@@ -606,6 +667,16 @@ const styles = StyleSheet.create({
   title: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface },
   emailAllBtn: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.brandPrimary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.md, minHeight: 36 },
   emailAllText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onBrandPrimary },
+  modeRow: { flexDirection: "row", gap: spacing.xs, marginBottom: spacing.sm },
+  modeChip: { flex: 1, paddingVertical: 8, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
+  modeChipOn: { backgroundColor: "#EAF3FA", borderColor: colors.brandPrimary },
+  modeChipText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  modeChipTextOn: { color: colors.brandPrimary, fontFamily: font.semibold },
+  rangeRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm },
+  rangeField: { flex: 1 },
+  rangeLabel: { fontFamily: font.medium, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, marginBottom: 4 },
+  rangeStepper: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: 10, paddingVertical: 8 },
+  rangeVal: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurface },
   sentRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
   sentText: { fontFamily: font.medium, fontSize: fontSize.xs, color: "#17B0A6" },
   previewWrap: { flex: 1, backgroundColor: colors.surface },
