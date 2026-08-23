@@ -260,3 +260,15 @@
   - **Fiche logement** : section « Taxe de séjour » avec les 2 champs %.
   - **Réservation (création)** : `tourist_tax` pré-rempli = nights_total × (tourist_tax_pct + regional_tax_pct)/100, recalculé au changement logement/dates, modifiable ; texte d'aide « Calculée automatiquement (…) ».
 - Testé : backend 5/5 (iteration_18, persistance taux, send-keys no_key_info/no_messaging, 404) ; frontend 10/10 (écran taxe, fiche logement, hint réservation, carte Airbnb vs caution). Aucun envoi réel Lodgify pendant les tests (réservations manuelles).
+
+## Lien de paiement de la caution par logement (2026-06)
+- `Property.deposit_link` : lien de paiement de la caution (montant prédéfini par logement, ex. livretaccueil.com). Champ dans la fiche logement (section « Caution »).
+- Variable `{caution}` disponible dans les messages automatiques (substituée comme {welcome_book}). Indiquée dans Paramètres → Messages automatiques.
+- POST /api/reservations/{id}/send-deposit-link : envoie le lien de caution au voyageur (Lodgify). Réponses: no_deposit_link / no_messaging / no_channel / sent. Bouton « Envoyer le lien de caution au voyageur » sur la carte caution (réservations non-Airbnb) dans reservation-form.
+- Vérifié curl : no_deposit_link (lien absent), persistance deposit_link, no_messaging (réservation manuelle → aucun envoi réel).
+
+## Synchro Lodgify automatique + diagnostic désync (2026-06)
+- **Cause désync** : la synchro Lodgify des réservations était MANUELLE uniquement (POST /channel/sync). Aucune boucle automatique → les logements ne se mettaient à jour que sur action manuelle. Diagnostic Alyoné/Cosy Cocoon : mapping lodgify_id OK, tous les bookings Lodgify présents après resync (imported 1, updated 313, unmapped 20 = anciennes annonces archivées 740708/740709/768915/819221, sans impact).
+- **Correctif** : extraction de la logique en `run_channel_sync(uid)` (l'endpoint POST /channel/sync délègue). Nouvelle boucle de fond `_lodgify_auto_sync_loop` (démarrage +90s, puis toutes les 30 min) qui resynchronise les réservations Lodgify de chaque utilisateur connecté. Enregistrée dans startup().
+- Note : les fiches « demande » locales qui n'existent plus côté Lodgify ne sont pas supprimées automatiquement (pour ne pas effacer d'éventuelles réservations manuelles).
+- Tests test_lodgify_channel: 3 échecs = base déjà peuplée (attendu imported>=1 sur base vierge) — non lié au refactor ; endpoint vérifié HTTP 200 (imported/updated/unmapped/conversations/total).

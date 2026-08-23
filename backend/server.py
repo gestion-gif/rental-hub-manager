@@ -94,6 +94,7 @@ class PropertyIn(BaseModel):
     seasons: List[Season] = []
     ical_links: List[IcalLink] = []
     welcome_book_url: str = ""
+    deposit_link: str = ""             # lien de paiement de la caution (montant prédéfini par logement)
     management_fee_pct: float = 0
     default_cleaning_fee: float = 0    # frais de ménage par défaut
     default_tourist_tax: float = 0     # taxe de séjour par défaut (montant fixe, hérité)
@@ -715,6 +716,35 @@ async def send_keys(reservation_id: str, payload: SendKeysIn, user=Depends(get_c
             {"id": reservation_id, "user_id": uid},
             {"$set": {"keys_sent_at": now_utc().isoformat()}})
     return {"keys_sent": keys_sent, "reason": reason}
+
+
+@api_router.post("/reservations/{reservation_id}/send-deposit-link")
+async def send_deposit_link(reservation_id: str, user=Depends(get_current_user)):
+    """Envoie au voyageur le lien de paiement de la caution défini sur le logement."""
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    prop = await db.properties.find_one({"id": r.get("property_id"), "user_id": uid}, {"_id": 0}) or {}
+    link = (prop.get("deposit_link") or "").strip()
+    if not link:
+        return {"sent": False, "reason": "no_deposit_link"}
+    if r.get("source") != "lodgify" or not r.get("thread_uid") or not r.get("lodgify_id"):
+        return {"sent": False, "reason": "no_messaging"}
+    settings = await db.channel_settings.find_one({"user_id": uid}, {"_id": 0})
+    if not settings or not settings.get("api_key"):
+        return {"sent": False, "reason": "no_channel"}
+    guest = r.get("guest_name") or ""
+    pname = r.get("property_name") or prop.get("name") or "votre logement"
+    body = (f"Bonjour {guest},".rstrip(",") + "\n"
+            f"Afin de finaliser votre réservation pour {pname}, merci de régler la caution "
+            f"via ce lien sécurisé :\n{link}\n\nMerci et à bientôt !")
+    adapter = LodgifyAdapter(settings["api_key"])
+    async with httpx.AsyncClient(timeout=30) as http:
+        await adapter.send_message(http, r["lodgify_id"], body, "Caution")
+    return {"sent": True, "reason": "sent"}
+
+
 
 
 
@@ -1712,7 +1742,10 @@ async def channel_import_properties(user=Depends(get_current_user)):
 
 @api_router.post("/channel/sync")
 async def channel_sync(user=Depends(get_current_user)):
-    uid = user["user_id"]
+    return await run_channel_sync(user["user_id"])
+
+
+async def run_channel_sync(uid: str):
     adapter, _ = await get_channel_adapter(uid)
     if not adapter:
         raise HTTPException(status_code=400, detail="Channel manager non connecté")
@@ -2865,7 +2898,8 @@ async def run_automations_for_user(uid: str):
                 if t["trigger_event"] == "before_arrival" and today >= ci - timedelta(days=int(t.get("trigger_days", 0))):
                     body = (t.get("body") or "").replace("{guest}", r.get("guest_name", "")).replace(
                         "{property}", r.get("property_name") or "").replace(
-                        "{welcome_book}", (pmap.get(r.get("property_id"), {}) or {}).get("welcome_book_url", "") or "")
+                        "{welcome_book}", (pmap.get(r.get("property_id"), {}) or {}).get("welcome_book_url", "") or "").replace(
+                        "{caution}", (pmap.get(r.get("property_id"), {}) or {}).get("deposit_link", "") or "")
                     try:
                         await adapter.send_message(http, r["lodgify_id"], body, t["name"])
                     except Exception:
@@ -3050,7 +3084,25 @@ async def startup():
     await db.interventions.create_index("user_id")
     asyncio.create_task(automation_scheduler())
     asyncio.create_task(_ical_auto_sync_loop())
+    asyncio.create_task(_lodgify_auto_sync_loop())
     asyncio.create_task(_ai_draft_loop())
+
+
+async def _lodgify_auto_sync_loop():
+    """Synchronise automatiquement les réservations Lodgify de chaque utilisateur toutes les 30 min."""
+    await asyncio.sleep(90)  # laisser le serveur démarrer
+    while True:
+        try:
+            uids = await db.channel_settings.distinct("user_id")
+            for uid in uids:
+                try:
+                    await run_channel_sync(uid)
+                except Exception:
+                    logger.exception("lodgify auto-sync error for %s", uid)
+        except Exception:
+            logger.exception("lodgify auto-sync loop error")
+        await asyncio.sleep(1800)
+
 
 
 async def automation_scheduler():

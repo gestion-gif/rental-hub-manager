@@ -363,6 +363,28 @@ export default function ReservationForm() {
     }
   }
 
+  async function sendDepositLink() {
+    if (cvBusy) return;
+    setCvBusy(true);
+    setCvMsg(null);
+    try {
+      const res = await api.post(`/reservations/${id}/send-deposit-link`, {});
+      if (res.sent) {
+        setCvMsg("Lien de caution envoyé au voyageur ✓");
+      } else {
+        const reason = res.reason || "";
+        if (reason === "no_deposit_link") setCvMsg("Ajoutez le lien de caution sur la fiche logement.");
+        else if (reason === "no_messaging" || reason === "no_channel") setCvMsg("Envoi indisponible (réservation hors Lodgify).");
+        else setCvMsg("Envoi impossible.");
+      }
+    } catch (e: any) {
+      setCvMsg(e?.message || "Erreur");
+    } finally {
+      setCvBusy(false);
+    }
+  }
+
+
 
 
   useEffect(() => {
@@ -455,6 +477,15 @@ export default function ReservationForm() {
                     )}
                   </Pressable>
                 </View>
+                <Pressable
+                  testID="send-deposit-link"
+                  onPress={sendDepositLink}
+                  disabled={cvBusy}
+                  style={[styles.depositBtn, cvBusy && { opacity: 0.6 }]}
+                >
+                  <Ionicons name="paper-plane-outline" size={16} color={colors.brandPrimary} />
+                  <Text style={styles.depositText}>Envoyer le lien de caution au voyageur</Text>
+                </Pressable>
                 {!!cvMsg && <Text style={styles.cvMsg}>{cvMsg}</Text>}
               </View>
             )
@@ -815,6 +846,8 @@ const styles = StyleSheet.create({
   cvMsg: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.brandPrimary, marginTop: spacing.md },
   sendKeysBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.brandPrimary, borderRadius: radius.md, paddingVertical: 12, marginTop: spacing.md },
   sendKeysText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onBrandPrimary },
+  depositBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.brandPrimary + "12", borderWidth: 1, borderColor: colors.brandPrimary + "33", borderRadius: radius.md, paddingVertical: 11, marginTop: spacing.md },
+  depositText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.brandPrimary },
 
   container: { flex: 1, backgroundColor: colors.surface },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },

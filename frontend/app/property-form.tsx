@@ -41,6 +41,7 @@ export default function PropertyForm() {
     address_complement: "",
     description: "",
     welcome_book_url: "",
+    deposit_link: "",
     management_fee_pct: "",
     default_cleaning_fee: "",
     tourist_tax_pct: "",
@@ -79,6 +80,7 @@ export default function PropertyForm() {
           address_complement: p.address_complement || "",
           description: p.description || "",
           welcome_book_url: p.welcome_book_url || "",
+          deposit_link: p.deposit_link || "",
           management_fee_pct: p.management_fee_pct ? String(p.management_fee_pct) : "",
           default_cleaning_fee: p.default_cleaning_fee ? String(p.default_cleaning_fee) : "",
           tourist_tax_pct: p.tourist_tax_pct ? String(p.tourist_tax_pct) : "",
@@ -139,6 +141,7 @@ export default function PropertyForm() {
       address_complement: form.address_complement.trim(),
       description: form.description.trim(),
       welcome_book_url: form.welcome_book_url.trim(),
+      deposit_link: form.deposit_link.trim(),
       management_fee_pct: parseFloat(form.management_fee_pct) || 0,
       default_cleaning_fee: parseFloat(form.default_cleaning_fee) || 0,
       tourist_tax_pct: parseFloat(form.tourist_tax_pct) || 0,
@@ -269,6 +272,21 @@ export default function PropertyForm() {
           autoCapitalize="none"
           keyboardType="url"
         />
+
+        <SectionLabel text="Caution" />
+        <Field
+          label="Lien de paiement de la caution (envoyé aux voyageurs)"
+          testID="prop-deposit-link"
+          value={form.deposit_link}
+          onChangeText={(v) => set("deposit_link", v)}
+          placeholder="https://livretaccueil.com/..."
+          autoCapitalize="none"
+          keyboardType="url"
+        />
+        <Text style={styles.helper}>
+          Le montant de caution étant propre à chaque logement, collez ici le lien préparé pour ce montant.
+          Utilisable dans les messages automatiques via la variable {"{caution}"} et envoyable en 1 tap depuis la réservation.
+        </Text>
 
         <SectionLabel text="Clés" />
         <Field
