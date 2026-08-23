@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "000000000000",
-    "project_id": "casaneo-placeholder",
-    "storage_bucket": "casaneo-placeholder.appspot.com"
+    "project_number": "282694561343",
+    "project_id": "casaneo-887f0",
+    "storage_bucket": "casaneo-887f0.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "mobilesdk_app_id": "1:282694561343:android:45d49c65e5bba79bfcd28a",
         "android_client_info": {
-          "package_name": "com.emergent.rentalhubmanager.p4jvi7"
+          "package_name": "com.casaneo.app"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "PLACEHOLDER_REPLACE_WITH_REAL_GOOGLE_SERVICES_JSON"
+          "current_key": "AIzaSyAWEE5U9_7Ydw67buTnNVLkuZw5d-BYupA"
         }
       ],
       "services": {

@@ -1554,6 +1554,115 @@ async def analytics_revenue(year: Optional[int] = None, user=Depends(get_current
     }
 
 
+@api_router.get("/analytics/kpi")
+async def analytics_kpi(month: str = "", start: str = "", end: str = "",
+                        user=Depends(get_current_user)):
+    """Synthèse conciergerie sur une période (mois OU plage) : revenus conciergerie
+    vs propriétaires, frais de gestion, commissions, taux d'occupation global,
+    top logements. Réutilise les règles comptables du relevé propriétaire."""
+    if not _can(user, "view_revenue_charts"):
+        raise HTTPException(status_code=403, detail="Accès aux revenus non autorisé")
+    uid = user["user_id"]
+    if not (month or (start and end)):
+        month = date.today().strftime("%Y-%m")
+    start_d, end_excl, period_key, period_label = _resolve_period(month, start, end)
+    sd = date.fromisoformat(start_d)
+    ed = date.fromisoformat(end_excl)  # exclusive
+    period_days = max((ed - sd).days, 1)
+
+    props = await db.properties.find(
+        {"user_id": uid, **_prop_scope(user)}, {"_id": 0}).to_list(500)
+
+    reservations = await db.reservations.find(
+        {"user_id": uid, "property_id": {"$in": [p["id"] for p in props]},
+         "check_in": {"$gte": start_d, "$lt": end_excl},
+         "status": {"$nin": ["annulee", "bloque"]}}, {"_id": 0}).to_list(5000)
+
+    by_prop = {p["id"]: [] for p in props}
+    for r in reservations:
+        pid = r.get("property_id")
+        if pid in by_prop:
+            by_prop[pid].append(r)
+
+    # Nuits réservées sur la période (pour l'occupation) — tous statuts occupants
+    occ_res = await db.reservations.find(
+        {"user_id": uid, "property_id": {"$in": [p["id"] for p in props]},
+         "status": {"$nin": ["annulee"]},
+         "check_in": {"$lt": end_excl}, "check_out": {"$gt": start_d}}, {"_id": 0}).to_list(5000)
+    nights_by_prop = {p["id"]: 0 for p in props}
+    for r in occ_res:
+        pid = r.get("property_id")
+        if pid not in nights_by_prop:
+            continue
+        try:
+            ci = max(date.fromisoformat(r.get("check_in")), sd)
+            co = min(date.fromisoformat(r.get("check_out")), ed)
+        except Exception:
+            continue
+        if co > ci:
+            nights_by_prop[pid] += (co - ci).days
+
+    tot = {"nights": 0.0, "cleaning": 0.0, "tax": 0.0, "commission": 0.0,
+           "management_fee": 0.0, "owner_revenue": 0.0, "concierge_revenue": 0.0,
+           "reservations": 0, "booked_nights": 0}
+    per_property = []
+    for p in props:
+        pid = p["id"]
+        rs = by_prop.get(pid, [])
+        t_nights = t_clean = t_tax = t_comm = 0.0
+        for r in rs:
+            a = _res_amounts(r)
+            t_nights += a["nights"]; t_clean += a["cleaning"]
+            t_tax += a["tax"]; t_comm += a["commission"]
+        # dépenses & override commission (mois uniquement — cohérent avec le relevé)
+        expenses = await db.statement_expenses.find(
+            {"user_id": uid, "property_id": pid, "month": period_key}, {"_id": 0}).to_list(500)
+        owner_exp = round(sum(float(e.get("amount") or 0) for e in expenses if e.get("charge_to") == "owner"), 2)
+        concierge_exp = round(sum(float(e.get("amount") or 0) for e in expenses if e.get("charge_to") == "concierge"), 2)
+        ov = await db.statement_overrides.find_one(
+            {"user_id": uid, "property_id": pid, "month": period_key}, {"_id": 0})
+        eff_comm = round(float(ov.get("commission") or 0), 2) if (ov and ov.get("commission") is not None) else round(t_comm, 2)
+        pct = float(p.get("management_fee_pct") or 0)
+        mgmt_fee = round(t_nights * pct / 100.0, 2)
+        owner_rev = round(t_nights - mgmt_fee - eff_comm - owner_exp, 2)
+        concierge_rev = round(mgmt_fee + t_clean - concierge_exp, 2)
+        booked = nights_by_prop.get(pid, 0)
+        occ = round(min(booked / period_days * 100, 100)) if period_days else 0
+
+        tot["nights"] += t_nights; tot["cleaning"] += t_clean
+        tot["tax"] += t_tax; tot["commission"] += eff_comm
+        tot["management_fee"] += mgmt_fee
+        tot["owner_revenue"] += owner_rev
+        tot["concierge_revenue"] += concierge_rev
+        tot["reservations"] += len(rs)
+        tot["booked_nights"] += booked
+
+        per_property.append({
+            "id": pid, "name": p.get("name", "Logement"),
+            "nights_revenue": round(t_nights, 2), "cleaning": round(t_clean, 2),
+            "commission": eff_comm, "management_fee": mgmt_fee,
+            "owner_revenue": owner_rev, "concierge_revenue": concierge_rev,
+            "reservations": len(rs), "booked_nights": booked, "occupancy": occ,
+        })
+
+    n_props = max(len(props), 1)
+    occ_all = round(min(tot["booked_nights"] / (period_days * n_props) * 100, 100)) if period_days else 0
+    top_by_revenue = sorted(per_property, key=lambda x: -x["concierge_revenue"])[:5]
+    top_by_occupancy = sorted(per_property, key=lambda x: -x["occupancy"])[:5]
+
+    return {
+        "period_key": period_key, "period_label": period_label,
+        "period_days": period_days, "properties_count": len(props),
+        "totals": {k: (round(v, 2) if isinstance(v, float) else v) for k, v in tot.items()},
+        "occupancy_all": occ_all,
+        "per_property": per_property,
+        "top_by_revenue": top_by_revenue,
+        "top_by_occupancy": top_by_occupancy,
+    }
+
+
+
+
 # ---------------------------------------------------------------------------
 # AI assistant
 # ---------------------------------------------------------------------------
@@ -1662,6 +1771,48 @@ def _build_company(doc: Optional[dict]) -> dict:
     return {k: str(c.get(k) or "") for k in _COMPANY_KEYS}
 
 
+# Enregistrement en ligne (online check-in form) --------------------------------
+# guests_count est toujours obligatoire (non désactivable).
+CHECKIN_PREDEFINED_KEYS = [
+    "guests_count", "phone_email", "arrival_info", "arrival_time",
+    "holder_id", "other_guests_id", "upload_id",
+]
+DEFAULT_CHECKIN = {
+    "enabled": False,
+    "require_before_arrival": False,
+    "auto_reminders": True,
+    "predefined": {
+        "guests_count": True,      # obligatoire
+        "phone_email": True,
+        "arrival_info": True,
+        "arrival_time": True,
+        "holder_id": False,
+        "other_guests_id": False,
+        "upload_id": False,
+    },
+    "custom_questions": [],
+}
+
+
+def _build_checkin(doc: Optional[dict]) -> dict:
+    c = (doc or {}).get("online_checkin") or {}
+    pre_in = c.get("predefined") or {}
+    predefined = {k: bool(pre_in.get(k, DEFAULT_CHECKIN["predefined"][k])) for k in CHECKIN_PREDEFINED_KEYS}
+    predefined["guests_count"] = True  # toujours obligatoire
+    custom = []
+    for q in (c.get("custom_questions") or [])[:5]:
+        label = str((q or {}).get("label") or "").strip()
+        if label:
+            custom.append({"id": str((q or {}).get("id") or uuid.uuid4().hex[:8]), "label": label})
+    return {
+        "enabled": bool(c.get("enabled", DEFAULT_CHECKIN["enabled"])),
+        "require_before_arrival": bool(c.get("require_before_arrival", DEFAULT_CHECKIN["require_before_arrival"])),
+        "auto_reminders": bool(c.get("auto_reminders", DEFAULT_CHECKIN["auto_reminders"])),
+        "predefined": predefined,
+        "custom_questions": custom,
+    }
+
+
 class PreferencesIn(BaseModel):
     status_colors: Optional[dict] = None
     statuses: Optional[list] = None
@@ -1669,6 +1820,7 @@ class PreferencesIn(BaseModel):
     payment_methods: Optional[dict] = None
     ai_auto_draft: Optional[bool] = None
     company: Optional[dict] = None
+    online_checkin: Optional[dict] = None
 
 
 async def _ai_auto_draft_enabled(uid: str) -> bool:
@@ -1687,6 +1839,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "payment_methods": _build_payment_methods(doc),
         "ai_auto_draft": bool((doc or {}).get("ai_auto_draft", True)),
         "company": _build_company(doc),
+        "online_checkin": _build_checkin(doc),
     }
 
 
@@ -1741,6 +1894,24 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
     if payload.company is not None:
         set_doc["company"] = {k: str(payload.company.get(k) or "").strip() for k in _COMPANY_KEYS}
 
+    if payload.online_checkin is not None:
+        c = payload.online_checkin or {}
+        pre_in = c.get("predefined") or {}
+        predefined = {k: bool(pre_in.get(k, DEFAULT_CHECKIN["predefined"][k])) for k in CHECKIN_PREDEFINED_KEYS}
+        predefined["guests_count"] = True  # toujours obligatoire
+        custom = []
+        for q in (c.get("custom_questions") or [])[:5]:
+            label = str((q or {}).get("label") or "").strip()
+            if label:
+                custom.append({"id": str((q or {}).get("id") or uuid.uuid4().hex[:8]), "label": label})
+        set_doc["online_checkin"] = {
+            "enabled": bool(c.get("enabled", False)),
+            "require_before_arrival": bool(c.get("require_before_arrival", False)),
+            "auto_reminders": bool(c.get("auto_reminders", True)),
+            "predefined": predefined,
+            "custom_questions": custom,
+        }
+
     await db.preferences.update_one({"user_id": uid}, {"$set": set_doc}, upsert=True)
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     statuses = _build_statuses(doc)
@@ -1751,6 +1922,7 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "payment_methods": _build_payment_methods(doc),
         "ai_auto_draft": bool((doc or {}).get("ai_auto_draft", True)),
         "company": _build_company(doc),
+        "online_checkin": _build_checkin(doc),
     }
 
 
@@ -1884,6 +2056,79 @@ async def channex_sync_logs(user=Depends(get_current_user)):
         {"user_id": user["user_id"], "provider": "channex"}, {"_id": 0}
     ).sort("date", -1).to_list(50)
     return {"logs": logs}
+
+
+# ---------------------------------------------------------------------------
+# Politiques de réservation (Booking policies)
+# ---------------------------------------------------------------------------
+class BookingPolicyIn(BaseModel):
+    name: str
+    payment_count: int = 1                     # 1 | 2 | 3
+    payments: list = []                        # [{percent: number}]
+    cancellation: str = "non_refundable"       # non_refundable | fully_refundable | partially_refundable
+    deposit_required: bool = False
+    deposit_method: str = "card_auth"          # card_auth | manual
+    deposit_amount_type: str = "percentage"    # percentage | flat
+    deposit_amount: float = 0
+    quote_expiration_hours: int = 48
+
+
+def _clean_policy(p: BookingPolicyIn) -> dict:
+    cnt = p.payment_count if p.payment_count in (1, 2, 3) else 1
+    pays = []
+    for i in range(cnt):
+        try:
+            pct = round(float((p.payments[i] or {}).get("percent", 0)), 2)
+        except Exception:
+            pct = 0.0
+        pays.append({"percent": pct})
+    if cnt == 1:
+        pays = [{"percent": 100.0}]
+    return {
+        "name": (p.name or "").strip() or "Politique",
+        "payment_count": cnt,
+        "payments": pays,
+        "cancellation": p.cancellation if p.cancellation in ("non_refundable", "fully_refundable", "partially_refundable") else "non_refundable",
+        "deposit_required": bool(p.deposit_required),
+        "deposit_method": p.deposit_method if p.deposit_method in ("card_auth", "manual") else "card_auth",
+        "deposit_amount_type": p.deposit_amount_type if p.deposit_amount_type in ("percentage", "flat") else "percentage",
+        "deposit_amount": round(float(p.deposit_amount or 0), 2),
+        "quote_expiration_hours": max(1, min(int(p.quote_expiration_hours or 48), 720)),
+    }
+
+
+@api_router.get("/booking-policies")
+async def list_booking_policies(user=Depends(get_current_user)):
+    docs = await db.booking_policies.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return {"policies": docs}
+
+
+@api_router.post("/booking-policies")
+async def create_booking_policy(payload: BookingPolicyIn, user=Depends(get_current_user)):
+    doc = _clean_policy(payload)
+    doc.update({"id": str(uuid.uuid4()), "user_id": user["user_id"], "created_at": now_utc().isoformat()})
+    await db.booking_policies.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/booking-policies/{policy_id}")
+async def update_booking_policy(policy_id: str, payload: BookingPolicyIn, user=Depends(get_current_user)):
+    existing = await db.booking_policies.find_one({"id": policy_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Politique introuvable")
+    doc = _clean_policy(payload)
+    await db.booking_policies.update_one({"id": policy_id}, {"$set": doc})
+    return {**existing, **doc}
+
+
+@api_router.delete("/booking-policies/{policy_id}")
+async def delete_booking_policy(policy_id: str, user=Depends(get_current_user)):
+    res = await db.booking_policies.delete_one({"id": policy_id, "user_id": user["user_id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Politique introuvable")
+    return {"ok": True}
+
 
 
 

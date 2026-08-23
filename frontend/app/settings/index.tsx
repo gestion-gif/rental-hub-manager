@@ -8,6 +8,8 @@ import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const OPTIONS = [
   { path: "/settings/company", icon: "business-outline", title: "Ma société", sub: "Coordonnées sur les relevés (PDF & email)" },
+  { path: "/settings/booking-policies", icon: "document-lock-outline", title: "Politique de réservation", sub: "Paiement, annulation, caution, devis" },
+  { path: "/settings/online-checkin", icon: "clipboard-outline", title: "Enregistrement en ligne", sub: "Formulaire d'arrivée & rappels automatiques" },
   { path: "/settings/members", icon: "people-circle-outline", title: "Utilisateurs", sub: "Équipe, rôles & autorisations" },
   { path: "/settings/staff", icon: "people-outline", title: "Intervenants", sub: "Équipe ménage & technique" },
   { path: "/settings/owners", icon: "person-outline", title: "Propriétaires", sub: "Fiches, logements & revenus" },

@@ -22,7 +22,7 @@
         "backgroundColor": "#FFFFFF"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.rentalhubmanager.p4jvi7",
+      "package": "com.casaneo.app",
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "READ_MEDIA_IMAGES"
