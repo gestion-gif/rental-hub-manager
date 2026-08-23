@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -75,6 +75,7 @@ export default function Planning() {
   const [specialName, setSpecialName] = useState("Promo");
   const [specialPrice, setSpecialPrice] = useState("");
   const [savingSpecial, setSavingSpecial] = useState(false);
+  const [blockedByProp, setBlockedByProp] = useState<Record<string, string[]>>({});
 
   const load = useCallback(async () => {
     try {
@@ -100,6 +101,20 @@ export default function Planning() {
       load();
     }, [load]),
   );
+
+  useEffect(() => {
+    const s = anchor.startOf("month").format("YYYY-MM-DD");
+    const e = anchor.endOf("month").format("YYYY-MM-DD");
+    api.get(`/availability/blocked?start=${s}&end=${e}`)
+      .then((r) => setBlockedByProp(r.blocks || {}))
+      .catch(() => setBlockedByProp({}));
+  }, [anchor]);
+
+  const blockedSets = useMemo(() => {
+    const m: Record<string, Set<string>> = {};
+    Object.entries(blockedByProp).forEach(([pid, dates]) => { m[pid] = new Set(dates as string[]); });
+    return m;
+  }, [blockedByProp]);
 
   const propMap = useMemo(() => {
     const m: Record<string, any> = {};
@@ -327,6 +342,7 @@ export default function Planning() {
           onIv={(id: string) => router.push(`/intervention-form?id=${id}`)}
           onCreate={(pid: string, ci: string, co: string) =>
             router.push(`/reservation-form?property=${pid}&check_in=${ci}&check_out=${co}`)}
+          blockedSets={blockedSets}
           bottomPad={insets.bottom + 90}
         />
       ) : (
@@ -347,6 +363,7 @@ export default function Planning() {
           todayStr={todayStr}
           onRes={(id: string) => router.push(`/reservation-form?id=${id}`)}
           onIv={(id: string) => router.push(`/intervention-form?id=${id}`)}
+          blockedSets={blockedSets}
           bottomPad={insets.bottom + 90}
         />
       )}
@@ -438,7 +455,7 @@ export default function Planning() {
   );
 }
 
-function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onEditPrice, priceMode, onPriceRange, onBar, onIv, onCreate, bottomPad }: any) {
+function TimelineView({ rows, days, monthStart, daysInMonth, filtered, interventions, statusColors, statuses, todayStr, showPrices, priceProp, onEditPrice, priceMode, onPriceRange, onBar, onIv, onCreate, blockedSets, bottomPad }: any) {
   const { user } = useAuth();
   const headH = showPrices ? DAYHEAD_H + 16 : DAYHEAD_H;
   const [sel, setSel] = useState<{ propId: string; a: number; b: number } | null>(null);
@@ -564,12 +581,16 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
                   <View style={{ flexDirection: "row" }}>
                     {days.map((d: any) => {
                       const weekend = d.day() === 0 || d.day() === 6;
-                      const isToday = d.format("YYYY-MM-DD") === todayStr;
+                      const dStr = d.format("YYYY-MM-DD");
+                      const isToday = dStr === todayStr;
+                      const blocked = blockedSets?.[p.id]?.has(dStr);
                       return (
                         <View
                           key={d.valueOf()}
-                          style={[styles.gridCell, weekend && styles.weekendBg, isToday && styles.todayCol]}
-                        />
+                          style={[styles.gridCell, weekend && styles.weekendBg, isToday && styles.todayCol, blocked && styles.blockedCell]}
+                        >
+                          {blocked && <Ionicons name="lock-closed" size={9} color="#9AA0A6" style={styles.blockedIcon} />}
+                        </View>
                       );
                     })}
                   </View>
@@ -664,7 +685,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
   );
 }
 
-function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, propMap, statusColors, single, showPrices, priceProp, onEditPrice, selectedDay, setSelectedDay, todayStr, onRes, onIv, bottomPad }: any) {
+function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, propMap, statusColors, single, showPrices, priceProp, onEditPrice, selectedDay, setSelectedDay, todayStr, onRes, onIv, blockedSets, bottomPad }: any) {
   const { user } = useAuth();
   const offset = (monthStart.day() + 6) % 7; // Monday start
   const cells: (any | null)[] = [
@@ -702,6 +723,7 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, p
           const isSel = dayStr === selectedDay;
           const firstColor = res.length ? (res[0].display_color || res[0].marker_color || statusColors[res[0].status]) : null;
           const uniqueStatuses = Array.from(new Set(res.map((r: any) => r.status))) as string[];
+          const isBlocked = single && priceProp && res.length === 0 && blockedSets?.[priceProp.id]?.has(dayStr);
           return (
             <Pressable
               key={dayStr}
@@ -710,9 +732,11 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, p
               style={[
                 styles.dayCell,
                 single && res.length > 0 && { backgroundColor: tint(firstColor, "33") },
+                isBlocked && styles.blockedCell,
                 isSel && styles.daySel,
               ]}
             >
+              {isBlocked && <Ionicons name="lock-closed" size={10} color="#9AA0A6" style={styles.blockedBadge} />}
               <Text style={[styles.dayNum, isToday && styles.dayNumToday, single && res.length > 0 && { color: firstColor }]}>
                 {d.date()}
               </Text>
@@ -856,6 +880,9 @@ const styles = StyleSheet.create({
   weekendBg: { backgroundColor: colors.surfaceSecondary },
   todayCol: { backgroundColor: "rgba(28,28,30,0.06)" },
   gridCell: { width: DAY_W, height: ROW_H, borderRightWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
+  blockedCell: { backgroundColor: "#EDEEF0" },
+  blockedIcon: { position: "absolute", top: 3, alignSelf: "center", opacity: 0.7 },
+  blockedBadge: { position: "absolute", top: 3, right: 3, opacity: 0.8 },
   bar: {
     position: "absolute", top: 10, height: ROW_H - 20, borderRadius: 7,
     paddingHorizontal: 5, flexDirection: "row", alignItems: "center", gap: 4,

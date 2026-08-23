@@ -2095,7 +2095,31 @@ async def set_availability(room_id: str, payload: AvailabilitySetIn, user=Depend
     return {"ok": True, "days": n}
 
 
-@api_router.post("/channex/import")
+@api_router.get("/availability/blocked")
+async def availability_blocked(start: str, end: str, user=Depends(get_current_user)):
+    """Dates bloquées MANUELLEMENT (closed=true, hors blocages auto de réservations)
+    agrégées par logement, pour l'affichage dans le Planning. Retourne {blocks: {property_id: [dates]}}."""
+    uid = user["user_id"]
+    rooms = await db.rooms.find({"user_id": uid}, {"_id": 0, "id": 1, "property_id": 1}).to_list(1000)
+    if not rooms:
+        return {"blocks": {}}
+    room_to_prop = {r["id"]: r["property_id"] for r in rooms}
+    docs = await db.availability.find(
+        {"user_id": uid, "room_id": {"$in": list(room_to_prop.keys())},
+         "date": {"$gte": start, "$lte": end}, "closed": True},
+        {"_id": 0, "room_id": 1, "date": 1, "auto_booking": 1}).to_list(20000)
+    blocks: dict = {}
+    for d in docs:
+        if d.get("auto_booking"):
+            continue  # blocage lié à une réservation (déjà affiché comme barre)
+        pid = room_to_prop.get(d["room_id"])
+        if not pid:
+            continue
+        blocks.setdefault(pid, set()).add(d["date"])
+    return {"blocks": {k: sorted(v) for k, v in blocks.items()}}
+
+
+
 async def channex_import(user=Depends(get_current_user)):
     """Importe les logements Channex → Property + Room + RatePlan (idempotent par channex_id).
     Conserve les IDs Lodgify existants (mapping provider-neutre)."""
