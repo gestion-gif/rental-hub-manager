@@ -1,0 +1,32 @@
+{
+  "summary": "Casanéo iteration 17 — « Clés » feature end-to-end (backend + frontend). All 5 backend pytest cases PASS (test_keys_caution.py): (1) PropertyIn PUT/GET round-trip persists key_instructions + key_photos, (2) GET /api/kp/{unknown} → 404, (3) upload → register in property.key_photos → public GET /api/kp/{path} without Authorization returns 200 with image/* content-type (before registration path returns 404 as expected), (4) PATCH /reservations/{id}/caution-validated {validated:true} on a MANUAL reservation (platform=Direct, no thread_uid) returns keys_sent=false with reason in {no_messaging,no_channel,no_key_info} and reservation.caution_validated=true persists, (5) validated=false unsets it. Frontend flow (QA admin, mobile 390x844): login via email+password → property-form?id=Alyoné shows the 'Clés' section with testID prop-key-instructions + add-key-photo, entering a code and saving persists (verified after reload, input value round-trips), and the /reservation-form?id=<manual> screen shows the 'Caution validée' card with testID caution-validated-toggle — tapping it displays 'Caution validée. Ajoutez le code/instructions des clés sur la fiche logement pour l'envoi auto.' (no_key_info branch) and caution_validated=true persists in DB. Integrations tab: livret-caution button 'Gérer les cautions' present in the Livret d'accueil section. Test seed data (manual reservation 70ba3448…, temporary key_instructions on Alyoné) fully cleaned up.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_keys_caution.py",
+    "/app/test_reports/pytest/pytest_iter17_keys.xml",
+    "/app/test_reports/it17_prop_keys.png",
+    "/app/test_reports/it17_prop_reloaded.png",
+    "/app/test_reports/it17_caution_on.png",
+    "/app/test_reports/it17_integrations.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:82: property-form.tsx uses truthy fallback (`p.default_cleaning_fee ? String(...) : ''`) — a value of 0 would render as ''. Unchanged from prior iterations, low priority.",
+    "server.py L649-663 `_send_key_instructions`: uses httpx.AsyncClient inside PATCH handler — good; no side-effect for non-Lodgify reservations (guard on source/thread_uid/lodgify_id). ✔",
+    "server.py L2946-2957 `/api/kp/{path}` correctly requires the path to be registered in property.key_photos before serving; unregistered path → 404 (validated). ✔",
+    "reservation-form.tsx L307-332 toggleCautionValidated handles all reason branches (no_key_info / no_messaging / no_channel / already_sent / send_error) with distinct FR user messages. ✔"
+  ],
+  "updated_files": ["/app/backend/tests/test_keys_caution.py"],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "100% (6/6 UI assertions)"},
+  "seed_data_creation": "Temporarily set property.key_instructions='TEST_QA …' on Alyoné then restored to empty. Created and deleted a manual Direct reservation (70ba3448-6680-429a-9b91-1351efb83478) on Alyoné for caution-validated UI test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "To reproduce quickly: (a) backend `EXPO_PUBLIC_BACKEND_URL=<url> pytest backend/tests/test_keys_caution.py -o addopts=''`; (b) frontend login qa.admin@casaneo.test / CasaneoQA2026! → open /property-form?id=<pid> → 'Clés' section (testID prop-key-instructions, add-key-photo, remove-key-photo-{i}); create a Direct reservation via POST /api/reservations then open /reservation-form?id=<rid> → tap caution-validated-toggle → expected French message shown and PATCH persists caution_validated. Integrations tab → livret-caution present.",
+  "rca_of_issue": "N/A — feature verified end-to-end."
+}

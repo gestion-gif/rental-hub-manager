@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
-import { api } from "@/src/api";
+import { api, uploadFile, fileUrl } from "@/src/api";
 import { useAuth } from "@/src/context/AuthContext";
 import { canModify } from "@/src/permissions";
 import { Field, PrimaryButton } from "@/src/components/ui";
@@ -41,12 +43,16 @@ export default function PropertyForm() {
     welcome_book_url: "",
     management_fee_pct: "",
     default_cleaning_fee: "",
-    default_tourist_tax: "",
+    tourist_tax_pct: "",
+    regional_tax_pct: "",
   });
   const [rooms, setRooms] = useState<string[]>([]);
   const [amenities, setAmenities] = useState<string[]>([]);
   const [owners, setOwners] = useState<any[]>([]);
   const [ownerId, setOwnerId] = useState("");
+  const [keyInstructions, setKeyInstructions] = useState("");
+  const [keyPhotos, setKeyPhotos] = useState<string[]>([]);
+  const [uploadingKeys, setUploadingKeys] = useState(false);
 
   useEffect(() => {
     api.get("/owners").then(setOwners).catch(() => {});
@@ -75,15 +81,39 @@ export default function PropertyForm() {
           welcome_book_url: p.welcome_book_url || "",
           management_fee_pct: p.management_fee_pct ? String(p.management_fee_pct) : "",
           default_cleaning_fee: p.default_cleaning_fee ? String(p.default_cleaning_fee) : "",
-          default_tourist_tax: p.default_tourist_tax ? String(p.default_tourist_tax) : "",
+          tourist_tax_pct: p.tourist_tax_pct ? String(p.tourist_tax_pct) : "",
+          regional_tax_pct: p.regional_tax_pct ? String(p.regional_tax_pct) : "",
         });
         setRooms(p.rooms || []);
         setAmenities(p.amenities || []);
         setOwnerId(p.owner_id || "");
+        setKeyInstructions(p.key_instructions || "");
+        setKeyPhotos(p.key_photos || []);
       } catch {}
       setLoading(false);
     })();
   }, []);
+
+  async function pickKeyPhotos() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      quality: 0.6,
+    });
+    if (result.canceled) return;
+    setUploadingKeys(true);
+    for (const asset of result.assets) {
+      try {
+        const name = asset.fileName || `cle_${Date.now()}.jpg`;
+        const path = await uploadFile(asset.uri, name, asset.mimeType || "image/jpeg");
+        setKeyPhotos((p) => [...p, path]);
+      } catch {}
+    }
+    setUploadingKeys(false);
+  }
+
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const toggle = (arr: string[], setArr: (v: string[]) => void, val: string) =>
@@ -111,7 +141,10 @@ export default function PropertyForm() {
       welcome_book_url: form.welcome_book_url.trim(),
       management_fee_pct: parseFloat(form.management_fee_pct) || 0,
       default_cleaning_fee: parseFloat(form.default_cleaning_fee) || 0,
-      default_tourist_tax: parseFloat(form.default_tourist_tax) || 0,
+      tourist_tax_pct: parseFloat(form.tourist_tax_pct) || 0,
+      regional_tax_pct: parseFloat(form.regional_tax_pct) || 0,
+      key_instructions: keyInstructions.trim(),
+      key_photos: keyPhotos,
       rooms,
       amenities,
       seasons: existing.current.seasons || [],
@@ -201,15 +234,19 @@ export default function PropertyForm() {
         <SectionLabel text="Gestion / Conciergerie" />
         <Field label="Frais de gestion (%)" testID="prop-mgmt-fee" value={form.management_fee_pct} onChangeText={(v) => set("management_fee_pct", v)} keyboardType="decimal-pad" placeholder="20" />
         <Text style={styles.helper}>Appliqué sur le montant des nuitées pour le relevé propriétaire.</Text>
+        <Field label="Frais de ménage par défaut (€)" testID="prop-default-cleaning" value={form.default_cleaning_fee} onChangeText={(v) => set("default_cleaning_fee", v)} keyboardType="decimal-pad" placeholder="50" />
+        <Text style={styles.helper}>Pré-rempli automatiquement à la création d'une réservation.</Text>
+
+        <SectionLabel text="Taxe de séjour" />
         <View style={styles.row}>
           <View style={{ flex: 1 }}>
-            <Field label="Frais de ménage par défaut (€)" testID="prop-default-cleaning" value={form.default_cleaning_fee} onChangeText={(v) => set("default_cleaning_fee", v)} keyboardType="decimal-pad" placeholder="50" />
+            <Field label="Taxe de séjour (%)" testID="prop-tourist-tax-pct" value={form.tourist_tax_pct} onChangeText={(v) => set("tourist_tax_pct", v)} keyboardType="decimal-pad" placeholder="5" />
           </View>
           <View style={{ flex: 1 }}>
-            <Field label="Taxe de séjour par défaut (€)" testID="prop-default-tax" value={form.default_tourist_tax} onChangeText={(v) => set("default_tourist_tax", v)} keyboardType="decimal-pad" placeholder="15" />
+            <Field label="Taxe add. régionale (%)" testID="prop-regional-tax-pct" value={form.regional_tax_pct} onChangeText={(v) => set("regional_tax_pct", v)} keyboardType="decimal-pad" placeholder="10" />
           </View>
         </View>
-        <Text style={styles.helper}>Pré-remplis automatiquement à la création d'une réservation.</Text>
+        <Text style={styles.helper}>Calculées en % du prix des nuitées et pré-remplies automatiquement dans la réservation. Modifiable aussi dans Paramètres → Taxe de séjour.</Text>
 
         <SectionLabel text="Descriptif" />
         <Field
@@ -232,6 +269,39 @@ export default function PropertyForm() {
           autoCapitalize="none"
           keyboardType="url"
         />
+
+        <SectionLabel text="Clés" />
+        <Field
+          label="Code boîte à clés / instructions de récupération"
+          testID="prop-key-instructions"
+          value={keyInstructions}
+          onChangeText={setKeyInstructions}
+          placeholder="Ex : Boîte à clés à gauche de la porte, code 4582. Les clés sont à l'intérieur."
+          multiline
+          style={styles.textarea}
+        />
+        <Text style={styles.helper}>
+          Ces informations sont envoyées automatiquement au voyageur dans la messagerie
+          {" "}uniquement lorsque vous validez la caution de sa réservation.
+        </Text>
+        <Text style={styles.keyPhotoLabel}>Photos (boîte à clés, emplacement)</Text>
+        <View style={styles.photoGrid}>
+          {keyPhotos.map((p, i) => (
+            <View key={p} style={styles.photoWrap}>
+              <Image source={{ uri: fileUrl(p) }} style={styles.photo} contentFit="cover" />
+              <Pressable
+                testID={`remove-key-photo-${i}`}
+                onPress={() => setKeyPhotos((ph) => ph.filter((x) => x !== p))}
+                style={styles.photoDel}
+              >
+                <Ionicons name="close-circle" size={20} color="#fff" />
+              </Pressable>
+            </View>
+          ))}
+          <Pressable testID="add-key-photo" onPress={pickKeyPhotos} style={styles.addPhoto} disabled={uploadingKeys}>
+            {uploadingKeys ? <ActivityIndicator color={colors.brandPrimary} /> : <Ionicons name="camera-outline" size={26} color={colors.onSurfaceSecondary} />}
+          </Pressable>
+        </View>
 
         <SectionLabel text="Pièces de l'hébergement" />
         <ChipSelect options={ROOM_OPTIONS} selected={rooms} onToggle={(v: string) => toggle(rooms, setRooms, v)} prefix="room" />
@@ -316,6 +386,12 @@ const styles = StyleSheet.create({
   },
   textarea: { minHeight: 96, textAlignVertical: "top", paddingTop: 12 },
   helper: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: -spacing.sm, marginBottom: spacing.md, lineHeight: 17 },
+  keyPhotoLabel: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary, marginBottom: spacing.sm },
+  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.md },
+  photoWrap: { width: 84, height: 84, borderRadius: radius.md, overflow: "hidden", position: "relative" },
+  photo: { width: "100%", height: "100%" },
+  photoDel: { position: "absolute", top: 2, right: 2, backgroundColor: "rgba(0,0,0,0.4)", borderRadius: 12 },
+  addPhoto: { width: 84, height: 84, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.border, borderStyle: "dashed", alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary },
   chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   selChip: {
     flexDirection: "row",

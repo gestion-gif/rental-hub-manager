@@ -14,6 +14,7 @@ const OPTIONS = [
   { path: "/settings/assistant", icon: "sparkles-outline", title: "Assistant IA", sub: "Brouillons automatiques des réponses" },
   { path: "/settings/quick-replies", icon: "flash-outline", title: "Réponses types", sub: "Modèles réutilisables en un tap" },
   { path: "/settings/commissions", icon: "cash-outline", title: "Commissions plateformes", sub: "Taux par plateforme & revenu net" },
+  { path: "/settings/tourist-tax", icon: "receipt-outline", title: "Taxe de séjour", sub: "Taux taxe de séjour & additionnelle par logement" },
   { path: "/settings/payments", icon: "card-outline", title: "Paiement", sub: "Passerelles & méthodes de paiement" },
   { path: "/settings/api-key", icon: "key-outline", title: "Clé API Lodgify", sub: "Connexion channel manager" },
   { path: "/settings/ical", icon: "calendar-outline", title: "Import / Export iCal", sub: "Synchro calendriers .ics (Airbnb, Booking…)" },

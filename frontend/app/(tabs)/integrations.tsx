@@ -23,6 +23,7 @@ import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL as string;
 const TURNO_URL = "https://turno.com/fr-fr";
 const LIVRET_URL = "https://livretaccueil.com/";
+const LIVRET_CAUTION_URL = "https://livretaccueil.com/account/caution";
 
 export default function Integrations() {
   const insets = useSafeAreaInsets();
@@ -167,6 +168,10 @@ export default function Integrations() {
                 <Pressable testID="livret-open" onPress={() => Linking.openURL(LIVRET_URL)} style={styles.secondaryBtn}>
                   <Ionicons name="open-outline" size={16} color={colors.brandPrimary} />
                   <Text style={styles.secondaryText}>Ouvrir livretaccueil.com</Text>
+                </Pressable>
+                <Pressable testID="livret-caution" onPress={() => Linking.openURL(LIVRET_CAUTION_URL)} style={[styles.secondaryBtn, { marginTop: spacing.sm }]}>
+                  <Ionicons name="shield-checkmark-outline" size={16} color={colors.brandPrimary} />
+                  <Text style={styles.secondaryText}>Gérer les cautions</Text>
                 </Pressable>
 
                 <Text style={[styles.step, { marginTop: spacing.lg }]}>

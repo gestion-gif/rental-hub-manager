@@ -96,7 +96,11 @@ class PropertyIn(BaseModel):
     welcome_book_url: str = ""
     management_fee_pct: float = 0
     default_cleaning_fee: float = 0    # frais de ménage par défaut
-    default_tourist_tax: float = 0     # taxe de séjour par défaut
+    default_tourist_tax: float = 0     # taxe de séjour par défaut (montant fixe, hérité)
+    tourist_tax_pct: float = 0         # taxe de séjour en % du prix des nuitées
+    regional_tax_pct: float = 0        # taxe additionnelle régionale en % du prix des nuitées
+    key_instructions: str = ""         # code boîte à clés / instructions de récupération
+    key_photos: List[str] = []         # chemins des photos (boîte à clés, emplacement)
     lodgify_id: Optional[str] = None
     owner_id: Optional[str] = None
 
@@ -616,6 +620,103 @@ async def set_commission(reservation_id: str, body: dict, user=Depends(get_curre
     item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     compute_display(item, await status_color_map(uid))
     return item
+
+
+class CautionValidatedIn(BaseModel):
+    validated: bool
+    base_url: str = ""
+
+
+def _build_keys_message(reservation: dict, prop: dict, base_url: str) -> str:
+    guest = reservation.get("guest_name") or ""
+    pname = reservation.get("property_name") or prop.get("name") or "votre logement"
+    lines = [f"Bonjour {guest},".strip().rstrip(","),
+             f"Votre caution est validée ✅. Voici les informations pour récupérer les clés de {pname} :"]
+    instr = (prop.get("key_instructions") or "").strip()
+    if instr:
+        lines.append("")
+        lines.append(instr)
+    photos = prop.get("key_photos") or []
+    if photos and base_url:
+        b = base_url.rstrip("/")
+        lines.append("")
+        lines.append("Photos (accès aux clés) :")
+        for p in photos:
+            lines.append(f"{b}/api/kp/{p}")
+    lines.append("")
+    lines.append("Bon séjour !")
+    return "\n".join(lines)
+
+
+async def _send_key_instructions(uid: str, reservation: dict, prop: dict, base_url: str):
+    """Envoie le code/instructions des clés (+ photos) au voyageur via Lodgify.
+    Retourne (sent: bool, reason: str)."""
+    if not (prop.get("key_instructions") or prop.get("key_photos")):
+        return False, "no_key_info"
+    if reservation.get("source") != "lodgify" or not reservation.get("thread_uid") or not reservation.get("lodgify_id"):
+        return False, "no_messaging"
+    settings = await db.channel_settings.find_one({"user_id": uid}, {"_id": 0})
+    if not settings or not settings.get("api_key"):
+        return False, "no_channel"
+    adapter = LodgifyAdapter(settings["api_key"])
+    body = _build_keys_message(reservation, prop, base_url)
+    async with httpx.AsyncClient(timeout=30) as http:
+        await adapter.send_message(http, reservation["lodgify_id"], body, "Récupération des clés")
+    return True, "sent"
+
+
+@api_router.patch("/reservations/{reservation_id}/caution-validated")
+async def set_caution_validated(reservation_id: str, payload: CautionValidatedIn, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    if payload.base_url:
+        await db.channel_settings.update_one({"user_id": uid}, {"$set": {"public_base_url": payload.base_url}}, upsert=True)
+    upd = {"caution_validated": payload.validated}
+    keys_sent = False
+    reason = "not_validated"
+    if payload.validated:
+        prop = await db.properties.find_one({"id": r.get("property_id"), "user_id": uid}, {"_id": 0}) or {}
+        if r.get("keys_sent_at"):
+            reason = "already_sent"
+        else:
+            try:
+                keys_sent, reason = await _send_key_instructions(uid, r, prop, payload.base_url)
+            except HTTPException as e:
+                reason = f"send_error:{e.detail}"
+            except Exception as e:
+                reason = f"send_error:{e}"
+            if keys_sent:
+                upd["keys_sent_at"] = now_utc().isoformat()
+    await db.reservations.update_one({"id": reservation_id, "user_id": uid}, {"$set": upd})
+    item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    return {"caution_validated": payload.validated, "keys_sent": keys_sent,
+            "reason": reason, "reservation": item}
+
+
+class SendKeysIn(BaseModel):
+    base_url: str = ""
+
+
+@api_router.post("/reservations/{reservation_id}/send-keys")
+async def send_keys(reservation_id: str, payload: SendKeysIn, user=Depends(get_current_user)):
+    """Envoi manuel des instructions de clés au voyageur (sans exiger de caution)."""
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    if payload.base_url:
+        await db.channel_settings.update_one({"user_id": uid}, {"$set": {"public_base_url": payload.base_url}}, upsert=True)
+    prop = await db.properties.find_one({"id": r.get("property_id"), "user_id": uid}, {"_id": 0}) or {}
+    keys_sent, reason = await _send_key_instructions(uid, r, prop, payload.base_url)
+    if keys_sent:
+        await db.reservations.update_one(
+            {"id": reservation_id, "user_id": uid},
+            {"$set": {"keys_sent_at": now_utc().isoformat()}})
+    return {"keys_sent": keys_sent, "reason": reason}
+
+
 
 
 @api_router.delete("/reservations/{reservation_id}")
@@ -2730,17 +2831,17 @@ async def delete_quick_reply(qid: str, user=Depends(get_current_user)):
 
 
 async def run_automations_for_user(uid: str):
-    """Send due automatic messages via Lodgify and set the corresponding markers."""
+    """Send due automatic messages via Lodgify and set the corresponding markers.
+    Envoie aussi automatiquement les instructions de clés aux voyageurs Airbnb (sans caution)."""
     settings = await db.channel_settings.find_one({"user_id": uid}, {"_id": 0})
     if not settings or not settings.get("api_key"):
         return 0
     templates = await get_templates(uid)
     active = [t for t in templates if t.get("kind") == "message" and t.get("enabled")]
-    if not active:
-        return 0
     tmap = {t["marker_key"]: t for t in templates}
     adapter = LodgifyAdapter(settings["api_key"])
-    props = await db.properties.find({"user_id": uid}, {"_id": 0, "id": 1, "welcome_book_url": 1}).to_list(2000)
+    base_url = settings.get("public_base_url") or ""
+    props = await db.properties.find({"user_id": uid}, {"_id": 0}).to_list(2000)
     pmap = {p["id"]: p for p in props}
     today = date.today()
     sent = 0
@@ -2772,6 +2873,20 @@ async def run_automations_for_user(uid: str):
                     markers.add(t["marker_key"])
                     changed = True
                     sent += 1
+            # Airbnb : caution non requise → envoi auto des clés 1 jour avant l'arrivée
+            plat = (r.get("platform") or "").lower()
+            if "airbnb" in plat and not r.get("keys_sent_at") and today >= ci - timedelta(days=1):
+                prop = pmap.get(r.get("property_id")) or {}
+                if prop.get("key_instructions") or prop.get("key_photos"):
+                    body = _build_keys_message(r, prop, base_url)
+                    try:
+                        await adapter.send_message(http, r["lodgify_id"], body, "Récupération des clés")
+                        await db.reservations.update_one(
+                            {"user_id": uid, "id": r["id"]},
+                            {"$set": {"keys_sent_at": now_utc().isoformat()}})
+                        sent += 1
+                    except Exception:
+                        pass
             if changed:
                 await db.reservations.update_one(
                     {"user_id": uid, "id": r["id"]},
@@ -2867,6 +2982,21 @@ async def get_file(path: str, token: Optional[str] = None, authorization: Option
     except Exception:
         raise HTTPException(status_code=404, detail="Fichier introuvable")
     return Response(content=content, media_type=ct)
+
+
+@api_router.get("/kp/{path:path}")
+async def get_key_photo(path: str):
+    """Accès public (lien non devinable) aux photos de clés envoyées aux voyageurs.
+    Ne sert que les fichiers réellement enregistrés comme photos de clés d'un logement."""
+    prop = await db.properties.find_one({"key_photos": path}, {"_id": 0, "id": 1})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
+    try:
+        content, ct = await run_in_threadpool(_get_object, path)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
+    return Response(content=content, media_type=ct)
+
 
 
 # ---------------------------------------------------------------------------

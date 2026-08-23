@@ -49,6 +49,13 @@ function computeNightsTotal(prop: any, ci: string, co: string): number {
   return Math.round(total * 100) / 100;
 }
 
+function computeTouristTax(prop: any, nightsTotal: number): number {
+  if (!prop) return 0;
+  const pct = (parseFloat(prop.tourist_tax_pct) || 0) + (parseFloat(prop.regional_tax_pct) || 0);
+  if (!pct) return 0;
+  return Math.round(nightsTotal * pct) / 100;
+}
+
 export default function ReservationForm() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -66,6 +73,9 @@ export default function ReservationForm() {
   const [saving, setSaving] = useState(false);
   const [paying, setPaying] = useState(false);
   const [payMsg, setPayMsg] = useState<string | null>(null);
+  const [cautionValidated, setCautionValidated] = useState(false);
+  const [cvBusy, setCvBusy] = useState(false);
+  const [cvMsg, setCvMsg] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     property_id: "",
@@ -94,6 +104,7 @@ export default function ReservationForm() {
           const r = list.find((x: any) => x.id === id);
           if (r) {
             setDetail(r);
+            setCautionValidated(!!r.caution_validated);
             const fn = r.guest_first_name || (r.guest_name || "").split(" ")[0] || "";
             const ln = r.guest_last_name || (r.guest_name || "").split(" ").slice(1).join(" ") || "";
             const fin = r.finance || {};
@@ -120,6 +131,7 @@ export default function ReservationForm() {
           const co = params.check_out || "";
           const selProp = pr.find((p: any) => p.id === pid);
           const preNights = ci && co ? computeNightsTotal(selProp, ci, co) : 0;
+          const preTax = computeTouristTax(selProp, preNights);
           setForm((f) => ({
             ...f,
             property_id: pid,
@@ -127,7 +139,7 @@ export default function ReservationForm() {
             check_out: co || f.check_out,
             nights_total: preNights ? String(preNights) : f.nights_total,
             cleaning_fee: selProp?.default_cleaning_fee ? String(selProp.default_cleaning_fee) : f.cleaning_fee,
-            tourist_tax: selProp?.default_tourist_tax ? String(selProp.default_tourist_tax) : f.tourist_tax,
+            tourist_tax: preTax ? String(preTax) : f.tourist_tax,
           }));
         }
       } catch {}
@@ -137,13 +149,16 @@ export default function ReservationForm() {
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  // Recalcule le prix des nuitées quand le logement ou les dates changent (création)
+  // Recalcule le prix des nuitées + la taxe de séjour quand le logement ou les dates changent (création)
   function recalcNights(next: any) {
     if (editing) return;
     const p = props.find((x) => x.id === next.property_id);
     if (p && next.check_in && next.check_out) {
       const v = computeNightsTotal(p, next.check_in, next.check_out);
-      if (v) setForm((f) => ({ ...f, nights_total: String(v) }));
+      if (v) {
+        const tax = computeTouristTax(p, v);
+        setForm((f) => ({ ...f, nights_total: String(v), ...(tax ? { tourist_tax: String(tax) } : {}) }));
+      }
     }
   }
   const setDate = (k: string, v: string) => {
@@ -166,7 +181,6 @@ export default function ReservationForm() {
         setForm((f) => ({
           ...f,
           cleaning_fee: p.default_cleaning_fee ? String(p.default_cleaning_fee) : f.cleaning_fee,
-          tourist_tax: p.default_tourist_tax ? String(p.default_tourist_tax) : f.tourist_tax,
         }));
       }
     }
@@ -300,6 +314,57 @@ export default function ReservationForm() {
     }
   }
 
+  async function toggleCautionValidated(next: boolean) {
+    if (cvBusy) return;
+    setCvBusy(true);
+    setCvMsg(null);
+    try {
+      const base = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+      const res = await api.patch(`/reservations/${id}/caution-validated`, { validated: next, base_url: base });
+      setCautionValidated(res.caution_validated);
+      if (res.keys_sent) {
+        setCvMsg("Clés envoyées au voyageur ✓");
+      } else if (next) {
+        const reason = res.reason || "";
+        if (reason === "already_sent") setCvMsg("Caution validée. Clés déjà envoyées précédemment.");
+        else if (reason === "no_key_info") setCvMsg("Caution validée. Ajoutez le code/instructions des clés sur la fiche logement pour l'envoi auto.");
+        else if (reason === "no_messaging" || reason === "no_channel") setCvMsg("Caution validée. Envoi auto indisponible (réservation hors Lodgify).");
+        else if (reason.startsWith("send_error")) setCvMsg("Caution validée, mais l'envoi a échoué : " + reason.replace("send_error:", ""));
+        else setCvMsg("Caution validée.");
+      } else {
+        setCvMsg(null);
+      }
+    } catch (e: any) {
+      setCvMsg(e?.message || "Erreur");
+    } finally {
+      setCvBusy(false);
+    }
+  }
+
+  async function sendKeysNow() {
+    if (cvBusy) return;
+    setCvBusy(true);
+    setCvMsg(null);
+    try {
+      const base = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+      const res = await api.post(`/reservations/${id}/send-keys`, { base_url: base });
+      if (res.keys_sent) {
+        setCvMsg("Instructions des clés envoyées au voyageur ✓");
+      } else {
+        const reason = res.reason || "";
+        if (reason === "no_key_info") setCvMsg("Ajoutez le code/instructions des clés sur la fiche logement.");
+        else if (reason === "no_messaging" || reason === "no_channel") setCvMsg("Envoi indisponible (réservation hors Lodgify).");
+        else setCvMsg("Envoi impossible.");
+      }
+    } catch (e: any) {
+      setCvMsg(e?.message || "Erreur");
+    } finally {
+      setCvBusy(false);
+    }
+  }
+
+
+
   useEffect(() => {
     if (!editing) return;
     (async () => {
@@ -345,6 +410,55 @@ export default function ReservationForm() {
           showsVerticalScrollIndicator={false}
         >
           {showPrices && detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} onAddPayment={addPayment} onDeletePayment={deletePayment} onSetCommission={saveCommission} onCheckout={startCheckout} paying={paying} payMsg={payMsg} />}
+          {editing && canModify(user) && (
+            form.platform === "Airbnb" ? (
+              <View style={styles.cvCard}>
+                <View style={styles.cvHead}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cvTitle}>Clés · Airbnb</Text>
+                    <Text style={styles.cvSub}>Airbnb — caution non requise. Les instructions des clés sont envoyées automatiquement au voyageur 1 jour avant l'arrivée.</Text>
+                  </View>
+                  <Ionicons name="key-outline" size={22} color={colors.brandPrimary} />
+                </View>
+                <Pressable
+                  testID="send-keys-now"
+                  onPress={sendKeysNow}
+                  disabled={cvBusy}
+                  style={[styles.sendKeysBtn, cvBusy && { opacity: 0.6 }]}
+                >
+                  {cvBusy ? <ActivityIndicator color={colors.onBrandPrimary} /> : (
+                    <>
+                      <Ionicons name="paper-plane-outline" size={16} color={colors.onBrandPrimary} />
+                      <Text style={styles.sendKeysText}>Envoyer les instructions des clés maintenant</Text>
+                    </>
+                  )}
+                </Pressable>
+                {!!cvMsg && <Text style={styles.cvMsg}>{cvMsg}</Text>}
+              </View>
+            ) : (
+              <View style={styles.cvCard}>
+                <View style={styles.cvHead}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cvTitle}>Caution validée</Text>
+                    <Text style={styles.cvSub}>À activer une fois la caution reçue (via livretaccueil.com). Envoie automatiquement le code et les instructions des clés au voyageur.</Text>
+                  </View>
+                  <Pressable
+                    testID="caution-validated-toggle"
+                    onPress={() => toggleCautionValidated(!cautionValidated)}
+                    disabled={cvBusy}
+                    style={[styles.cvSwitch, cautionValidated && styles.cvSwitchOn, cvBusy && { opacity: 0.6 }]}
+                  >
+                    {cvBusy ? (
+                      <ActivityIndicator size="small" color={cautionValidated ? colors.onBrandPrimary : colors.onSurfaceSecondary} />
+                    ) : (
+                      <View style={[styles.cvKnob, cautionValidated && styles.cvKnobOn]} />
+                    )}
+                  </Pressable>
+                </View>
+                {!!cvMsg && <Text style={styles.cvMsg}>{cvMsg}</Text>}
+              </View>
+            )
+          )}
           <Text style={styles.label}>Logement</Text>
           <Picker
             testID="res-prop-picker"
@@ -407,6 +521,14 @@ export default function ReservationForm() {
                 </View>
               </View>
               <Field label="Taxe de séjour (€)" testID="tourist-tax" value={form.tourist_tax} onChangeText={(v) => set("tourist_tax", v)} keyboardType="decimal-pad" placeholder="0" />
+              {(() => {
+                const sp = props.find((p) => p.id === form.property_id);
+                const tp = parseFloat(sp?.tourist_tax_pct) || 0;
+                const rp = parseFloat(sp?.regional_tax_pct) || 0;
+                if (!sp || (!tp && !rp)) return null;
+                const parts = [tp ? `taxe de séjour ${tp}%` : "", rp ? `régionale ${rp}%` : ""].filter(Boolean).join(" + ");
+                return <Text style={styles.priceHint}>Calculée automatiquement ({parts} du prix des nuitées) — modifiable.</Text>;
+              })()}
               {!editing && !!form.nights_total && (
                 <Text style={styles.priceHint}>Prix des nuitées pré-rempli d'après les tarifs par saison du logement — modifiable.</Text>
               )}
@@ -682,6 +804,18 @@ function ChipRow({ items, value, onSelect, prefix }: any) {
 }
 
 const styles = StyleSheet.create({
+  cvCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
+  cvHead: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  cvTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
+  cvSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 3, lineHeight: 17 },
+  cvSwitch: { width: 52, height: 30, borderRadius: 15, backgroundColor: colors.surfaceSecondary, padding: 3, justifyContent: "center", alignItems: "flex-start" },
+  cvSwitchOn: { backgroundColor: colors.brandPrimary, alignItems: "flex-end" },
+  cvKnob: { width: 24, height: 24, borderRadius: 12, backgroundColor: "#fff", shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 2, elevation: 2 },
+  cvKnobOn: { backgroundColor: "#fff" },
+  cvMsg: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.brandPrimary, marginTop: spacing.md },
+  sendKeysBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.brandPrimary, borderRadius: radius.md, paddingVertical: 12, marginTop: spacing.md },
+  sendKeysText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onBrandPrimary },
+
   container: { flex: 1, backgroundColor: colors.surface },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   header: {
