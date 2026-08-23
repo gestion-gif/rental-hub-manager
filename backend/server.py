@@ -8,6 +8,7 @@ import json
 import asyncio
 import logging
 import uuid
+from html import escape
 import calendar as pycalendar
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -750,7 +751,8 @@ async def send_deposit_link(reservation_id: str, user=Depends(get_current_user))
 
 @api_router.get("/deposits/pending")
 async def deposits_pending(user=Depends(get_current_user)):
-    """Arrivées à venir (hors Airbnb) dont le lien de caution n'a pas encore été envoyé."""
+    """Cautions à suivre : arrivées à venir (hors Airbnb) dont la caution n'est pas validée,
+    pour un logement ayant un lien de caution. Signale les arrivées J-1 (urgent)."""
     uid = user["user_id"]
     props = await db.properties.find(
         {"user_id": uid, "deposit_link": {"$nin": [None, ""]}, **_prop_scope(user)},
@@ -759,24 +761,35 @@ async def deposits_pending(user=Depends(get_current_user)):
         return []
     prop_ids = [p["id"] for p in props]
     pname = {p["id"]: p["name"] for p in props}
-    today = date.today().isoformat()
+    today = date.today()
     q = {
         "user_id": uid,
         "property_id": {"$in": prop_ids},
         "status": {"$nin": ["annulee"]},
-        "check_in": {"$gte": today},
-        "deposit_link_sent_at": {"$in": [None, ""]},
+        "check_in": {"$gte": today.isoformat()},
+        "caution_validated": {"$ne": True},
         "platform": {"$ne": "Airbnb"},
     }
     res = await db.reservations.find(
-        q, {"_id": 0, "id": 1, "guest_name": 1, "property_id": 1, "check_in": 1, "platform": 1}
+        q, {"_id": 0, "id": 1, "guest_name": 1, "property_id": 1, "check_in": 1, "platform": 1,
+            "deposit_link_sent_at": 1, "deposit_reminder_sent_at": 1}
     ).sort("check_in", 1).to_list(500)
-    return [
-        {"reservation_id": r["id"], "guest_name": r.get("guest_name", ""),
-         "property_name": pname.get(r["property_id"], ""), "check_in": r.get("check_in"),
-         "platform": r.get("platform", "")}
-        for r in res
-    ]
+    out = []
+    for r in res:
+        try:
+            days = (date.fromisoformat(r["check_in"]) - today).days
+        except Exception:
+            days = None
+        out.append({
+            "reservation_id": r["id"], "guest_name": r.get("guest_name", ""),
+            "property_name": pname.get(r["property_id"], ""), "check_in": r.get("check_in"),
+            "platform": r.get("platform", ""),
+            "sent": bool(r.get("deposit_link_sent_at")),
+            "reminder": bool(r.get("deposit_reminder_sent_at")),
+            "days_until": days,
+            "urgent": days is not None and days <= 1,
+        })
+    return out
 
 
 
@@ -1727,6 +1740,7 @@ async def channel_status(user=Depends(get_current_user)):
         "connected_at": doc.get("connected_at"),
         "last_sync": doc.get("last_sync"),
         "sync_interval_min": int(doc.get("sync_interval_min") or 30),
+        "deposit_reminder_days": int(doc.get("deposit_reminder_days") or 2),
     }
 
 
@@ -1741,6 +1755,19 @@ async def set_sync_interval(payload: SyncIntervalIn, user=Depends(get_current_us
     await db.channel_settings.update_one(
         {"user_id": user["user_id"]}, {"$set": {"sync_interval_min": minutes}})
     return {"sync_interval_min": minutes}
+
+
+class ReminderDaysIn(BaseModel):
+    days: int
+
+
+@api_router.patch("/channel/reminder-days")
+async def set_reminder_days(payload: ReminderDaysIn, user=Depends(get_current_user)):
+    # Nombre de jours avant l'arrivée pour la relance caution (0..14)
+    days = max(0, min(14, int(payload.days if payload.days is not None else 2)))
+    await db.channel_settings.update_one(
+        {"user_id": user["user_id"]}, {"$set": {"deposit_reminder_days": days}})
+    return {"deposit_reminder_days": days}
 
 
 @api_router.post("/channel/disconnect")
@@ -2821,6 +2848,89 @@ async def set_statement_commission(payload: CommissionOverrideIn, user=Depends(g
     return {"commission_override": val}
 
 
+def _statement_html(month: str, s: dict) -> str:
+    t = s["totals"]
+    m = lambda n: f"{(n or 0):.2f} €"  # noqa: E731
+    try:
+        month_lbl = f"{month.split('-')[1]}/{month.split('-')[0]}"
+    except Exception:
+        month_lbl = month
+    rows = "".join(
+        f"<tr><td style='padding:6px 0;color:#555'>{escape(str(l.get('guest_name') or '—'))} · "
+        f"{escape(str(l.get('check_in') or ''))}→{escape(str(l.get('check_out') or ''))} "
+        f"({escape(str(l.get('platform') or ''))})</td>"
+        f"<td style='padding:6px 0;text-align:right;font-weight:600'>{m(l.get('nights'))}</td></tr>"
+        for l in s.get("lines", [])
+    )
+    def line(lbl, val, bold=False, color="#111"):
+        w = "700" if bold else "400"
+        return (f"<tr><td style='padding:5px 0;color:#555'>{escape(lbl)}</td>"
+                f"<td style='padding:5px 0;text-align:right;font-weight:{w};color:{color}'>{val}</td></tr>")
+    reg = ""
+    if (t.get("tax_regional") or 0) > 0:
+        reg = line("Taxe add. régionale (à reverser)", m(t.get("tax_regional")))
+    res_header = ("<tr><td colspan=2 style='padding-top:8px;font-weight:700;color:#2A6F9E'>Réservations</td></tr>" + rows) if rows else ""
+    prop_title = escape(str(s.get("property_name") or ""))
+    gestion_lbl = "Frais de gestion (" + str(s.get("management_fee_pct", 0)) + "%)"
+    tax_sej = m(t.get("tax_sejour") if t.get("tax_sejour") is not None else t.get("tax"))
+    return (
+        f"<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto'>"
+        f"<h2 style='color:#2A6F9E'>Relevé {escape(month_lbl)} — {prop_title}</h2>"
+        f"<p style='color:#777'>{s.get('reservations_count',0)} réservation(s) · Frais de gestion {s.get('management_fee_pct',0)}%</p>"
+        f"<table style='width:100%;border-collapse:collapse;font-size:14px'>"
+        f"{res_header}"
+        f"<tr><td colspan=2 style='border-top:1px solid #eee;padding-top:8px'></td></tr>"
+        f"{line('Nuitées (base voyageurs)', m(t.get('nights')))}"
+        f"{line('Frais de ménage (conciergerie)', m(t.get('cleaning')))}"
+        f"{line('Taxe de séjour (à reverser)', tax_sej)}"
+        f"{reg}"
+        f"{line('Commissions OTA', '-' + m(t.get('commission')))}"
+        f"{line(gestion_lbl, m(t.get('management_fee')))}"
+        f"<tr><td colspan=2 style='border-top:2px solid #2A6F9E;padding-top:8px'></td></tr>"
+        f"{line('Revenu proprietaire', m(t.get('owner_revenue')), bold=True, color='#2A6F9E')}"
+        f"{line('Revenu conciergerie', m(t.get('concierge_revenue')))}"
+        f"</table>"
+        f"<p style='color:#aaa;font-size:12px;margin-top:24px'>Envoyé via Casanéo</p>"
+        f"</div>"
+    )
+
+
+class StatementEmailIn(BaseModel):
+    month: str
+    property_id: str
+
+
+@api_router.post("/owner-statement/email")
+async def email_owner_statement(payload: StatementEmailIn, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    prop = await db.properties.find_one({"id": payload.property_id, "user_id": uid}, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Logement introuvable")
+    owner_email = ""
+    owner_name = prop.get("owner") or ""
+    if prop.get("owner_id"):
+        owner = await db.owners.find_one({"id": prop["owner_id"], "user_id": uid}, {"_id": 0})
+        if owner:
+            owner_email = (owner.get("email") or "").strip()
+            owner_name = owner.get("name") or owner_name
+    if not owner_email:
+        return {"sent": False, "reason": "no_owner_email"}
+    data = await owner_statement(month=payload.month, property_id=payload.property_id, user=user)
+    stmts = data.get("statements") or []
+    if not stmts:
+        return {"sent": False, "reason": "no_data"}
+    s = stmts[0]
+    try:
+        y, mo = payload.month.split("-")
+        subject = f"Relevé {mo}/{y} — {s.get('property_name')}"
+    except Exception:
+        subject = f"Relevé {payload.month} — {s.get('property_name')}"
+    html = _statement_html(payload.month, s)
+    await send_email(to=owner_email, subject=subject, html=html)
+    return {"sent": True, "to": owner_email, "owner_name": owner_name}
+
+
+
 # ---------------------------------------------------------------------------
 # Message templates + markers (couleurs automatiques + envois programmés)
 # ---------------------------------------------------------------------------
@@ -2976,6 +3086,7 @@ async def run_automations_for_user(uid: str):
     tmap = {t["marker_key"]: t for t in templates}
     adapter = LodgifyAdapter(settings["api_key"])
     base_url = settings.get("public_base_url") or ""
+    reminder_days = int(settings.get("deposit_reminder_days") or 2)
     props = await db.properties.find({"user_id": uid}, {"_id": 0}).to_list(2000)
     pmap = {p["id"]: p for p in props}
     today = date.today()
@@ -3025,7 +3136,7 @@ async def run_automations_for_user(uid: str):
                         pass
             # Relance caution à J-2 : hors Airbnb, caution non validée, lien de caution défini
             if ("airbnb" not in plat and not r.get("caution_validated")
-                    and not r.get("deposit_reminder_sent_at") and today >= ci - timedelta(days=2)):
+                    and not r.get("deposit_reminder_sent_at") and today >= ci - timedelta(days=reminder_days)):
                 prop = pmap.get(r.get("property_id")) or {}
                 link = (prop.get("deposit_link") or "").strip()
                 if link:

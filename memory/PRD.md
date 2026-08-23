@@ -289,3 +289,10 @@
 - **Historique caution** : la carte caution de la réservation (non-Airbnb) affiche « Lien envoyé le … » (`deposit_link_sent_at`) et « Relance envoyée le … » (`deposit_reminder_sent_at`). send-deposit-link met à jour la date localement.
 - **Détail taxe (relevé)** : owner_statement renvoie `totals.tax_sejour` et `totals.tax_regional` (répartition proportionnelle aux taux du logement tourist_tax_pct/regional_tax_pct ; si taux 0 → tout en séjour). UI relevé: 2 lignes « Taxe de séjour (à reverser) » + « Taxe add. régionale (à reverser) » (affichée si >0). Partage texte mis à jour. Vérifié curl: 66.98 → 22.33 (5%) + 44.65 (10%).
 - Données réelles: logements Beldi/Blue Haven ont déjà deposit_link + instructions clés réels (ne pas supprimer).
+
+## Alerte caution J-1 + Relevé PDF + Email propriétaire + Délai relance réglable (2026-06)
+- **Alerte caution** : /deposits/pending renvoie désormais TOUTES les arrivées à venir (hors Airbnb) non validées d'un logement avec deposit_link, + champs sent/reminder/days_until/urgent (urgent = J-1/J0). Carte accueil « Cautions à suivre » : bordure/icône ROUGE si une arrivée est urgente, badge « J-1 »/« Aujourd'hui » rouge par ligne, statut (Non envoyé/Lien envoyé/Relancé), bouton Envoyer/Renvoyer.
+- **Relevé PDF** : bouton (icône doc) par relevé → expo-print printToFileAsync(HTML) + expo-sharing. NATIF uniquement (ne marche pas en preview web/Expo Go web ; OK sur build device).
+- **Envoi propriétaire** : bouton (icône mail) → POST /api/owner-statement/email {month, property_id} → email HTML du relevé au propriétaire (owners.email via property.owner_id) via Resend. Réponses: sent / no_owner_email / no_data. Vérifié no_owner_email (aucun envoi si email absent).
+- **Délai relance réglable** : channel_settings.deposit_reminder_days (défaut 2, 0..14). PATCH /api/channel/reminder-days ; GET /channel/status le renvoie. Chips J-1/J-2/J-3/J-5/J-7 dans Paramètres → Clé API Lodgify. La boucle de relance utilise cette valeur.
+- Libs ajoutées : expo-print, expo-sharing. Vérifié curl (reminder-days, deposits/pending shape, email no_owner_email) + UI (carte accueil, relevé boutons, 2 lignes taxe).

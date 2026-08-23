@@ -35,6 +35,16 @@ export default function ApiKeyScreen() {
     setSavingInt(false);
   }
 
+  async function changeReminderDays(days: number) {
+    if (savingInt) return;
+    setSavingInt(true);
+    try {
+      const r = await api.patch("/channel/reminder-days", { days });
+      setStatus((s: any) => ({ ...s, deposit_reminder_days: r.deposit_reminder_days }));
+    } catch {}
+    setSavingInt(false);
+  }
+
   async function connect() {
     if (!apiKey.trim()) return;
     setBusy("connect"); setMsg(null);
@@ -93,6 +103,25 @@ export default function ApiKeyScreen() {
                       style={[styles.chip, active && styles.chipActive]}
                     >
                       <Text style={[styles.chipText, active && styles.chipTextActive]}>{lbl}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={{ height: spacing.md }} />
+              <Text style={styles.intervalLabel}>Relance caution</Text>
+              <Text style={styles.intervalHint}>Nombre de jours avant l'arrivée pour renvoyer automatiquement le lien de caution (si non validée).</Text>
+              <View style={styles.chipsRow}>
+                {[1, 2, 3, 5, 7].map((d) => {
+                  const active = Number(status.deposit_reminder_days ?? 2) === d;
+                  return (
+                    <Pressable
+                      key={d}
+                      testID={`reminder-days-${d}`}
+                      onPress={() => changeReminderDays(d)}
+                      disabled={savingInt}
+                      style={[styles.chip, active && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, active && styles.chipTextActive]}>J-{d}</Text>
                     </Pressable>
                   );
                 })}

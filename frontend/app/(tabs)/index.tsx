@@ -212,15 +212,15 @@ export default function Dashboard() {
             )}
 
             {canModify(user) && deposits.length > 0 && (
-              <View style={styles.cautionCard}>
+              <View style={[styles.cautionCard, deposits.some((d) => d.urgent) && styles.cautionCardUrgent]}>
                 <Pressable testID="caution-toggle" onPress={() => setCautionOpen((o) => !o)} style={styles.cautionHeader}>
                   <View style={styles.cautionHeadLeft}>
-                    <View style={styles.cautionIcon}>
+                    <View style={[styles.cautionIcon, deposits.some((d) => d.urgent) && { backgroundColor: colors.error }]}>
                       <Ionicons name="shield-checkmark" size={18} color={colors.onBrandPrimary} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.cautionTitle}>Cautions à envoyer</Text>
-                      <Text style={styles.cautionSub}>{deposits.length} arrivée{deposits.length > 1 ? "s" : ""} sans lien de caution envoyé</Text>
+                      <Text style={styles.cautionTitle}>Cautions à suivre</Text>
+                      <Text style={styles.cautionSub}>{deposits.length} arrivée{deposits.length > 1 ? "s" : ""} sans caution validée</Text>
                     </View>
                   </View>
                   <Ionicons name={cautionOpen ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurfaceSecondary} />
@@ -228,14 +228,23 @@ export default function Dashboard() {
                 {cautionOpen && deposits.map((d) => (
                   <View key={d.reservation_id} style={styles.depRow} testID={`deposit-row-${d.reservation_id}`}>
                     <Pressable style={{ flex: 1 }} onPress={() => router.push(`/reservation-form?id=${d.reservation_id}`)}>
-                      <Text style={styles.depGuest}>{guestLabel(user, d.guest_name)}</Text>
-                      <Text style={styles.depMeta}>{d.property_name} · {dayjs(d.check_in).format("DD MMM")} · {d.platform || "Direct"}</Text>
+                      <View style={styles.depGuestRow}>
+                        <Text style={styles.depGuest}>{guestLabel(user, d.guest_name)}</Text>
+                        {d.urgent && (
+                          <View style={styles.urgentBadge}>
+                            <Text style={styles.urgentBadgeText}>{d.days_until <= 0 ? "Aujourd'hui" : "J-1"}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.depMeta, d.urgent && { color: colors.error, fontFamily: font.semibold }]}>
+                        {d.property_name} · {dayjs(d.check_in).format("DD MMM")} · {d.reminder ? "Relancé" : d.sent ? "Lien envoyé" : "Non envoyé"}
+                      </Text>
                     </Pressable>
                     <Pressable testID={`send-deposit-${d.reservation_id}`} onPress={() => sendDeposit(d.reservation_id)} disabled={depBusy === d.reservation_id} style={[styles.depSendBtn, depBusy === d.reservation_id && { opacity: 0.6 }]}>
                       {depBusy === d.reservation_id ? <ActivityIndicator size="small" color={colors.onBrandPrimary} /> : (
                         <>
                           <Ionicons name="paper-plane" size={13} color={colors.onBrandPrimary} />
-                          <Text style={styles.depSendText}>Envoyer</Text>
+                          <Text style={styles.depSendText}>{d.sent ? "Renvoyer" : "Envoyer"}</Text>
                         </>
                       )}
                     </Pressable>
@@ -517,6 +526,10 @@ const styles = StyleSheet.create({
   draftBannerTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
   draftBannerSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
   cautionCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.warning + "55", borderRadius: radius.lg, padding: spacing.md, marginTop: spacing.lg },
+  cautionCardUrgent: { borderColor: colors.error, backgroundColor: colors.error + "0A" },
+  depGuestRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  urgentBadge: { backgroundColor: colors.error, borderRadius: radius.pill, paddingHorizontal: 7, paddingVertical: 1 },
+  urgentBadgeText: { fontFamily: font.bold, fontSize: 10, color: "#fff" },
   cautionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   cautionHeadLeft: { flexDirection: "row", alignItems: "center", gap: spacing.md, flex: 1 },
   cautionIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.warning, alignItems: "center", justifyContent: "center" },

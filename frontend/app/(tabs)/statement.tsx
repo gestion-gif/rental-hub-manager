@@ -1,9 +1,11 @@
 import React, { useCallback, useState } from "react";
 import {
   View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator,
-  Modal, TextInput, Share, Platform,
+  Modal, TextInput, Share, Platform, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import dayjs from "dayjs";
@@ -40,6 +42,8 @@ export default function Statement() {
   const [commModal, setCommModal] = useState<any>(null);
   const [commInput, setCommInput] = useState("");
   const [savingComm, setSavingComm] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState("");
+  const [emailBusy, setEmailBusy] = useState("");
 
   const month = anchor.format("YYYY-MM");
 
@@ -90,6 +94,15 @@ export default function Statement() {
     setSavingFee(false);
   }
 
+  function shareStatement(s: any) {
+    const lines = statementLines(s);
+    if (Platform.OS === "web") {
+      try { (navigator as any).clipboard.writeText(lines); } catch {}
+    } else {
+      Share.share({ message: lines });
+    }
+  }
+
   async function saveComm(reset = false) {
     if (!commModal || savingComm) return;
     setSavingComm(true);
@@ -105,9 +118,67 @@ export default function Statement() {
     setSavingComm(false);
   }
 
-  function shareStatement(s: any) {
+  function statementHtml(s: any): string {
     const t = s.totals;
-    const lines = [
+    const rows = (s.lines || []).map((l: any) =>
+      `<tr><td style="padding:6px 0;color:#555">${(l.guest_name || "—")} · ${dayjs(l.check_in).format("DD/MM")}→${dayjs(l.check_out).format("DD/MM")} (${l.platform || ""})</td><td style="padding:6px 0;text-align:right;font-weight:600">${money(l.nights)}</td></tr>`
+    ).join("");
+    const row = (lbl: string, val: string, bold = false, color = "#111") =>
+      `<tr><td style="padding:5px 0;color:#555">${lbl}</td><td style="padding:5px 0;text-align:right;font-weight:${bold ? 700 : 400};color:${color}">${val}</td></tr>`;
+    const reg = (t.tax_regional || 0) > 0 ? row("Taxe add. régionale (à reverser)", money(t.tax_regional)) : "";
+    return `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:16px">
+      <h2 style="color:#2A6F9E">Relevé ${dayjs(month).format("MMMM YYYY")} — ${s.property_name}</h2>
+      <p style="color:#777">${s.reservations_count} réservation(s) · Frais de gestion ${s.management_fee_pct}%${s.owner ? " · Propriétaire : " + s.owner : ""}</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        ${rows ? `<tr><td colspan=2 style="padding-top:8px;font-weight:700;color:#2A6F9E">Réservations</td></tr>${rows}` : ""}
+        <tr><td colspan=2 style="border-top:1px solid #eee;padding-top:8px"></td></tr>
+        ${row("Nuitées (base voyageurs)", money(t.nights))}
+        ${row("Frais de ménage (conciergerie)", money(t.cleaning))}
+        ${row("Taxe de séjour (à reverser)", money(t.tax_sejour != null ? t.tax_sejour : t.tax))}
+        ${reg}
+        ${row("Commissions OTA", "-" + money(t.commission))}
+        ${row(`Frais de gestion (${s.management_fee_pct}%)`, money(t.management_fee))}
+        <tr><td colspan=2 style="border-top:2px solid #2A6F9E;padding-top:8px"></td></tr>
+        ${row("Revenu propriétaire", money(t.owner_revenue), true, "#2A6F9E")}
+        ${row("Revenu conciergerie", money(t.concierge_revenue))}
+      </table>
+      <p style="color:#aaa;font-size:12px;margin-top:24px">Édité via Casanéo</p>
+    </div>`;
+  }
+
+  async function generatePdf(s: any) {
+    if (pdfBusy) return;
+    setPdfBusy(s.property_id);
+    try {
+      const { uri } = await Print.printToFileAsync({ html: statementHtml(s) });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Relevé propriétaire" });
+      }
+    } catch {}
+    setPdfBusy("");
+  }
+
+  async function emailOwner(s: any) {
+    if (emailBusy) return;
+    setEmailBusy(s.property_id);
+    try {
+      const res = await api.post("/owner-statement/email", { month, property_id: s.property_id });
+      if (res.sent) {
+        Alert.alert("Relevé envoyé", `Le relevé a été envoyé à ${res.owner_name || "le propriétaire"} (${res.to}).`);
+      } else if (res.reason === "no_owner_email") {
+        Alert.alert("Email manquant", "Ajoutez l'email du propriétaire dans sa fiche pour lui envoyer le relevé.");
+      } else {
+        Alert.alert("Envoi impossible", "Aucune donnée à envoyer pour ce mois.");
+      }
+    } catch {
+      Alert.alert("Erreur", "Envoi impossible.");
+    }
+    setEmailBusy("");
+  }
+
+  function statementLines(s: any) {
+    const t = s.totals;
+    return [
       `Relevé ${dayjs(month).format("MMMM YYYY")} — ${s.property_name}`,
       s.owner ? `Propriétaire : ${s.owner}` : "",
       ``,
@@ -124,11 +195,6 @@ export default function Statement() {
       `➡ Revenu propriétaire : ${money(t.owner_revenue)}`,
       `➡ Revenu conciergerie : ${money(t.concierge_revenue)}`,
     ].filter(Boolean).join("\n");
-    if (Platform.OS === "web") {
-      try { (navigator as any).clipboard.writeText(lines); } catch {}
-    } else {
-      Share.share({ message: lines });
-    }
   }
 
   const grand = data.reduce(
@@ -194,9 +260,19 @@ export default function Statement() {
                       )}
                     </View>
                   </View>
-                  <Pressable testID={`stmt-share-${s.property_id}`} onPress={() => shareStatement(s)} style={styles.shareBtn}>
-                    <Ionicons name={Platform.OS === "web" ? "copy-outline" : "share-outline"} size={18} color={colors.brandPrimary} />
-                  </Pressable>
+                  <View style={styles.cardActions}>
+                    {editable && (
+                      <Pressable testID={`stmt-email-${s.property_id}`} onPress={() => emailOwner(s)} disabled={emailBusy === s.property_id} style={styles.shareBtn}>
+                        {emailBusy === s.property_id ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : <Ionicons name="mail-outline" size={18} color={colors.brandPrimary} />}
+                      </Pressable>
+                    )}
+                    <Pressable testID={`stmt-pdf-${s.property_id}`} onPress={() => generatePdf(s)} disabled={pdfBusy === s.property_id} style={styles.shareBtn}>
+                      {pdfBusy === s.property_id ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : <Ionicons name="document-text-outline" size={18} color={colors.brandPrimary} />}
+                    </Pressable>
+                    <Pressable testID={`stmt-share-${s.property_id}`} onPress={() => shareStatement(s)} style={styles.shareBtn}>
+                      <Ionicons name={Platform.OS === "web" ? "copy-outline" : "share-outline"} size={18} color={colors.brandPrimary} />
+                    </Pressable>
+                  </View>
                 </View>
 
                 {/* Ventilation */}
@@ -393,6 +469,7 @@ const styles = StyleSheet.create({
   feePillText: { fontFamily: font.semibold, fontSize: 11, color: colors.brandPrimary },
   feeHint: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: spacing.sm, lineHeight: 17 },
   shareBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
+  cardActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   detailToggle: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.md },
   detailToggleText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
   linesBox: { marginTop: spacing.sm, gap: 6 },
