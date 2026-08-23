@@ -792,6 +792,41 @@ async def deposits_pending(user=Depends(get_current_user)):
     return out
 
 
+@api_router.get("/payments/pending")
+async def payments_pending(user=Depends(get_current_user)):
+    """Réservations à venir dont le solde n'est pas réglé avant l'arrivée."""
+    uid = user["user_id"]
+    today = date.today()
+    q = {
+        "user_id": uid,
+        "status": {"$nin": ["annulee"]},
+        "check_in": {"$gte": today.isoformat()},
+        **_prop_scope(user, "property_id"),
+    }
+    res = await db.reservations.find(q, {"_id": 0}).sort("check_in", 1).to_list(1000)
+    out = []
+    for r in res:
+        if "paid" in (r.get("markers") or []):
+            continue
+        fin = r.get("finance") or {}
+        due = round(float(fin.get("due") or 0), 2)
+        if due <= 0:
+            continue
+        try:
+            days = (date.fromisoformat(r["check_in"]) - today).days
+        except Exception:
+            days = None
+        out.append({
+            "reservation_id": r["id"], "guest_name": r.get("guest_name", ""),
+            "property_name": r.get("property_name", ""), "check_in": r.get("check_in"),
+            "platform": r.get("platform", ""), "due": due,
+            "total": round(float(fin.get("total") or 0), 2),
+            "days_until": days, "urgent": days is not None and days <= 2,
+        })
+    return out
+
+
+
 
 
 
@@ -1602,12 +1637,25 @@ def _parse_pricing_json(raw: str):
 # ---------------------------------------------------------------------------
 # Preferences (customizable statuses + colors)
 # ---------------------------------------------------------------------------
+DEFAULT_COMPANY = {
+    "name": "", "address": "", "postal_code": "", "city": "",
+    "phone": "", "email": "", "website": "", "siret": "", "vat": "",
+}
+_COMPANY_KEYS = list(DEFAULT_COMPANY.keys())
+
+
+def _build_company(doc: Optional[dict]) -> dict:
+    c = (doc or {}).get("company") or {}
+    return {k: str(c.get(k) or "") for k in _COMPANY_KEYS}
+
+
 class PreferencesIn(BaseModel):
     status_colors: Optional[dict] = None
     statuses: Optional[list] = None
     commission_rates: Optional[dict] = None
     payment_methods: Optional[dict] = None
     ai_auto_draft: Optional[bool] = None
+    company: Optional[dict] = None
 
 
 async def _ai_auto_draft_enabled(uid: str) -> bool:
@@ -1625,6 +1673,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "commission_rates": _build_commission_rates(doc),
         "payment_methods": _build_payment_methods(doc),
         "ai_auto_draft": bool((doc or {}).get("ai_auto_draft", True)),
+        "company": _build_company(doc),
     }
 
 
@@ -1676,6 +1725,9 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
     if payload.ai_auto_draft is not None:
         set_doc["ai_auto_draft"] = bool(payload.ai_auto_draft)
 
+    if payload.company is not None:
+        set_doc["company"] = {k: str(payload.company.get(k) or "").strip() for k in _COMPANY_KEYS}
+
     await db.preferences.update_one({"user_id": uid}, {"$set": set_doc}, upsert=True)
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     statuses = _build_statuses(doc)
@@ -1685,6 +1737,7 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "commission_rates": _build_commission_rates(doc),
         "payment_methods": _build_payment_methods(doc),
         "ai_auto_draft": bool((doc or {}).get("ai_auto_draft", True)),
+        "company": _build_company(doc),
     }
 
 
@@ -2848,13 +2901,52 @@ async def set_statement_commission(payload: CommissionOverrideIn, user=Depends(g
     return {"commission_override": val}
 
 
-def _statement_html(month: str, s: dict) -> str:
+def _money(n) -> str:
+    return f"{(n or 0):.2f} €"
+
+
+def _company_header_html(company: dict, logo_url: str = "") -> str:
+    """Bandeau d'en-tête : logo Casanéo + coordonnées de la société de conciergerie."""
+    c = company or {}
+    logo = (
+        f"<img src='{escape(logo_url)}' alt='Casanéo' style='height:44px;display:block' />"
+        if logo_url else
+        "<div style='font-family:Arial,sans-serif;font-size:22px;font-weight:800;color:#2A6F9E'>Casanéo</div>"
+    )
+    name = escape(str(c.get("name") or ""))
+    addr_parts = [c.get("address"), " ".join([str(c.get("postal_code") or ""), str(c.get("city") or "")]).strip()]
+    addr = " · ".join([escape(str(a).strip()) for a in addr_parts if str(a or "").strip()])
+    contact_parts = []
+    if c.get("phone"): contact_parts.append("Tél. " + escape(str(c["phone"])))
+    if c.get("email"): contact_parts.append(escape(str(c["email"])))
+    if c.get("website"): contact_parts.append(escape(str(c["website"])))
+    contact = " · ".join(contact_parts)
+    legal_parts = []
+    if c.get("siret"): legal_parts.append("SIRET " + escape(str(c["siret"])))
+    if c.get("vat"): legal_parts.append("TVA " + escape(str(c["vat"])))
+    legal = " · ".join(legal_parts)
+    right = ""
+    if name or addr or contact or legal:
+        right = (
+            "<div style='text-align:right;font-family:Arial,sans-serif;font-size:12px;color:#555;line-height:1.5'>"
+            + (f"<div style='font-weight:700;color:#111;font-size:14px'>{name}</div>" if name else "")
+            + (f"<div>{addr}</div>" if addr else "")
+            + (f"<div>{contact}</div>" if contact else "")
+            + (f"<div style='color:#999'>{legal}</div>" if legal else "")
+            + "</div>"
+        )
+    return (
+        "<table style='width:100%;border-collapse:collapse;margin-bottom:16px'>"
+        f"<tr><td style='vertical-align:top'>{logo}</td>"
+        f"<td style='vertical-align:top'>{right}</td></tr></table>"
+        "<div style='height:3px;background:#2A6F9E;border-radius:2px;margin-bottom:16px'></div>"
+    )
+
+
+def _statement_body_html(month: str, s: dict) -> str:
+    """Corps du relevé pour UN logement (titre + tableau), sans en-tête société."""
     t = s["totals"]
-    m = lambda n: f"{(n or 0):.2f} €"  # noqa: E731
-    try:
-        month_lbl = f"{month.split('-')[1]}/{month.split('-')[0]}"
-    except Exception:
-        month_lbl = month
+    m = _money
     rows = "".join(
         f"<tr><td style='padding:6px 0;color:#555'>{escape(str(l.get('guest_name') or '—'))} · "
         f"{escape(str(l.get('check_in') or ''))}→{escape(str(l.get('check_out') or ''))} "
@@ -2862,10 +2954,12 @@ def _statement_html(month: str, s: dict) -> str:
         f"<td style='padding:6px 0;text-align:right;font-weight:600'>{m(l.get('nights'))}</td></tr>"
         for l in s.get("lines", [])
     )
+
     def line(lbl, val, bold=False, color="#111"):
         w = "700" if bold else "400"
         return (f"<tr><td style='padding:5px 0;color:#555'>{escape(lbl)}</td>"
                 f"<td style='padding:5px 0;text-align:right;font-weight:{w};color:{color}'>{val}</td></tr>")
+
     reg = ""
     if (t.get("tax_regional") or 0) > 0:
         reg = line("Taxe add. régionale (à reverser)", m(t.get("tax_regional")))
@@ -2874,9 +2968,8 @@ def _statement_html(month: str, s: dict) -> str:
     gestion_lbl = "Frais de gestion (" + str(s.get("management_fee_pct", 0)) + "%)"
     tax_sej = m(t.get("tax_sejour") if t.get("tax_sejour") is not None else t.get("tax"))
     return (
-        f"<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto'>"
-        f"<h2 style='color:#2A6F9E'>Relevé {escape(month_lbl)} — {prop_title}</h2>"
-        f"<p style='color:#777'>{s.get('reservations_count',0)} réservation(s) · Frais de gestion {s.get('management_fee_pct',0)}%</p>"
+        f"<h3 style='color:#2A6F9E;margin:18px 0 4px'>{prop_title}</h3>"
+        f"<p style='color:#777;margin:0 0 6px'>{s.get('reservations_count',0)} réservation(s) · Frais de gestion {s.get('management_fee_pct',0)}%</p>"
         f"<table style='width:100%;border-collapse:collapse;font-size:14px'>"
         f"{res_header}"
         f"<tr><td colspan=2 style='border-top:1px solid #eee;padding-top:8px'></td></tr>"
@@ -2887,17 +2980,71 @@ def _statement_html(month: str, s: dict) -> str:
         f"{line('Commissions OTA', '-' + m(t.get('commission')))}"
         f"{line(gestion_lbl, m(t.get('management_fee')))}"
         f"<tr><td colspan=2 style='border-top:2px solid #2A6F9E;padding-top:8px'></td></tr>"
-        f"{line('Revenu proprietaire', m(t.get('owner_revenue')), bold=True, color='#2A6F9E')}"
+        f"{line('Revenu propriétaire', m(t.get('owner_revenue')), bold=True, color='#2A6F9E')}"
         f"{line('Revenu conciergerie', m(t.get('concierge_revenue')))}"
         f"</table>"
-        f"<p style='color:#aaa;font-size:12px;margin-top:24px'>Envoyé via Casanéo</p>"
-        f"</div>"
+    )
+
+
+def _month_label(month: str) -> str:
+    try:
+        return f"{month.split('-')[1]}/{month.split('-')[0]}"
+    except Exception:
+        return month
+
+
+def _statement_html(month: str, s: dict, company: dict = None, logo_url: str = "") -> str:
+    """Relevé complet pour UN logement (en-tête société + corps + pied)."""
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:16px'>"
+        f"{_company_header_html(company or {}, logo_url)}"
+        f"<h2 style='color:#111;margin:0 0 4px'>Relevé de gestion — {escape(_month_label(month))}</h2>"
+        f"{_statement_body_html(month, s)}"
+        "<p style='color:#aaa;font-size:12px;margin-top:24px'>Édité via Casanéo</p>"
+        "</div>"
+    )
+
+
+def _combined_statement_html(month: str, statements: list, owner_name: str,
+                             company: dict = None, logo_url: str = "") -> str:
+    """Relevé regroupant TOUS les logements d'un même propriétaire pour le mois."""
+    g_owner = round(sum((st["totals"].get("owner_revenue") or 0) for st in statements), 2)
+    g_conc = round(sum((st["totals"].get("concierge_revenue") or 0) for st in statements), 2)
+    bodies = "<div style='height:1px;background:#eee;margin:20px 0'></div>".join(
+        _statement_body_html(month, st) for st in statements
+    )
+    total_block = ""
+    if len(statements) > 1:
+        total_block = (
+            "<div style='margin-top:24px;padding:14px 16px;background:#F0F6FB;border-radius:12px'>"
+            "<table style='width:100%;border-collapse:collapse;font-size:15px'>"
+            f"<tr><td style='color:#555;padding:4px 0'>Total revenu propriétaire ({len(statements)} logements)</td>"
+            f"<td style='text-align:right;font-weight:800;color:#2A6F9E'>{_money(g_owner)}</td></tr>"
+            f"<tr><td style='color:#555;padding:4px 0'>Total revenu conciergerie</td>"
+            f"<td style='text-align:right;font-weight:600'>{_money(g_conc)}</td></tr>"
+            "</table></div>"
+        )
+    return (
+        "<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:16px'>"
+        f"{_company_header_html(company or {}, logo_url)}"
+        f"<h2 style='color:#111;margin:0 0 4px'>Relevé de gestion — {escape(_month_label(month))}</h2>"
+        + (f"<p style='color:#555;margin:0 0 8px'>Propriétaire : {escape(str(owner_name))}</p>" if owner_name else "")
+        + bodies
+        + total_block
+        + "<p style='color:#aaa;font-size:12px;margin-top:24px'>Édité via Casanéo</p>"
+        "</div>"
     )
 
 
 class StatementEmailIn(BaseModel):
     month: str
     property_id: str
+    base_url: Optional[str] = None
+
+
+def _logo_url_from_base(base: str) -> str:
+    base = (base or "").rstrip("/")
+    return f"{base}/api/assets/casaneo-logo.png" if base else ""
 
 
 @api_router.post("/owner-statement/email")
@@ -2920,14 +3067,70 @@ async def email_owner_statement(payload: StatementEmailIn, user=Depends(get_curr
     if not stmts:
         return {"sent": False, "reason": "no_data"}
     s = stmts[0]
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
+    company = _build_company(prefs)
+    logo_url = _logo_url_from_base(payload.base_url or (await db.channel_settings.find_one({"user_id": uid}) or {}).get("public_base_url", ""))
     try:
         y, mo = payload.month.split("-")
         subject = f"Relevé {mo}/{y} — {s.get('property_name')}"
     except Exception:
         subject = f"Relevé {payload.month} — {s.get('property_name')}"
-    html = _statement_html(payload.month, s)
+    html = _statement_html(payload.month, s, company, logo_url)
     await send_email(to=owner_email, subject=subject, html=html)
     return {"sent": True, "to": owner_email, "owner_name": owner_name}
+
+
+class StatementEmailAllIn(BaseModel):
+    month: str
+    base_url: Optional[str] = None
+
+
+@api_router.post("/owner-statement/email-all")
+async def email_all_owner_statements(payload: StatementEmailAllIn, user=Depends(get_current_user)):
+    """Envoie à chaque propriétaire UN SEUL email regroupant tous ses logements pour le mois."""
+    uid = user["user_id"]
+    data = await owner_statement(month=payload.month, property_id="", user=user)
+    stmts = data.get("statements") or []
+    if not stmts:
+        return {"sent": 0, "results": [], "reason": "no_data"}
+
+    # Regroupe les logements par propriétaire (owner_id)
+    prop_ids = [s["property_id"] for s in stmts]
+    props = await db.properties.find({"user_id": uid, "id": {"$in": prop_ids}}, {"_id": 0}).to_list(500)
+    prop_by_id = {p["id"]: p for p in props}
+
+    groups: dict = {}
+    for s in stmts:
+        p = prop_by_id.get(s["property_id"], {})
+        oid = p.get("owner_id") or f"__noid__{s['property_id']}"
+        groups.setdefault(oid, {"owner_id": p.get("owner_id"), "owner_fallback": p.get("owner") or "", "statements": []})
+        groups[oid]["statements"].append(s)
+
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
+    company = _build_company(prefs)
+    logo_url = _logo_url_from_base(payload.base_url or (await db.channel_settings.find_one({"user_id": uid}) or {}).get("public_base_url", ""))
+
+    y, mo = (payload.month.split("-") + ["", ""])[:2]
+    results = []
+    sent = 0
+    for grp in groups.values():
+        owner_email = ""
+        owner_name = grp["owner_fallback"]
+        if grp["owner_id"]:
+            owner = await db.owners.find_one({"id": grp["owner_id"], "user_id": uid}, {"_id": 0})
+            if owner:
+                owner_email = (owner.get("email") or "").strip()
+                owner_name = owner.get("name") or owner_name
+        names = ", ".join(st.get("property_name") or "" for st in grp["statements"])
+        if not owner_email:
+            results.append({"owner_name": owner_name or "?", "properties": names, "sent": False, "reason": "no_owner_email"})
+            continue
+        subject = f"Relevé {mo}/{y} — {owner_name}" if owner_name else f"Relevé {mo}/{y}"
+        html = _combined_statement_html(payload.month, grp["statements"], owner_name, company, logo_url)
+        await send_email(to=owner_email, subject=subject, html=html)
+        sent += 1
+        results.append({"owner_name": owner_name, "properties": names, "sent": True, "to": owner_email})
+    return {"sent": sent, "results": results}
 
 
 
@@ -3248,6 +3451,16 @@ async def get_file(path: str, token: Optional[str] = None, authorization: Option
     except Exception:
         raise HTTPException(status_code=404, detail="Fichier introuvable")
     return Response(content=content, media_type=ct)
+
+
+@api_router.get("/assets/casaneo-logo.png")
+async def get_casaneo_logo():
+    """Logo Casanéo public (utilisé dans les emails de relevé)."""
+    p = ROOT_DIR / "assets" / "casaneo-logo.png"
+    try:
+        return Response(content=p.read_bytes(), media_type="image/png")
+    except Exception:
+        raise HTTPException(status_code=404, detail="Logo introuvable")
 
 
 @api_router.get("/kp/{path:path}")

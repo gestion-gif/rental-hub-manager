@@ -66,6 +66,8 @@ export default function Dashboard() {
   const [deposits, setDeposits] = useState<any[]>([]);
   const [depBusy, setDepBusy] = useState<string>("");
   const [cautionOpen, setCautionOpen] = useState(true);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [payOpen, setPayOpen] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -78,6 +80,7 @@ export default function Dashboard() {
       api.get("/notifications/count").then((n) => setDrafts(n?.count || 0)).catch(() => {});
       if (canModify(user)) {
         api.get("/deposits/pending").then((list) => setDeposits(list || [])).catch(() => setDeposits([]));
+        api.get("/payments/pending").then((list) => setPayments(list || [])).catch(() => setPayments([]));
       }
     } catch {}
     setLoading(false);
@@ -249,6 +252,44 @@ export default function Dashboard() {
                       )}
                     </Pressable>
                   </View>
+                ))}
+              </View>
+            )}
+
+            {canModify(user) && payments.length > 0 && (
+              <View style={[styles.cautionCard, payments.some((d) => d.urgent) && styles.cautionCardUrgent]}>
+                <Pressable testID="payment-toggle" onPress={() => setPayOpen((o) => !o)} style={styles.cautionHeader}>
+                  <View style={styles.cautionHeadLeft}>
+                    <View style={[styles.cautionIcon, { backgroundColor: colors.brandPrimary }, payments.some((d) => d.urgent) && { backgroundColor: colors.error }]}>
+                      <Ionicons name="card" size={18} color={colors.onBrandPrimary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cautionTitle}>Paiements à suivre</Text>
+                      <Text style={styles.cautionSub}>{payments.length} réservation{payments.length > 1 ? "s" : ""} avec solde impayé</Text>
+                    </View>
+                  </View>
+                  <Ionicons name={payOpen ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurfaceSecondary} />
+                </Pressable>
+                {payOpen && payments.slice(0, 12).map((d) => (
+                  <Pressable key={d.reservation_id} style={styles.depRow} testID={`payment-row-${d.reservation_id}`} onPress={() => router.push(`/reservation-form?id=${d.reservation_id}`)}>
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.depGuestRow}>
+                        <Text style={styles.depGuest}>{guestLabel(user, d.guest_name)}</Text>
+                        {d.urgent && (
+                          <View style={styles.urgentBadge}>
+                            <Text style={styles.urgentBadgeText}>{d.days_until <= 0 ? "Aujourd'hui" : `J-${d.days_until}`}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.depMeta, d.urgent && { color: colors.error, fontFamily: font.semibold }]}>
+                        {d.property_name || "—"} · {dayjs(d.check_in).format("DD MMM")}
+                      </Text>
+                    </View>
+                    <View style={styles.dueWrap}>
+                      <Text style={styles.dueLabel}>Solde</Text>
+                      <Text style={[styles.dueValue, d.urgent && { color: colors.error }]}>{d.due.toFixed(0)} €</Text>
+                    </View>
+                  </Pressable>
                 ))}
               </View>
             )}
@@ -530,6 +571,9 @@ const styles = StyleSheet.create({
   depGuestRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   urgentBadge: { backgroundColor: colors.error, borderRadius: radius.pill, paddingHorizontal: 7, paddingVertical: 1 },
   urgentBadgeText: { fontFamily: font.bold, fontSize: 10, color: "#fff" },
+  dueWrap: { alignItems: "flex-end" },
+  dueLabel: { fontFamily: font.regular, fontSize: 10, color: colors.onSurfaceTertiary },
+  dueValue: { fontFamily: font.bold, fontSize: fontSize.base, color: colors.onSurface },
   cautionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   cautionHeadLeft: { flexDirection: "row", alignItems: "center", gap: spacing.md, flex: 1 },
   cautionIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.warning, alignItems: "center", justifyContent: "center" },

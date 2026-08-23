@@ -44,14 +44,19 @@ export default function Statement() {
   const [savingComm, setSavingComm] = useState(false);
   const [pdfBusy, setPdfBusy] = useState("");
   const [emailBusy, setEmailBusy] = useState("");
+  const [emailAllBusy, setEmailAllBusy] = useState(false);
+  const [company, setCompany] = useState<any>({});
 
   const month = anchor.format("YYYY-MM");
+  const LOGO_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/assets/casaneo-logo.png`;
+  const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "";
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const pr = await api.get("/properties");
       setProps(pr);
+      try { const prefs = await api.get("/preferences"); setCompany(prefs.company || {}); } catch {}
       const q = selectedProp !== "all" ? `&property_id=${selectedProp}` : "";
       const res = await api.get(`/owner-statement?month=${month}${q}`);
       setData(res.statements || []);
@@ -118,6 +123,25 @@ export default function Statement() {
     setSavingComm(false);
   }
 
+  function companyHeaderHtml(): string {
+    const c = company || {};
+    const logo = `<img src="${LOGO_URL}" alt="Casanéo" style="height:44px;display:block" />`;
+    const addr = [c.address, [c.postal_code, c.city].filter(Boolean).join(" ")].filter((x: string) => (x || "").trim()).join(" · ");
+    const contact = [c.phone ? "Tél. " + c.phone : "", c.email, c.website].filter(Boolean).join(" · ");
+    const legal = [c.siret ? "SIRET " + c.siret : "", c.vat ? "TVA " + c.vat : ""].filter(Boolean).join(" · ");
+    const right = (c.name || addr || contact || legal)
+      ? `<div style="text-align:right;font-size:12px;color:#555;line-height:1.5">
+          ${c.name ? `<div style="font-weight:700;color:#111;font-size:14px">${c.name}</div>` : ""}
+          ${addr ? `<div>${addr}</div>` : ""}
+          ${contact ? `<div>${contact}</div>` : ""}
+          ${legal ? `<div style="color:#999">${legal}</div>` : ""}
+        </div>` : "";
+    return `<table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+        <tr><td style="vertical-align:top">${logo}</td><td style="vertical-align:top">${right}</td></tr>
+      </table>
+      <div style="height:3px;background:#2A6F9E;border-radius:2px;margin-bottom:16px"></div>`;
+  }
+
   function statementHtml(s: any): string {
     const t = s.totals;
     const rows = (s.lines || []).map((l: any) =>
@@ -126,9 +150,11 @@ export default function Statement() {
     const row = (lbl: string, val: string, bold = false, color = "#111") =>
       `<tr><td style="padding:5px 0;color:#555">${lbl}</td><td style="padding:5px 0;text-align:right;font-weight:${bold ? 700 : 400};color:${color}">${val}</td></tr>`;
     const reg = (t.tax_regional || 0) > 0 ? row("Taxe add. régionale (à reverser)", money(t.tax_regional)) : "";
-    return `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:16px">
-      <h2 style="color:#2A6F9E">Relevé ${dayjs(month).format("MMMM YYYY")} — ${s.property_name}</h2>
-      <p style="color:#777">${s.reservations_count} réservation(s) · Frais de gestion ${s.management_fee_pct}%${s.owner ? " · Propriétaire : " + s.owner : ""}</p>
+    return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:16px">
+      ${companyHeaderHtml()}
+      <h2 style="color:#111;margin:0 0 4px">Relevé de gestion — ${dayjs(month).format("MMMM YYYY")}</h2>
+      <h3 style="color:#2A6F9E;margin:12px 0 4px">${s.property_name}</h3>
+      <p style="color:#777;margin:0 0 6px">${s.reservations_count} réservation(s) · Frais de gestion ${s.management_fee_pct}%${s.owner ? " · Propriétaire : " + s.owner : ""}</p>
       <table style="width:100%;border-collapse:collapse;font-size:14px">
         ${rows ? `<tr><td colspan=2 style="padding-top:8px;font-weight:700;color:#2A6F9E">Réservations</td></tr>${rows}` : ""}
         <tr><td colspan=2 style="border-top:1px solid #eee;padding-top:8px"></td></tr>
@@ -162,7 +188,7 @@ export default function Statement() {
     if (emailBusy) return;
     setEmailBusy(s.property_id);
     try {
-      const res = await api.post("/owner-statement/email", { month, property_id: s.property_id });
+      const res = await api.post("/owner-statement/email", { month, property_id: s.property_id, base_url: BASE_URL });
       if (res.sent) {
         Alert.alert("Relevé envoyé", `Le relevé a été envoyé à ${res.owner_name || "le propriétaire"} (${res.to}).`);
       } else if (res.reason === "no_owner_email") {
@@ -174,6 +200,36 @@ export default function Statement() {
       Alert.alert("Erreur", "Envoi impossible.");
     }
     setEmailBusy("");
+  }
+
+  function emailAll() {
+    if (emailAllBusy) return;
+    Alert.alert(
+      "Envoyer à tous les propriétaires",
+      `Chaque propriétaire recevra un seul email regroupant tous ses logements pour ${dayjs(month).format("MMMM YYYY")}.`,
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Envoyer", onPress: doEmailAll },
+      ],
+    );
+  }
+
+  async function doEmailAll() {
+    setEmailAllBusy(true);
+    try {
+      const res = await api.post("/owner-statement/email-all", { month, base_url: BASE_URL });
+      const results = res.results || [];
+      const ok = results.filter((r: any) => r.sent);
+      const skipped = results.filter((r: any) => !r.sent);
+      let msg = ok.length ? `${ok.length} relevé(s) envoyé(s) :\n` + ok.map((r: any) => `• ${r.owner_name} (${r.to})`).join("\n") : "Aucun relevé envoyé.";
+      if (skipped.length) {
+        msg += `\n\nNon envoyés (email propriétaire manquant) :\n` + skipped.map((r: any) => `• ${r.owner_name} — ${r.properties}`).join("\n");
+      }
+      Alert.alert("Envoi groupé", msg);
+    } catch {
+      Alert.alert("Erreur", "Envoi impossible.");
+    }
+    setEmailAllBusy(false);
   }
 
   function statementLines(s: any) {
@@ -212,6 +268,16 @@ export default function Statement() {
         <View style={styles.titleRow}>
           <MenuButton />
           <Text style={styles.title}>Relevé propriétaires</Text>
+          {editable && data.length > 0 && (
+            <Pressable testID="stmt-email-all" onPress={emailAll} disabled={emailAllBusy} style={styles.emailAllBtn}>
+              {emailAllBusy ? <ActivityIndicator size="small" color={colors.onBrandPrimary} /> : (
+                <>
+                  <Ionicons name="mail-outline" size={15} color={colors.onBrandPrimary} />
+                  <Text style={styles.emailAllText}>Tout envoyer</Text>
+                </>
+              )}
+            </Pressable>
+          )}
         </View>
         <View style={styles.monthNav}>
           <Pressable testID="stmt-prev" onPress={() => setAnchor((a) => a.subtract(1, "month"))} style={styles.navBtn}>
@@ -454,6 +520,8 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginBottom: spacing.md },
   title: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface },
+  emailAllBtn: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.brandPrimary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.md, minHeight: 36 },
+  emailAllText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onBrandPrimary },
   monthNav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
   navBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
   monthLabel: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, textTransform: "capitalize" },

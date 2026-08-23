@@ -418,11 +418,23 @@ export default function ReservationForm() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <Text style={styles.title}>{editing ? "Modifier" : "Nouvelle réservation"}</Text>
-        <Pressable testID="close-form" onPress={() => router.back()} style={styles.closeBtn}>
-          <Ionicons name="close" size={22} color={colors.onSurface} />
-        </Pressable>
+      <View style={[styles.headerBanner, { paddingTop: insets.top + spacing.md }]}>
+        <View style={styles.headerTopRow}>
+          <View style={styles.headerBadge}>
+            {editing ? <PlatformLogo platform={form.platform} size={18} /> : <Ionicons name="add-circle" size={18} color="#fff" />}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {editing ? (`${form.guest_first_name} ${form.guest_last_name}`.trim() || "Réservation") : "Nouvelle réservation"}
+            </Text>
+            <Text style={styles.headerSub} numberOfLines={1}>
+              {editing ? `${form.platform || "Direct"}${form.check_in ? " · " + dayjs(form.check_in).format("DD MMM") : ""}` : "Ajouter au calendrier"}
+            </Text>
+          </View>
+          <Pressable testID="close-form" onPress={() => router.back()} style={styles.headerClose}>
+            <Ionicons name="close" size={22} color="#fff" />
+          </Pressable>
+        </View>
       </View>
 
       {props.length === 0 ? (
@@ -871,6 +883,19 @@ const styles = StyleSheet.create({
 
   container: { flex: 1, backgroundColor: colors.surface },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  headerBanner: {
+    backgroundColor: "#2A6F9E",
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
+    shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 6,
+  },
+  headerTopRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  headerBadge: { width: 40, height: 40, borderRadius: 12, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
+  headerTitle: { fontFamily: font.bold, fontSize: fontSize.xl, color: "#fff" },
+  headerSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: "rgba(255,255,255,0.8)", marginTop: 1 },
+  headerClose: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
   header: {
     flexDirection: "row",
     alignItems: "center",

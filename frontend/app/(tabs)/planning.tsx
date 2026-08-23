@@ -754,6 +754,7 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, p
       {selectedDay && (
         <View style={styles.dayDetail}>
           <Text style={styles.detailTitle}>{dayjs(selectedDay).format("dddd D MMMM")}</Text>
+          <View style={styles.dayDetailBody}>
           {selRes.length === 0 && selIvs.length === 0 ? (
             <Text style={styles.detailEmpty}>Journée libre ✓</Text>
           ) : (
@@ -786,6 +787,7 @@ function MonthView({ anchor, daysInMonth, monthStart, filtered, interventions, p
               })}
             </>
           )}
+          </View>
         </View>
       )}
     </ScrollView>
@@ -886,9 +888,10 @@ const styles = StyleSheet.create({
   miniDot: { width: 6, height: 6, borderRadius: 999 },
   occBar: { position: "absolute", bottom: 6, height: 4, left: 8, right: 8, borderRadius: 2 },
   monthPrice: { position: "absolute", bottom: 3, alignSelf: "center", fontFamily: font.semibold, fontSize: 9, color: colors.brandPrimary },
-  dayDetail: { marginTop: spacing.xl },
-  detailTitle: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.md, textTransform: "capitalize" },
-  detailEmpty: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
+  dayDetail: { marginTop: spacing.xl, backgroundColor: colors.surface, borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: colors.border, shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 4 },
+  detailTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: "#fff", backgroundColor: "#2A6F9E", paddingVertical: spacing.md, paddingHorizontal: spacing.lg, textTransform: "capitalize" },
+  detailEmpty: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, padding: spacing.lg },
+  dayDetailBody: { padding: spacing.md },
   detailCard: {
     flexDirection: "row", alignItems: "center", backgroundColor: colors.surfaceSecondary,
     borderRadius: radius.md, padding: spacing.lg, marginBottom: spacing.sm,
@@ -929,13 +932,13 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   priceBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "center", padding: spacing.xl },
-  priceSheet: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl },
-  priceSheetTitle: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
+  priceSheet: { backgroundColor: colors.surface, borderRadius: 20, padding: spacing.xl, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
+  priceSheetTitle: { fontFamily: font.bold, fontSize: fontSize.xl, color: "#2A6F9E" },
   priceSheetSeason: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.brandPrimary, marginTop: spacing.md },
   priceSheetRange: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
   priceInputWrap: { flexDirection: "row", alignItems: "center", gap: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.lg, marginTop: spacing.lg },
   priceInput: { flex: 1, fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface, paddingVertical: 12 },
   priceInputUnit: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
-  priceSaveBtn: { marginTop: spacing.lg, backgroundColor: colors.brandPrimary, borderRadius: radius.pill, paddingVertical: 14, alignItems: "center" },
+  priceSaveBtn: { marginTop: spacing.lg, backgroundColor: "#17B0A6", borderRadius: radius.pill, paddingVertical: 14, alignItems: "center" },
   priceSaveText: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onBrandPrimary },
 });
