@@ -1,0 +1,112 @@
+"""Channex.io Public API v1 integration layer (provider-neutral adapter).
+
+Self-contained: no database dependency. Imported by server.py.
+Auth via `user-api-key` header. Read-only foundation (properties / room types /
+rate plans). Writes (ARI) and bookings/webhooks are added in later phases.
+"""
+import asyncio
+from typing import Optional
+
+import httpx
+from fastapi import HTTPException
+
+CHANNEX_BASES = {
+    "staging": "https://staging.channex.io/api/v1",
+    "production": "https://channex.io/api/v1",
+}
+
+
+def base_for(environment: str) -> str:
+    return CHANNEX_BASES.get((environment or "staging").lower(), CHANNEX_BASES["staging"])
+
+
+class ChannexAdapter:
+    """Thin async client for the Channex Public API v1. Auth via user-api-key header."""
+
+    def __init__(self, api_key: str, environment: str = "staging"):
+        self.api_key = api_key
+        self.environment = (environment or "staging").lower()
+        self.base = base_for(self.environment)
+
+    def _headers(self):
+        return {"user-api-key": self.api_key, "Content-Type": "application/json"}
+
+    async def _get(self, http: httpx.AsyncClient, path: str, params: dict = None):
+        for attempt in range(3):
+            r = await http.get(f"{self.base}{path}", params=params or {}, headers=self._headers())
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if r.status_code in (401, 403):
+                raise HTTPException(status_code=400, detail="Clé API Channex invalide")
+            if r.status_code == 404:
+                raise HTTPException(status_code=400, detail="API Channex introuvable (vérifiez l'environnement staging/production)")
+            if r.status_code >= 400:
+                raise HTTPException(status_code=502, detail=f"Channex {r.status_code}")
+            return r.json()
+        raise HTTPException(status_code=502, detail="Channex indisponible")
+
+    @staticmethod
+    def _page(page=1, limit=100):
+        return {"pagination[page]": page, "pagination[limit]": min(limit, 100)}
+
+    async def validate(self, http) -> int:
+        """Returns the number of properties visible with this key (also proves auth)."""
+        body = await self._get(http, "/properties", self._page(1, 100))
+        meta = body.get("meta") or {}
+        return int(meta.get("total", len(body.get("data", []))))
+
+    async def list_properties(self, http) -> list:
+        page, out = 1, []
+        while True:
+            body = await self._get(http, "/properties", self._page(page, 100))
+            data = body.get("data", [])
+            out.extend(data)
+            meta = body.get("meta") or {}
+            total = int(meta.get("total", len(out)))
+            if len(out) >= total or not data:
+                return out
+            page += 1
+
+    async def list_room_types(self, http, property_id: str) -> list:
+        body = await self._get(http, "/room_types",
+                               {**self._page(), "filter[property_id]": property_id})
+        return body.get("data", [])
+
+    async def list_rate_plans(self, http, property_id: str) -> list:
+        body = await self._get(http, "/rate_plans",
+                               {**self._page(), "filter[property_id]": property_id})
+        return body.get("data", [])
+
+
+def map_channex_property(p: dict) -> dict:
+    """Normalize a Channex property record to a light provider-neutral shape."""
+    a = (p or {}).get("attributes") or {}
+    return {
+        "channex_id": p.get("id"),
+        "title": a.get("title") or a.get("name") or "(sans nom)",
+        "currency": a.get("currency"),
+        "country": a.get("country"),
+        "city": a.get("city"),
+        "property_type": a.get("property_type"),
+    }
+
+
+def map_channex_room(r: dict) -> dict:
+    a = (r or {}).get("attributes") or {}
+    return {
+        "channex_room_type_id": r.get("id"),
+        "title": a.get("title") or a.get("name") or "(sans nom)",
+        "occ_adults": a.get("occ_adults"),
+        "count_of_rooms": a.get("count_of_rooms"),
+    }
+
+
+def map_channex_rate_plan(rp: dict) -> dict:
+    a = (rp or {}).get("attributes") or {}
+    return {
+        "channex_rate_plan_id": rp.get("id"),
+        "channex_room_type_id": a.get("room_type_id"),
+        "title": a.get("title") or a.get("name") or "(sans nom)",
+        "currency": a.get("currency"),
+    }

@@ -26,6 +26,9 @@ from lodgify import (
     LODGIFY_STATUS_MAP, source_label, strip_html,
     LodgifyAdapter, map_lodgify_property,
 )
+from channex import (
+    ChannexAdapter, map_channex_property, map_channex_room, map_channex_rate_plan,
+)
 from emailer import send_email, build_invite_email
 from helpers import (
     now_utc, hash_password, verify_password, norm_email, hash_token,
@@ -1640,6 +1643,7 @@ def _parse_pricing_json(raw: str):
 DEFAULT_COMPANY = {
     "name": "", "address": "", "postal_code": "", "city": "",
     "phone": "", "email": "", "website": "", "siret": "", "vat": "",
+    "logo_path": "",
 }
 _COMPANY_KEYS = list(DEFAULT_COMPANY.keys())
 
@@ -1749,6 +1753,128 @@ async def get_channel_adapter(user_id: str):
     if not doc or not doc.get("api_key"):
         return None, None
     return LodgifyAdapter(doc["api_key"]), doc
+
+
+# ---------------------------------------------------------------------------
+# Channex integration (foundation) — provider-neutral, alongside Lodgify.
+# Read-only for now: connect/validate, status, list Channex properties/catalog.
+# Does NOT touch Lodgify. Key stored in `channex_settings` (never returned).
+# ---------------------------------------------------------------------------
+async def _sync_log(user_id: str, kind: str, status: str, message: str = "", provider: str = "channex"):
+    """Persist a synchronization log entry (SyncLog data-model)."""
+    await db.sync_logs.insert_one({
+        "id": str(uuid.uuid4()), "user_id": user_id, "provider": provider,
+        "type": kind, "status": status, "message": message[:1000],
+        "date": now_utc().isoformat(),
+    })
+
+
+async def get_channex_adapter(user_id: str):
+    doc = await db.channex_settings.find_one({"user_id": user_id}, {"_id": 0})
+    if not doc or not doc.get("api_key"):
+        return None, None
+    return ChannexAdapter(doc["api_key"], doc.get("environment", "staging")), doc
+
+
+class ChannexConnectIn(BaseModel):
+    api_key: str
+    environment: str = "staging"  # staging | production
+
+
+@api_router.post("/channex/connect")
+async def channex_connect(payload: ChannexConnectIn, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    key = (payload.api_key or "").strip()
+    env = (payload.environment or "staging").lower()
+    if env not in ("staging", "production"):
+        env = "staging"
+    if not key:
+        raise HTTPException(status_code=400, detail="Clé API Channex requise")
+    adapter = ChannexAdapter(key, env)
+    try:
+        async with httpx.AsyncClient(timeout=30) as http:
+            count = await adapter.validate(http)
+    except HTTPException as e:
+        await _sync_log(uid, "connect", "error", str(e.detail))
+        raise
+    await db.channex_settings.update_one(
+        {"user_id": uid},
+        {"$set": {
+            "user_id": uid, "provider": "channex", "api_key": key,
+            "environment": env, "properties_count": count,
+            "connected_at": now_utc().isoformat(),
+        }},
+        upsert=True,
+    )
+    await _sync_log(uid, "connect", "success", f"{count} logement(s) — {env}")
+    return {"ok": True, "environment": env, "properties_count": count}
+
+
+@api_router.get("/channex/status")
+async def channex_status(user=Depends(get_current_user)):
+    doc = await db.channex_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not doc or not doc.get("api_key"):
+        return {"connected": False}
+    return {
+        "connected": True,
+        "environment": doc.get("environment", "staging"),
+        "properties_count": doc.get("properties_count", 0),
+        "connected_at": doc.get("connected_at"),
+        "last_read_at": doc.get("last_read_at"),
+    }
+
+
+@api_router.post("/channex/disconnect")
+async def channex_disconnect(user=Depends(get_current_user)):
+    await db.channex_settings.delete_one({"user_id": user["user_id"]})
+    await _sync_log(user["user_id"], "disconnect", "success")
+    return {"ok": True}
+
+
+@api_router.get("/channex/properties")
+async def channex_properties(user=Depends(get_current_user)):
+    uid = user["user_id"]
+    adapter, doc = await get_channex_adapter(uid)
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channex non connecté")
+    try:
+        async with httpx.AsyncClient(timeout=40) as http:
+            raw = await adapter.list_properties(http)
+    except HTTPException as e:
+        await _sync_log(uid, "read_properties", "error", str(e.detail))
+        raise
+    props = [map_channex_property(p) for p in raw]
+    await db.channex_settings.update_one(
+        {"user_id": uid},
+        {"$set": {"properties_count": len(props), "last_read_at": now_utc().isoformat()}})
+    await _sync_log(uid, "read_properties", "success", f"{len(props)} logement(s)")
+    return {"properties": props, "count": len(props)}
+
+
+@api_router.get("/channex/properties/{channex_id}/catalog")
+async def channex_catalog(channex_id: str, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    adapter, doc = await get_channex_adapter(uid)
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channex non connecté")
+    async with httpx.AsyncClient(timeout=40) as http:
+        rooms = await adapter.list_room_types(http, channex_id)
+        rates = await adapter.list_rate_plans(http, channex_id)
+    await _sync_log(uid, "read_catalog", "success",
+                    f"{len(rooms)} chambres, {len(rates)} tarifs")
+    return {
+        "channex_id": channex_id,
+        "rooms": [map_channex_room(r) for r in rooms],
+        "rate_plans": [map_channex_rate_plan(rp) for rp in rates],
+    }
+
+
+@api_router.get("/channex/sync-logs")
+async def channex_sync_logs(user=Depends(get_current_user)):
+    logs = await db.sync_logs.find(
+        {"user_id": user["user_id"], "provider": "channex"}, {"_id": 0}
+    ).sort("date", -1).to_list(50)
+    return {"logs": logs}
 
 
 class ChannelConnectIn(BaseModel):
@@ -2864,9 +2990,14 @@ async def owner_statement(month: str, property_id: str = "", user=Depends(get_cu
         owner_revenue = round(t_nights - mgmt_fee - eff_comm - owner_exp, 2)
         concierge_revenue = round(mgmt_fee + t_clean - concierge_exp, 2)
 
+        send_log = await db.statement_sends.find_one(
+            {"user_id": user["user_id"], "property_id": pid, "month": month}, {"_id": 0})
+
         statements.append({
             "property_id": pid, "property_name": p.get("name"), "owner": p.get("owner"),
             "management_fee_pct": pct, "reservations_count": len(lines), "lines": lines,
+            "last_sent_at": (send_log or {}).get("sent_at"),
+            "last_sent_to": (send_log or {}).get("to"),
             "totals": {
                 "nights": round(t_nights, 2), "cleaning": round(t_clean, 2),
                 "tax": round(t_tax, 2), "commission": eff_comm,
@@ -3042,9 +3173,24 @@ class StatementEmailIn(BaseModel):
     base_url: Optional[str] = None
 
 
-def _logo_url_from_base(base: str) -> str:
+def _logo_url_from_base(base: str, company: dict = None) -> str:
+    """URL publique du logo pour l'en-tête : logo de la société si téléversé, sinon logo Casanéo."""
     base = (base or "").rstrip("/")
-    return f"{base}/api/assets/casaneo-logo.png" if base else ""
+    if not base:
+        return ""
+    lp = (company or {}).get("logo_path")
+    if lp:
+        return f"{base}/api/company-logo/{lp}"
+    return f"{base}/api/assets/casaneo-logo.png"
+
+
+async def _record_statement_send(uid: str, property_id: str, month: str, to: str):
+    await db.statement_sends.update_one(
+        {"user_id": uid, "property_id": property_id, "month": month},
+        {"$set": {"user_id": uid, "property_id": property_id, "month": month,
+                  "sent_at": now_utc().isoformat(), "to": to}},
+        upsert=True,
+    )
 
 
 @api_router.post("/owner-statement/email")
@@ -3069,7 +3215,7 @@ async def email_owner_statement(payload: StatementEmailIn, user=Depends(get_curr
     s = stmts[0]
     prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     company = _build_company(prefs)
-    logo_url = _logo_url_from_base(payload.base_url or (await db.channel_settings.find_one({"user_id": uid}) or {}).get("public_base_url", ""))
+    logo_url = _logo_url_from_base(payload.base_url or (await db.channel_settings.find_one({"user_id": uid}) or {}).get("public_base_url", ""), company)
     try:
         y, mo = payload.month.split("-")
         subject = f"Relevé {mo}/{y} — {s.get('property_name')}"
@@ -3077,6 +3223,7 @@ async def email_owner_statement(payload: StatementEmailIn, user=Depends(get_curr
         subject = f"Relevé {payload.month} — {s.get('property_name')}"
     html = _statement_html(payload.month, s, company, logo_url)
     await send_email(to=owner_email, subject=subject, html=html)
+    await _record_statement_send(uid, payload.property_id, payload.month, owner_email)
     return {"sent": True, "to": owner_email, "owner_name": owner_name}
 
 
@@ -3108,7 +3255,7 @@ async def email_all_owner_statements(payload: StatementEmailAllIn, user=Depends(
 
     prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     company = _build_company(prefs)
-    logo_url = _logo_url_from_base(payload.base_url or (await db.channel_settings.find_one({"user_id": uid}) or {}).get("public_base_url", ""))
+    logo_url = _logo_url_from_base(payload.base_url or (await db.channel_settings.find_one({"user_id": uid}) or {}).get("public_base_url", ""), company)
 
     y, mo = (payload.month.split("-") + ["", ""])[:2]
     results = []
@@ -3128,6 +3275,8 @@ async def email_all_owner_statements(payload: StatementEmailAllIn, user=Depends(
         subject = f"Relevé {mo}/{y} — {owner_name}" if owner_name else f"Relevé {mo}/{y}"
         html = _combined_statement_html(payload.month, grp["statements"], owner_name, company, logo_url)
         await send_email(to=owner_email, subject=subject, html=html)
+        for st in grp["statements"]:
+            await _record_statement_send(uid, st["property_id"], payload.month, owner_email)
         sent += 1
         results.append({"owner_name": owner_name, "properties": names, "sent": True, "to": owner_email})
     return {"sent": sent, "results": results}
@@ -3461,6 +3610,20 @@ async def get_casaneo_logo():
         return Response(content=p.read_bytes(), media_type="image/png")
     except Exception:
         raise HTTPException(status_code=404, detail="Logo introuvable")
+
+
+@api_router.get("/company-logo/{path:path}")
+async def get_company_logo(path: str):
+    """Logo de la société de conciergerie (public, chemin non devinable) — utilisé dans les relevés/emails.
+    Ne sert le fichier que s'il est enregistré comme logo dans les préférences d'un utilisateur."""
+    pref = await db.preferences.find_one({"company.logo_path": path}, {"_id": 0, "user_id": 1})
+    if not pref:
+        raise HTTPException(status_code=404, detail="Logo introuvable")
+    try:
+        content, ct = await run_in_threadpool(_get_object, path)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Logo introuvable")
+    return Response(content=content, media_type=ct)
 
 
 @api_router.get("/kp/{path:path}")

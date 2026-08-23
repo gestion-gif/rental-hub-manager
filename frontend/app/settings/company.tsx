@@ -1,21 +1,24 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
-import { api } from "@/src/api";
+import { api, uploadFile, fileUrl } from "@/src/api";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 type Company = {
   name: string; address: string; postal_code: string; city: string;
   phone: string; email: string; website: string; siret: string; vat: string;
+  logo_path: string;
 };
 
 const EMPTY: Company = {
   name: "", address: "", postal_code: "", city: "",
-  phone: "", email: "", website: "", siret: "", vat: "",
+  phone: "", email: "", website: "", siret: "", vat: "", logo_path: "",
 };
 
 const FIELDS: { key: keyof Company; label: string; placeholder: string; keyboard?: any; half?: boolean }[] = [
@@ -36,6 +39,7 @@ export default function CompanySettings() {
   const [form, setForm] = useState<Company>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -48,6 +52,26 @@ export default function CompanySettings() {
 
   function set(k: keyof Company, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
+  }
+
+  async function pickLogo() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Autorisation requise", "Autorisez l'accès aux photos pour choisir votre logo.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8 });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    setUploadingLogo(true);
+    try {
+      const name = asset.fileName || `logo_${Date.now()}.png`;
+      const path = await uploadFile(asset.uri, name, asset.mimeType || "image/png");
+      setForm((f) => ({ ...f, logo_path: path }));
+    } catch {
+      Alert.alert("Erreur", "Téléversement du logo impossible.");
+    }
+    setUploadingLogo(false);
   }
 
   async function save() {
@@ -82,8 +106,37 @@ export default function CompanySettings() {
         >
           <Text style={styles.intro}>Coordonnées de la conciergerie</Text>
           <Text style={styles.introSub}>
-            Ces informations et le logo Casanéo apparaissent en en-tête des relevés propriétaires (PDF et emails).
+            Ces informations et votre logo apparaissent en en-tête des relevés propriétaires (PDF et emails).
           </Text>
+
+          <View style={styles.logoCard}>
+            <Text style={styles.fieldLabel}>Logo</Text>
+            <View style={styles.logoRow}>
+              <View style={styles.logoPreview}>
+                {form.logo_path ? (
+                  <Image source={{ uri: fileUrl(form.logo_path) }} style={styles.logoImg} contentFit="contain" />
+                ) : (
+                  <Ionicons name="image-outline" size={28} color={colors.onSurfaceTertiary} />
+                )}
+              </View>
+              <View style={{ flex: 1, gap: 8 }}>
+                <Pressable testID="company-logo-pick" onPress={pickLogo} disabled={uploadingLogo} style={styles.logoBtn}>
+                  {uploadingLogo ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : (
+                    <>
+                      <Ionicons name="cloud-upload-outline" size={16} color={colors.brandPrimary} />
+                      <Text style={styles.logoBtnText}>{form.logo_path ? "Changer le logo" : "Téléverser un logo"}</Text>
+                    </>
+                  )}
+                </Pressable>
+                {!!form.logo_path && (
+                  <Pressable testID="company-logo-remove" onPress={() => set("logo_path", "")} style={styles.logoRemove}>
+                    <Ionicons name="trash-outline" size={15} color="#E5484D" />
+                    <Text style={styles.logoRemoveText}>Retirer</Text>
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          </View>
 
           <View style={styles.card}>
             <View style={styles.grid}>
@@ -127,6 +180,14 @@ const styles = StyleSheet.create({
   intro: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface },
   introSub: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, marginTop: 4, marginBottom: spacing.lg, lineHeight: 20 },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg },
+  logoCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md },
+  logoRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: 8 },
+  logoPreview: { width: 96, height: 64, borderRadius: radius.md, backgroundColor: "#111", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  logoImg: { width: "100%", height: "100%" },
+  logoBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingVertical: 10 },
+  logoBtnText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
+  logoRemove: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
+  logoRemoveText: { fontFamily: font.medium, fontSize: fontSize.xs, color: "#E5484D" },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
   fullField: { width: "100%", marginBottom: spacing.md },
   halfField: { width: "48%", marginBottom: spacing.md },

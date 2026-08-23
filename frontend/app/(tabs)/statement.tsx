@@ -4,6 +4,7 @@ import {
   Modal, TextInput, Share, Platform, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -46,6 +47,7 @@ export default function Statement() {
   const [emailBusy, setEmailBusy] = useState("");
   const [emailAllBusy, setEmailAllBusy] = useState(false);
   const [company, setCompany] = useState<any>({});
+  const [previewStmt, setPreviewStmt] = useState<any>(null);
 
   const month = anchor.format("YYYY-MM");
   const LOGO_URL = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/assets/casaneo-logo.png`;
@@ -125,7 +127,8 @@ export default function Statement() {
 
   function companyHeaderHtml(): string {
     const c = company || {};
-    const logo = `<img src="${LOGO_URL}" alt="Casanéo" style="height:44px;display:block" />`;
+    const logoSrc = c.logo_path ? `${BASE_URL}/api/company-logo/${c.logo_path}` : LOGO_URL;
+    const logo = `<img src="${logoSrc}" alt="${c.name || "Casanéo"}" style="height:56px;display:block" />`;
     const addr = [c.address, [c.postal_code, c.city].filter(Boolean).join(" ")].filter((x: string) => (x || "").trim()).join(" · ");
     const contact = [c.phone ? "Tél. " + c.phone : "", c.email, c.website].filter(Boolean).join(" · ");
     const legal = [c.siret ? "SIRET " + c.siret : "", c.vat ? "TVA " + c.vat : ""].filter(Boolean).join(" · ");
@@ -325,8 +328,17 @@ export default function Statement() {
                         <Text style={styles.propSub}> · gestion {s.management_fee_pct}%</Text>
                       )}
                     </View>
+                    {s.last_sent_at && (
+                      <View style={styles.sentRow}>
+                        <Ionicons name="checkmark-circle" size={12} color="#17B0A6" />
+                        <Text style={styles.sentText}>Envoyé le {dayjs(s.last_sent_at).format("DD/MM/YYYY à HH:mm")}</Text>
+                      </View>
+                    )}
                   </View>
                   <View style={styles.cardActions}>
+                    <Pressable testID={`stmt-preview-${s.property_id}`} onPress={() => setPreviewStmt(s)} style={styles.shareBtn}>
+                      <Ionicons name="eye-outline" size={18} color={colors.brandPrimary} />
+                    </Pressable>
                     {editable && (
                       <Pressable testID={`stmt-email-${s.property_id}`} onPress={() => emailOwner(s)} disabled={emailBusy === s.property_id} style={styles.shareBtn}>
                         {emailBusy === s.property_id ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : <Ionicons name="mail-outline" size={18} color={colors.brandPrimary} />}
@@ -430,6 +442,69 @@ export default function Statement() {
         </ScrollView>
       )}
 
+      {/* Aperçu du relevé avant envoi */}
+      <Modal visible={!!previewStmt} transparent animationType="slide" onRequestClose={() => setPreviewStmt(null)}>
+        <View style={styles.previewWrap}>
+          <View style={[styles.previewHeader, { paddingTop: insets.top + 8 }]}>
+            <Text style={styles.previewHeaderTitle}>Aperçu du relevé</Text>
+            <Pressable testID="preview-close" onPress={() => setPreviewStmt(null)} style={styles.previewClose}>
+              <Ionicons name="close" size={22} color="#fff" />
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 100 }}>
+            {previewStmt && (() => {
+              const s = previewStmt; const t = s.totals;
+              const logoSrc = company?.logo_path ? `${BASE_URL}/api/company-logo/${company.logo_path}` : LOGO_URL;
+              return (
+                <View style={styles.previewDoc}>
+                  <View style={styles.previewTop}>
+                    <Image source={{ uri: logoSrc }} style={styles.previewLogo} contentFit="contain" />
+                    <View style={{ flex: 1 }}>
+                      {!!company?.name && <Text style={styles.previewCoName}>{company.name}</Text>}
+                      {!!(company?.address || company?.city) && <Text style={styles.previewCoLine}>{[company?.address, [company?.postal_code, company?.city].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</Text>}
+                      {!!(company?.phone || company?.email) && <Text style={styles.previewCoLine}>{[company?.phone ? "Tél. " + company.phone : "", company?.email].filter(Boolean).join(" · ")}</Text>}
+                      {!!company?.siret && <Text style={styles.previewCoLegal}>SIRET {company.siret}</Text>}
+                    </View>
+                  </View>
+                  <View style={styles.previewRule} />
+                  <Text style={styles.previewH2}>Relevé de gestion — {dayjs(month).format("MMMM YYYY")}</Text>
+                  <Text style={styles.previewH3}>{s.property_name}</Text>
+                  <Text style={styles.previewMeta}>{s.reservations_count} réservation(s) · Frais de gestion {s.management_fee_pct}%{s.owner ? " · Propriétaire : " + s.owner : ""}</Text>
+                  {(s.lines || []).length > 0 && <Text style={styles.previewSection}>Réservations</Text>}
+                  {(s.lines || []).map((l: any) => (
+                    <View key={l.id} style={styles.previewLine}>
+                      <Text style={styles.previewLineL} numberOfLines={1}>{l.guest_name || "—"} · {dayjs(l.check_in).format("DD/MM")}→{dayjs(l.check_out).format("DD/MM")} ({l.platform})</Text>
+                      <Text style={styles.previewLineV}>{money(l.nights)}</Text>
+                    </View>
+                  ))}
+                  <View style={styles.previewRuleThin} />
+                  <PreviewRow label="Nuitées (base voyageurs)" value={money(t.nights)} />
+                  <PreviewRow label="Frais de ménage (conciergerie)" value={money(t.cleaning)} />
+                  <PreviewRow label="Taxe de séjour (à reverser)" value={money(t.tax_sejour != null ? t.tax_sejour : t.tax)} />
+                  {(t.tax_regional || 0) > 0 && <PreviewRow label="Taxe add. régionale (à reverser)" value={money(t.tax_regional)} />}
+                  <PreviewRow label="Commissions OTA" value={"-" + money(t.commission)} />
+                  <PreviewRow label={`Frais de gestion (${s.management_fee_pct}%)`} value={money(t.management_fee)} />
+                  <View style={styles.previewRule} />
+                  <PreviewRow label="Revenu propriétaire" value={money(t.owner_revenue)} bold />
+                  <PreviewRow label="Revenu conciergerie" value={money(t.concierge_revenue)} />
+                  {s.last_sent_at && (
+                    <Text style={styles.previewSent}>Déjà envoyé le {dayjs(s.last_sent_at).format("DD/MM/YYYY à HH:mm")}{s.last_sent_to ? " à " + s.last_sent_to : ""}</Text>
+                  )}
+                </View>
+              );
+            })()}
+          </ScrollView>
+          {editable && previewStmt && (
+            <View style={[styles.previewFooter, { paddingBottom: insets.bottom + 12 }]}>
+              <Pressable testID="preview-send" onPress={() => { const s = previewStmt; setPreviewStmt(null); emailOwner(s); }} disabled={!!emailBusy} style={styles.previewSendBtn}>
+                <Ionicons name="mail" size={18} color="#fff" />
+                <Text style={styles.previewSendText}>Envoyer au propriétaire</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      </Modal>
+
       {/* Add expense modal */}
       <Modal visible={!!expModal} transparent animationType="fade" onRequestClose={() => setExpModal(null)}>
         <Pressable style={styles.backdrop} onPress={() => setExpModal(null)}>
@@ -515,6 +590,15 @@ function SummaryLine({ label, value, accent }: any) {
   );
 }
 
+function PreviewRow({ label, value, bold }: any) {
+  return (
+    <View style={styles.previewRow}>
+      <Text style={[styles.previewRowL, bold && { fontFamily: font.bold, color: "#2A6F9E" }]}>{label}</Text>
+      <Text style={[styles.previewRowV, bold && { fontFamily: font.bold, color: "#2A6F9E" }]}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
   header: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
@@ -522,6 +606,34 @@ const styles = StyleSheet.create({
   title: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface },
   emailAllBtn: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.brandPrimary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.md, minHeight: 36 },
   emailAllText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onBrandPrimary },
+  sentRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  sentText: { fontFamily: font.medium, fontSize: fontSize.xs, color: "#17B0A6" },
+  previewWrap: { flex: 1, backgroundColor: colors.surface },
+  previewHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "#2A6F9E", paddingHorizontal: spacing.lg, paddingBottom: 14, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
+  previewHeaderTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: "#fff" },
+  previewClose: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+  previewDoc: { backgroundColor: "#fff", borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: spacing.lg },
+  previewTop: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
+  previewLogo: { width: 96, height: 56 },
+  previewCoName: { fontFamily: font.bold, fontSize: fontSize.base, color: "#111", textAlign: "right" },
+  previewCoLine: { fontFamily: font.regular, fontSize: fontSize.xs, color: "#555", textAlign: "right", marginTop: 1 },
+  previewCoLegal: { fontFamily: font.regular, fontSize: fontSize.xs, color: "#999", textAlign: "right", marginTop: 1 },
+  previewRule: { height: 3, backgroundColor: "#2A6F9E", borderRadius: 2, marginVertical: 14 },
+  previewRuleThin: { height: 1, backgroundColor: "#eee", marginVertical: 10 },
+  previewH2: { fontFamily: font.bold, fontSize: fontSize.xl, color: "#111" },
+  previewH3: { fontFamily: font.semibold, fontSize: fontSize.lg, color: "#2A6F9E", marginTop: 10 },
+  previewMeta: { fontFamily: font.regular, fontSize: fontSize.sm, color: "#777", marginTop: 2, marginBottom: 6 },
+  previewSection: { fontFamily: font.bold, fontSize: fontSize.sm, color: "#2A6F9E", marginTop: 6, marginBottom: 2 },
+  previewLine: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 4, gap: 8 },
+  previewLineL: { fontFamily: font.regular, fontSize: fontSize.sm, color: "#555", flex: 1 },
+  previewLineV: { fontFamily: font.semibold, fontSize: fontSize.sm, color: "#111" },
+  previewRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5, gap: 8 },
+  previewRowL: { fontFamily: font.regular, fontSize: fontSize.base, color: "#555", flex: 1 },
+  previewRowV: { fontFamily: font.semibold, fontSize: fontSize.base, color: "#111" },
+  previewSent: { fontFamily: font.medium, fontSize: fontSize.xs, color: "#17B0A6", marginTop: 14 },
+  previewFooter: { paddingHorizontal: spacing.lg, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.surface },
+  previewSendBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#17B0A6", borderRadius: radius.md, paddingVertical: 14 },
+  previewSendText: { fontFamily: font.semibold, fontSize: fontSize.base, color: "#fff" },
   monthNav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
   navBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
   monthLabel: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, textTransform: "capitalize" },

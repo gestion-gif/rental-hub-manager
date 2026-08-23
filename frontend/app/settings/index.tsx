@@ -18,6 +18,7 @@ const OPTIONS = [
   { path: "/settings/tourist-tax", icon: "receipt-outline", title: "Taxe de séjour", sub: "Taux taxe de séjour & additionnelle par logement" },
   { path: "/settings/payments", icon: "card-outline", title: "Paiement", sub: "Passerelles & méthodes de paiement" },
   { path: "/settings/api-key", icon: "key-outline", title: "Clé API Lodgify", sub: "Connexion channel manager" },
+  { path: "/settings/channex", icon: "swap-horizontal-outline", title: "Channex", sub: "Channel manager (connexion & lecture)" },
   { path: "/settings/ical", icon: "calendar-outline", title: "Import / Export iCal", sub: "Synchro calendriers .ics (Airbnb, Booking…)" },
   { path: "/settings/status-colors", icon: "color-palette-outline", title: "Couleurs des statuts", sub: "Personnalisez le code couleur" },
 ];
