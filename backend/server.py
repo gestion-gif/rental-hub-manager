@@ -470,6 +470,8 @@ async def create_reservation(payload: ReservationIn, user=Depends(get_current_us
     await db.reservations.insert_one(doc)
     doc.pop("_id", None)
     await ensure_cleaning(user["user_id"], doc["property_id"], doc.get("check_out"), doc.get("status"))
+    if doc.get("status") != "annulee":
+        await _set_property_rooms_availability(user["user_id"], doc["property_id"], doc.get("check_in"), doc.get("check_out"), True)
     return doc
 
 
@@ -506,6 +508,8 @@ async def update_reservation(reservation_id: str, payload: ReservationIn, user=D
             {"$set": {"finance": item["finance"]}})
         item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     await ensure_cleaning(user["user_id"], item["property_id"], item.get("check_out"), item.get("status"))
+    await _set_property_rooms_availability(user["user_id"], item["property_id"], item.get("check_in"), item.get("check_out"),
+                                           item.get("status") != "annulee")
     return item
 
 
@@ -527,6 +531,8 @@ async def update_status(reservation_id: str, body: dict, user=Depends(get_curren
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Reservation not found")
     item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    await _set_property_rooms_availability(user["user_id"], item["property_id"], item.get("check_in"), item.get("check_out"),
+                                           new_status != "annulee")
     return item
 
 
@@ -836,7 +842,10 @@ async def payments_pending(user=Depends(get_current_user)):
 
 @api_router.delete("/reservations/{reservation_id}")
 async def delete_reservation(reservation_id: str, user=Depends(get_current_user)):
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": user["user_id"]}, {"_id": 0})
     await db.reservations.delete_one({"id": reservation_id, "user_id": user["user_id"]})
+    if r:
+        await _set_property_rooms_availability(user["user_id"], r.get("property_id"), r.get("check_in"), r.get("check_out"), False)
     return {"ok": True}
 
 
@@ -1875,6 +1884,78 @@ async def channex_sync_logs(user=Depends(get_current_user)):
         {"user_id": user["user_id"], "provider": "channex"}, {"_id": 0}
     ).sort("date", -1).to_list(50)
     return {"logs": logs}
+
+
+
+# ---------------------------------------------------------------------------
+# Push notifications (Emergent managed relay) — register device + send_push
+# ---------------------------------------------------------------------------
+PUSH_BASE_URL = "https://integrations.emergentagent.com"
+PUSH_KEY = os.environ.get("EMERGENT_PUSH_KEY", "placeholder")
+_push_client = httpx.AsyncClient(base_url=PUSH_BASE_URL, headers={"X-Push-Key": PUSH_KEY}, timeout=10.0)
+
+
+class RegisterPushBody(BaseModel):
+    user_id: str
+    platform: str
+    device_token: str
+
+
+@api_router.post("/register-push", status_code=201)
+async def register_push(body: RegisterPushBody):
+    resp = await _push_client.post("/api/v1/push/users/register", json=body.model_dump())
+    if resp.status_code == 401:
+        raise HTTPException(500, "EMERGENT_PUSH_KEY missing or invalid")
+    if resp.status_code >= 500:
+        raise HTTPException(502, "Push provider unavailable")
+    resp.raise_for_status()
+    return {"status": "registered"}
+
+
+async def send_push(recipients: list, data: dict, idempotency_key: str = None):
+    if not recipients:
+        return
+    if "title" not in data or "message" not in data:
+        raise ValueError("data must include title and message")
+    payload = {"recipients": recipients[:100], "data": data}
+    if idempotency_key:
+        payload["$idempotency_key"] = idempotency_key
+    resp = await _push_client.post("/api/v1/push/trigger", json=payload)
+    if resp.status_code == 401:
+        raise HTTPException(500, "EMERGENT_PUSH_KEY missing or invalid")
+    if resp.status_code >= 500:
+        raise HTTPException(502, "Push provider unavailable")
+    resp.raise_for_status()
+
+
+# ---------------------------------------------------------------------------
+# Auto-block room availability from reservations
+# ---------------------------------------------------------------------------
+async def _set_property_rooms_availability(uid: str, property_id: str, check_in: str, check_out: str, closed: bool):
+    """Bloque (closed=True) ou libère (closed=False) toutes les chambres d'un logement
+    sur [check_in, check_out) (check_out exclusif). No-op si le logement n'a pas de chambre."""
+    if not check_in or not check_out:
+        return
+    rooms = await db.rooms.find({"user_id": uid, "property_id": property_id}, {"_id": 0, "id": 1}).to_list(200)
+    if not rooms:
+        return
+    try:
+        d = datetime.fromisoformat(check_in).date()
+        end = datetime.fromisoformat(check_out).date()  # exclusif (jour de depart libre)
+    except Exception:
+        return
+    room_ids = [r["id"] for r in rooms]
+    n = 0
+    while d < end and n < 800:
+        ds = d.isoformat()
+        for rid in room_ids:
+            await db.availability.update_one(
+                {"user_id": uid, "room_id": rid, "date": ds},
+                {"$set": {"user_id": uid, "room_id": rid, "date": ds,
+                          "is_available": not closed, "closed": closed,
+                          "auto_booking": closed or None}},
+                upsert=True)
+        d += timedelta(days=1); n += 1
 
 
 # ---------------------------------------------------------------------------
@@ -3965,6 +4046,7 @@ async def startup():
     asyncio.create_task(_ical_auto_sync_loop())
     asyncio.create_task(_lodgify_auto_sync_loop())
     asyncio.create_task(_ai_draft_loop())
+    asyncio.create_task(_statement_reminder_loop())
 
 
 async def _lodgify_auto_sync_loop():
@@ -4016,6 +4098,64 @@ async def automation_scheduler():
         await asyncio.sleep(1800)
 
 
-@app.on_event("shutdown")
+async def _statement_reminder_loop():
+    """Début de mois : rappelle (email + push) au gestionnaire les relevés du mois
+    écoulé restant à envoyer. Envoi unique par mois (collection reminders_sent)."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            today = now_utc().date()
+            if today.day <= 7:  # fenêtre "début de mois"
+                cur_month = f"{today.year:04d}-{today.month:02d}"
+                first = today.replace(day=1)
+                prev = first - timedelta(days=1)
+                prev_month = f"{prev.year:04d}-{prev.month:02d}"
+                owners = await db.users.find({}, {"_id": 0, "user_id": 1, "email": 1, "name": 1}).to_list(1000)
+                for u in owners:
+                    uid = u.get("user_id")
+                    if not uid:
+                        continue
+                    already = await db.reminders_sent.find_one({"user_id": uid, "month": cur_month, "kind": "statement"})
+                    if already:
+                        continue
+                    fake = {"user_id": uid, "role": "owner", "allowed_property_ids": None, "permissions": []}
+                    try:
+                        data = await owner_statement(month=prev_month, property_id="", user=fake)
+                    except Exception:
+                        continue
+                    pending = [s for s in (data.get("statements") or [])
+                               if (s.get("reservations_count") or 0) > 0 and not s.get("last_sent_at")]
+                    if not pending:
+                        continue
+                    label = data.get("period_label") or prev_month
+                    title = "Relevés à envoyer"
+                    msg = f"{len(pending)} relevé(s) de {label} restent à envoyer à vos propriétaires."
+                    # Push
+                    try:
+                        await send_push(recipients=[uid], data={"title": title, "message": msg, "action_url": "/statement"},
+                                        idempotency_key=f"stmt-{uid}-{cur_month}")
+                    except Exception as e:
+                        logger.warning("push rappel relevés échoué: %s", e)
+                    # Email au gestionnaire
+                    email = (u.get("email") or "").strip()
+                    if email:
+                        items = "".join(f"<li>{escape(str(p.get('property_name') or ''))} — {escape(str(p.get('owner') or ''))}</li>"
+                                        for p in pending)
+                        html = (f"<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto'>"
+                                f"<h2 style='color:#2A6F9E'>Relevés à envoyer — {escape(label)}</h2>"
+                                f"<p>{len(pending)} relevé(s) du mois écoulé restent à envoyer :</p>"
+                                f"<ul>{items}</ul>"
+                                f"<p style='color:#777'>Ouvrez Casanéo → Relevé pour les envoyer.</p></div>")
+                        try:
+                            await send_email(to=email, subject=f"Casanéo — {len(pending)} relevé(s) à envoyer ({label})", html=html)
+                        except Exception as e:
+                            logger.warning("email rappel relevés échoué: %s", e)
+                    await db.reminders_sent.update_one(
+                        {"user_id": uid, "month": cur_month, "kind": "statement"},
+                        {"$set": {"user_id": uid, "month": cur_month, "kind": "statement",
+                                  "count": len(pending), "sent_at": now_utc().isoformat()}}, upsert=True)
+        except Exception:
+            logger.exception("statement reminder loop error")
+        await asyncio.sleep(6 * 3600)
 async def shutdown_db_client():
     client.close()

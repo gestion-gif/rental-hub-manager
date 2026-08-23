@@ -23,6 +23,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.emergent.rentalhubmanager.p4jvi7",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "READ_MEDIA_IMAGES"
       ]
@@ -34,6 +35,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {
