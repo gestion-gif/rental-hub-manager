@@ -14,6 +14,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import * as WebBrowser from "expo-web-browser";
+import dayjs from "dayjs";
+import "dayjs/locale/fr";
+dayjs.locale("fr");
 
 import { api } from "@/src/api";
 import { storage } from "@/src/utils/storage";
@@ -371,6 +374,7 @@ export default function ReservationForm() {
       const res = await api.post(`/reservations/${id}/send-deposit-link`, {});
       if (res.sent) {
         setCvMsg("Lien de caution envoyé au voyageur ✓");
+        setDetail((d: any) => (d ? { ...d, deposit_link_sent_at: new Date().toISOString() } : d));
       } else {
         const reason = res.reason || "";
         if (reason === "no_deposit_link") setCvMsg("Ajoutez le lien de caution sur la fiche logement.");
@@ -486,6 +490,20 @@ export default function ReservationForm() {
                   <Ionicons name="paper-plane-outline" size={16} color={colors.brandPrimary} />
                   <Text style={styles.depositText}>Envoyer le lien de caution au voyageur</Text>
                 </Pressable>
+                {(!!detail?.deposit_link_sent_at || !!detail?.deposit_reminder_sent_at) && (
+                  <View style={styles.cautionHist}>
+                    {!!detail?.deposit_link_sent_at && (
+                      <Text style={styles.cautionHistText}>
+                        <Ionicons name="checkmark-circle" size={12} color={colors.success} /> Lien envoyé le {dayjs(detail.deposit_link_sent_at).format("DD/MM/YYYY à HH:mm")}
+                      </Text>
+                    )}
+                    {!!detail?.deposit_reminder_sent_at && (
+                      <Text style={styles.cautionHistText}>
+                        <Ionicons name="notifications" size={12} color={colors.warning} /> Relance envoyée le {dayjs(detail.deposit_reminder_sent_at).format("DD/MM/YYYY à HH:mm")}
+                      </Text>
+                    )}
+                  </View>
+                )}
                 {!!cvMsg && <Text style={styles.cvMsg}>{cvMsg}</Text>}
               </View>
             )
@@ -848,6 +866,8 @@ const styles = StyleSheet.create({
   sendKeysText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onBrandPrimary },
   depositBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.brandPrimary + "12", borderWidth: 1, borderColor: colors.brandPrimary + "33", borderRadius: radius.md, paddingVertical: 11, marginTop: spacing.md },
   depositText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.brandPrimary },
+  cautionHist: { marginTop: spacing.sm, gap: 3 },
+  cautionHistText: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
 
   container: { flex: 1, backgroundColor: colors.surface },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },

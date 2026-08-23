@@ -114,8 +114,9 @@ export default function Statement() {
       `Réservations : ${s.reservations_count}`,
       `Nuitées : ${money(t.nights)}`,
       `Frais de ménage : ${money(t.cleaning)}`,
-      `Taxe de séjour (à reverser) : ${money(t.tax)}`,
-      `Commissions plateforme : ${money(t.commission)}`,
+      `Taxe de séjour (à reverser) : ${money(t.tax_sejour != null ? t.tax_sejour : t.tax)}`,
+      t.tax_regional > 0 ? `Taxe add. régionale (à reverser) : ${money(t.tax_regional)}` : "",
+      `Commissions OTA : ${money(t.commission)}`,
       `Frais de gestion (${s.management_fee_pct}%) : ${money(t.management_fee)}`,
       t.owner_expenses ? `Dépenses propriétaire : ${money(t.owner_expenses)}` : "",
       t.concierge_expenses ? `Dépenses conciergerie : ${money(t.concierge_expenses)}` : "",
@@ -227,7 +228,8 @@ export default function Statement() {
                 <View style={styles.breakdown}>
                   <Row label="Nuitées (base voyageurs)" value={money(t.nights)} />
                   <Row label="Frais de ménage (conciergerie)" value={money(t.cleaning)} />
-                  <Row label="Taxe de séjour (à reverser)" value={money(t.tax)} muted />
+                  <Row label="Taxe de séjour (à reverser)" value={money(t.tax_sejour != null ? t.tax_sejour : t.tax)} muted />
+                  {t.tax_regional > 0 && <Row label="Taxe add. régionale (à reverser)" value={money(t.tax_regional)} muted />}
                   <View style={styles.brRow}>
                     <View style={styles.commLabelWrap}>
                       <Text style={styles.brLabel}>Commissions OTA</Text>

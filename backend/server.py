@@ -2748,9 +2748,20 @@ async def owner_statement(month: str, property_id: str = "", user=Depends(get_cu
             {"_id": 0}).sort("check_in", 1).to_list(1000)
         lines = []
         t_nights = t_clean = t_tax = t_comm = 0.0
+        t_tax_sejour = t_tax_regional = 0.0
+        _tp = float(p.get("tourist_tax_pct") or 0)
+        _rp = float(p.get("regional_tax_pct") or 0)
+        _tot_pct = _tp + _rp
         for r in reservations:
             a = _res_amounts(r)
             t_nights += a["nights"]; t_clean += a["cleaning"]; t_tax += a["tax"]; t_comm += a["commission"]
+            # Répartition taxe de séjour / taxe additionnelle régionale (proportionnelle aux taux du logement)
+            if _tot_pct > 0:
+                sej = round(a["tax"] * _tp / _tot_pct, 2)
+            else:
+                sej = a["tax"]
+            reg = round(a["tax"] - sej, 2)
+            t_tax_sejour += sej; t_tax_regional += reg
             lines.append({
                 "id": r.get("id"), "guest_name": r.get("guest_name"),
                 "platform": r.get("platform"), "check_in": r.get("check_in"),
@@ -2779,6 +2790,7 @@ async def owner_statement(month: str, property_id: str = "", user=Depends(get_cu
             "totals": {
                 "nights": round(t_nights, 2), "cleaning": round(t_clean, 2),
                 "tax": round(t_tax, 2), "commission": eff_comm,
+                "tax_sejour": round(t_tax_sejour, 2), "tax_regional": round(t_tax_regional, 2),
                 "commission_auto": round(t_comm, 2), "commission_override": comm_override,
                 "management_fee": mgmt_fee, "owner_expenses": owner_exp,
                 "concierge_expenses": concierge_exp,
@@ -3008,6 +3020,25 @@ async def run_automations_for_user(uid: str):
                         await db.reservations.update_one(
                             {"user_id": uid, "id": r["id"]},
                             {"$set": {"keys_sent_at": now_utc().isoformat()}})
+                        sent += 1
+                    except Exception:
+                        pass
+            # Relance caution à J-2 : hors Airbnb, caution non validée, lien de caution défini
+            if ("airbnb" not in plat and not r.get("caution_validated")
+                    and not r.get("deposit_reminder_sent_at") and today >= ci - timedelta(days=2)):
+                prop = pmap.get(r.get("property_id")) or {}
+                link = (prop.get("deposit_link") or "").strip()
+                if link:
+                    guest = r.get("guest_name") or ""
+                    pname = r.get("property_name") or prop.get("name") or "votre logement"
+                    body = (f"Bonjour {guest},".rstrip(",") + "\n"
+                            f"Petit rappel : votre arrivée à {pname} approche. Si ce n'est pas déjà fait, "
+                            f"merci de régler la caution via ce lien sécurisé :\n{link}\n\nMerci et à bientôt !")
+                    try:
+                        await adapter.send_message(http, r["lodgify_id"], body, "Rappel caution")
+                        await db.reservations.update_one(
+                            {"user_id": uid, "id": r["id"]},
+                            {"$set": {"deposit_reminder_sent_at": now_utc().isoformat()}})
                         sent += 1
                     except Exception:
                         pass
