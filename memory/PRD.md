@@ -360,3 +360,8 @@
 - **Formulaire réservation** : lit le param `status` (prefill), et pour un blocage le nom voyageur est **optionnel** (guest_name = « Bloqué » par défaut, `valid` relâché si status=bloque).
 - **Blocage depuis Planning** : bouton bascule « Bloquer des dates » (Réglette, canModify). En mode blocage, sélectionner une plage (tap début → tap fin) ouvre le formulaire réservation prérempli property+dates+status=bloque pour saisir l'annotation. Style `blockToggleOn` (gris), hint dédié.
 - Vérifié : statut bloque présent dans /preferences, création résa bloque avec notes OK + exclue du relevé (count 0), tri alphabétique + bouton « Bloquer des dates » à l'écran (screenshots), formulaire prérempli (Cosy Cocoon, dates, status=bloque).
+
+## Correction URL production Channex + re-test clé (2026-08)
+- L'utilisateur a re-fourni la MÊME clé en la présentant comme « production ». Tests multi-hôtes : `app.channex.io/api/v1` = **VRAIE URL prod** → **401** (clé invalide en prod) ; `channex.io/api/v1` → 404 (site vitrine) ; `staging.channex.io/api/v1` → 200 (0 logement). ⇒ La clé reste une clé **staging**, PAS production.
+- **Fix** : `channex.py` `CHANNEX_BASES["production"]` corrigé de `https://channex.io/api/v1` (faux, playbook) → `https://app.channex.io/api/v1`. Connexion en mode production échoue proprement (« Clé API Channex invalide ») ; staging connecté (0), import = 0.
+- **Bloqueur côté utilisateur** : il faut une VRAIE clé API de production (compte channex.io production) + logements créés dans Channex pour pouvoir importer. Rien à importer tant que ce n'est pas le cas.

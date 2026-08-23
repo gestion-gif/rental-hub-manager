@@ -12,7 +12,7 @@ from fastapi import HTTPException
 
 CHANNEX_BASES = {
     "staging": "https://staging.channex.io/api/v1",
-    "production": "https://channex.io/api/v1",
+    "production": "https://app.channex.io/api/v1",
 }
 
 
