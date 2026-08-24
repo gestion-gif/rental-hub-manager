@@ -12,14 +12,33 @@ import { useAuth } from "@/src/context/AuthContext";
 import { canSeeRevenue, canSeeInbox, canSeeSettings, canModify } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
-const ITEMS = [
-  { name: "index", label: "Accueil", icon: "home-outline" },
-  { name: "calendar", label: "Réservations", icon: "list-outline" },
-  { name: "planning", label: "Calendrier", icon: "calendar-outline" },
-  { name: "properties", label: "Logements", icon: "business-outline" },
-  { name: "statement", label: "Relevé propriétaires", icon: "document-text-outline", revenue: true },
-  { name: "assistant", label: "Assistant IA", icon: "sparkles-outline" },
-  { name: "integrations", label: "Intégrations", icon: "link-outline", admin: true },
+type NavItem = { key: string; label: string; icon: string; kind: "tab" | "stack"; path?: string; gate?: "revenue" | "admin" | "modify" | "inbox" | "settings" };
+const SECTIONS: { title: string | null; items: NavItem[] }[] = [
+  { title: null, items: [
+    { key: "index", label: "Accueil", icon: "home-outline", kind: "tab" },
+    { key: "inbox", label: "Boîte de réception", icon: "mail-outline", kind: "stack", path: "/inbox", gate: "inbox" },
+  ] },
+  { title: "Gestion", items: [
+    { key: "calendar", label: "Réservations", icon: "list-outline", kind: "tab" },
+    { key: "planning", label: "Calendrier", icon: "calendar-outline", kind: "tab" },
+    { key: "properties", label: "Logements", icon: "business-outline", kind: "tab" },
+    { key: "cleaning", label: "À faire aujourd'hui", icon: "checkbox-outline", kind: "stack", path: "/cleaning" },
+  ] },
+  { title: "Revenus", items: [
+    { key: "statement", label: "Relevé propriétaires", icon: "document-text-outline", kind: "tab", gate: "revenue" },
+    { key: "kpi", label: "Tableau de bord", icon: "speedometer-outline", kind: "stack", path: "/kpi", gate: "revenue" },
+    { key: "analytics", label: "Statistiques", icon: "stats-chart-outline", kind: "stack", path: "/analytics", gate: "revenue" },
+    { key: "reviews", label: "Avis voyageurs", icon: "star-outline", kind: "stack", path: "/reviews", gate: "revenue" },
+  ] },
+  { title: "Outils", items: [
+    { key: "assistant", label: "Assistant IA", icon: "sparkles-outline", kind: "tab" },
+    { key: "website", label: "Site Web", icon: "globe-outline", kind: "stack", path: "/settings/booking-site", gate: "modify" },
+    { key: "integrations", label: "Intégrations", icon: "link-outline", kind: "tab", gate: "admin" },
+  ] },
+  { title: "Compte", items: [
+    { key: "settings", label: "Paramètres", icon: "settings-outline", kind: "stack", path: "/settings", gate: "settings" },
+    { key: "help", label: "Aide", icon: "help-buoy-outline", kind: "stack", path: "/help" },
+  ] },
 ];
 
 function CustomDrawer(props: any) {
@@ -61,77 +80,41 @@ function CustomDrawer(props: any) {
 
         <View style={styles.sep} />
 
-        {ITEMS.map((it) => {
-          if ((it as any).revenue && !canSeeRevenue(user)) return null;
-          if ((it as any).admin && !canModify(user)) return null;
-          const active = current === it.name;
+        {SECTIONS.map((section, si) => {
+          const visible = section.items.filter((it) => {
+            if (it.gate === "revenue") return canSeeRevenue(user);
+            if (it.gate === "admin" || it.gate === "modify") return canModify(user);
+            if (it.gate === "inbox") return canSeeInbox(user);
+            if (it.gate === "settings") return canSeeSettings(user);
+            return true;
+          });
+          if (!visible.length) return null;
           return (
-            <React.Fragment key={it.name}>
-              <Pressable
-                testID={`drawer-${it.name}`}
-                onPress={() => navigation.navigate(it.name)}
-                style={[styles.item, active && styles.itemActive]}
-              >
-                <Ionicons name={it.icon as any} size={20} color={active ? colors.brandPrimary : colors.onSurfaceSecondary} />
-                <Text style={[styles.itemText, active && styles.itemTextActive]}>{it.label}</Text>
-              </Pressable>
-              {it.name === "index" && canSeeInbox(user) && (
-                <Pressable testID="drawer-inbox" onPress={() => goStack("/inbox")} style={styles.item}>
-                  <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />
-                  <Text style={styles.itemText}>Boîte de réception</Text>
-                  {unread > 0 && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{unread > 9 ? "9+" : unread}</Text>
-                    </View>
-                  )}
-                </Pressable>
-              )}
-            </React.Fragment>
+            <View key={si}>
+              {si > 0 && <View style={styles.sep} />}
+              {section.title && <Text style={styles.sectionTitle}>{section.title}</Text>}
+              {visible.map((it) => {
+                const active = it.kind === "tab" && current === it.key;
+                return (
+                  <Pressable
+                    key={it.key}
+                    testID={`drawer-${it.key}`}
+                    onPress={() => { if (it.kind === "tab") navigation.navigate(it.key); else goStack(it.path!); }}
+                    style={[styles.item, active && styles.itemActive]}
+                  >
+                    <Ionicons name={it.icon as any} size={20} color={active ? colors.brandPrimary : colors.onSurfaceSecondary} />
+                    <Text style={[styles.itemText, active && styles.itemTextActive]}>{it.label}</Text>
+                    {it.key === "inbox" && unread > 0 && (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{unread > 9 ? "9+" : unread}</Text>
+                      </View>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
           );
         })}
-
-        <View style={styles.sep} />
-
-        <Pressable testID="drawer-cleaning" onPress={() => goStack("/cleaning")} style={styles.item}>
-          <Ionicons name="sparkles-outline" size={20} color={colors.onSurfaceSecondary} />
-          <Text style={styles.itemText}>À faire aujourd'hui</Text>
-        </Pressable>
-
-        {canSeeRevenue(user) && (
-          <Pressable testID="drawer-kpi" onPress={() => goStack("/kpi")} style={styles.item}>
-            <Ionicons name="speedometer-outline" size={20} color={colors.onSurfaceSecondary} />
-            <Text style={styles.itemText}>Tableau de bord</Text>
-          </Pressable>
-        )}
-        {canSeeRevenue(user) && (
-          <Pressable testID="drawer-analytics" onPress={() => goStack("/analytics")} style={styles.item}>
-            <Ionicons name="stats-chart-outline" size={20} color={colors.onSurfaceSecondary} />
-            <Text style={styles.itemText}>Statistiques</Text>
-          </Pressable>
-        )}
-        {canSeeRevenue(user) && (
-          <Pressable testID="drawer-reviews" onPress={() => goStack("/reviews")} style={styles.item}>
-            <Ionicons name="star-outline" size={20} color={colors.onSurfaceSecondary} />
-            <Text style={styles.itemText}>Avis voyageurs</Text>
-          </Pressable>
-        )}
-        {canModify(user) && (
-          <Pressable testID="drawer-website" onPress={() => goStack("/settings/booking-site")} style={styles.item}>
-            <Ionicons name="globe-outline" size={20} color={colors.onSurfaceSecondary} />
-            <Text style={styles.itemText}>Site Web</Text>
-          </Pressable>
-        )}
-        {canSeeSettings(user) && (
-          <Pressable testID="drawer-settings" onPress={() => goStack("/settings")} style={styles.item}>
-            <Ionicons name="settings-outline" size={20} color={colors.onSurfaceSecondary} />
-            <Text style={styles.itemText}>Paramètres</Text>
-          </Pressable>
-        )}
-
-        <Pressable testID="drawer-help" onPress={() => goStack("/help")} style={styles.item}>
-          <Ionicons name="help-buoy-outline" size={20} color={colors.onSurfaceSecondary} />
-          <Text style={styles.itemText}>Aide</Text>
-        </Pressable>
       </DrawerContentScrollView>
 
       <Pressable
@@ -174,6 +157,7 @@ const styles = StyleSheet.create({
   userName: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface },
   userEmail: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginVertical: spacing.md, marginHorizontal: spacing.lg },
+  sectionTitle: { fontFamily: font.bold, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, textTransform: "uppercase", letterSpacing: 0.6, marginTop: spacing.sm, marginBottom: 4, paddingHorizontal: spacing.lg },
   item: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: 13, paddingHorizontal: spacing.lg, borderRadius: radius.md, marginHorizontal: spacing.sm },
   itemActive: { backgroundColor: colors.surfaceSecondary },
   itemText: { fontFamily: font.medium, fontSize: fontSize.lg, color: colors.onSurfaceSecondary },
