@@ -13,6 +13,8 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Haptics from "expo-haptics";
 import dayjs from "dayjs";
 import "dayjs/locale/fr";
 dayjs.locale("fr");
@@ -20,6 +22,7 @@ dayjs.locale("fr");
 import { useAuth } from "@/src/context/AuthContext";
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
+import CelebrationBanner from "@/src/components/CelebrationBanner";
 import { HelpButton } from "@/src/components/HelpButton";
 import StatusBadge from "@/src/components/StatusBadge";
 import { getInterventionType } from "@/src/interventionTypes";
@@ -71,6 +74,38 @@ export default function Dashboard() {
   const [payments, setPayments] = useState<any[]>([]);
   const [payOpen, setPayOpen] = useState(true);
   const [pendingStmts, setPendingStmts] = useState<any>({ count: 0, pending: [], period_label: "" });
+  const [celebration, setCelebration] = useState<{ count: number; latest: any } | null>(null);
+
+  const checkCelebration = useCallback(async () => {
+    try {
+      const key = `casaneo:lastSeenReservations:${user?.user_id || user?.email || "me"}`;
+      const since = await AsyncStorage.getItem(key);
+      const nowIso = new Date().toISOString();
+      if (since) {
+        const res = await api.get(`/reservations/recent-confirmed?since=${encodeURIComponent(since)}`);
+        if (res?.count > 0) {
+          setCelebration({ count: res.count, latest: res.latest });
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        }
+      }
+      await AsyncStorage.setItem(key, nowIso);
+    } catch {}
+  }, [user]);
+
+  function dismissCelebration() {
+    setCelebration(null);
+  }
+
+  function openCelebration() {
+    const c = celebration;
+    setCelebration(null);
+    if (c?.count === 1 && c?.latest?.reservation_id) {
+      router.push(`/reservation-form?id=${c.latest.reservation_id}`);
+    } else {
+      router.push("/(tabs)/planning");
+    }
+  }
+
 
   const load = useCallback(async () => {
     try {
@@ -114,7 +149,8 @@ export default function Dashboard() {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load]),
+      checkCelebration();
+    }, [load, checkCelebration]),
   );
 
   const firstName = (user?.name || "").split(" ")[0] || "hôte";
@@ -205,6 +241,16 @@ export default function Dashboard() {
                 onPress={() => router.push("/(tabs)/planning")}
               />
             </View>
+
+            {!loading && (
+              <CelebrationBanner
+                key={celebration && celebration.count > 0 ? `celebrate-${celebration.count}` : "greeting"}
+                count={celebration?.count || 0}
+                latest={celebration?.latest || null}
+                onPress={openCelebration}
+                onDismiss={dismissCelebration}
+              />
+            )}
 
             {canSeeInbox(user) && drafts > 0 && (
               <Pressable testID="dash-drafts-banner" onPress={() => router.push("/inbox")} style={styles.draftBanner}>

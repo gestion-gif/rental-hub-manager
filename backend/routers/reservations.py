@@ -326,6 +326,44 @@ async def deposits_pending(user=Depends(get_current_user)):
     return out
 
 
+@api_router.get("/reservations/recent-confirmed")
+async def recent_confirmed(since: Optional[str] = None, user=Depends(get_current_user)):
+    """Réservations confirmées reçues depuis la dernière visite (paramètre `since` = timestamp ISO).
+    Sert au bandeau de félicitations sur l'accueil. Renvoie le nombre et la dernière réservation."""
+    uid = user["user_id"]
+    q = {
+        "user_id": uid,
+        "status": {"$nin": ["annulee", "demande"]},
+        **_prop_scope(user, "property_id"),
+    }
+    if since:
+        q["created_at"] = {"$gt": since}
+    else:
+        # Sans référence, on ne remonte rien (évite un bandeau au tout premier chargement).
+        return {"count": 0, "latest": None}
+    res = await db.reservations.find(
+        q, {"_id": 0, "id": 1, "guest_name": 1, "property_id": 1, "check_in": 1,
+            "created_at": 1, "platform": 1}
+    ).sort("created_at", -1).to_list(200)
+    if not res:
+        return {"count": 0, "latest": None}
+    pids = list({r["property_id"] for r in res if r.get("property_id")})
+    props = await db.properties.find({"id": {"$in": pids}}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
+    pname = {p["id"]: p["name"] for p in props}
+    top = res[0]
+    return {
+        "count": len(res),
+        "latest": {
+            "reservation_id": top["id"],
+            "guest_name": top.get("guest_name", ""),
+            "property_name": pname.get(top.get("property_id"), ""),
+            "check_in": top.get("check_in"),
+            "platform": top.get("platform", ""),
+        },
+    }
+
+
+
 @api_router.get("/payments/pending")
 async def payments_pending(user=Depends(get_current_user)):
     """Réservations à venir dont le solde n'est pas réglé avant l'arrivée."""

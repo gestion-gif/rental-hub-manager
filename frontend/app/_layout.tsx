@@ -115,6 +115,14 @@ export default function RootLayout() {
                   options={{ presentation: "modal" }}
                 />
                 <Stack.Screen
+                  name="accounting-form"
+                  options={{ presentation: "modal" }}
+                />
+                <Stack.Screen
+                  name="accounting-recurring-form"
+                  options={{ presentation: "modal" }}
+                />
+                <Stack.Screen
                   name="settings/status-colors"
                   options={{ presentation: "modal" }}
                 />

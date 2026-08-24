@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -44,6 +44,8 @@ const SECTIONS = [
 export default function SettingsHub() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const [open, setOpen] = useState<string | null>(SECTIONS[0].title);
+  const toggle = (t: string) => setOpen((cur) => (cur === t ? null : t));
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
@@ -54,21 +56,30 @@ export default function SettingsHub() {
         <HelpButton screen="settings" />
       </View>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }}>
-        {SECTIONS.map((section) => (
-          <View key={section.title}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            {section.items.map((o) => (
-              <Pressable key={o.path} testID={`settings-${o.path}`} onPress={() => router.push(o.path)} style={styles.row}>
-                <View style={styles.iconWrap}><Ionicons name={o.icon as any} size={20} color={colors.onSurface} /></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.rowTitle}>{o.title}</Text>
-                  <Text style={styles.rowSub}>{o.sub}</Text>
+        {SECTIONS.map((section) => {
+          const expanded = open === section.title;
+          return (
+            <View key={section.title} style={styles.group}>
+              <Pressable testID={`settings-section-${section.title}`} onPress={() => toggle(section.title)} style={styles.groupHead}>
+                <Text style={styles.groupHeadText}>{section.title}</Text>
+                <View style={styles.groupHeadRight}>
+                  <Text style={styles.groupCount}>{section.items.length}</Text>
+                  <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={18} color={colors.onSurfaceTertiary} />
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceTertiary} />
               </Pressable>
-            ))}
-          </View>
-        ))}
+              {expanded && section.items.map((o) => (
+                <Pressable key={o.path} testID={`settings-${o.path}`} onPress={() => router.push(o.path)} style={styles.row}>
+                  <View style={styles.iconWrap}><Ionicons name={o.icon as any} size={20} color={colors.onSurface} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowTitle}>{o.title}</Text>
+                    <Text style={styles.rowSub}>{o.sub}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceTertiary} />
+                </Pressable>
+              ))}
+            </View>
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -80,6 +91,11 @@ const styles = StyleSheet.create({
   backBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
   title: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
   sectionTitle: { fontFamily: font.bold, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, textTransform: "uppercase", letterSpacing: 0.6, marginTop: spacing.lg, marginBottom: spacing.sm },
+  group: { marginBottom: spacing.sm },
+  groupHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, paddingVertical: 14, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
+  groupHeadText: { fontFamily: font.bold, fontSize: fontSize.base, color: colors.onSurface, textTransform: "uppercase", letterSpacing: 0.4 },
+  groupHeadRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  groupCount: { fontFamily: font.semibold, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, backgroundColor: colors.surface, borderRadius: radius.pill, minWidth: 20, textAlign: "center", paddingHorizontal: 6, paddingVertical: 2, overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.sm },
   iconWrap: { width: 42, height: 42, borderRadius: 12, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
   rowTitle: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface },

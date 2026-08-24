@@ -483,3 +483,23 @@
 - Intégrations : carte GetYourGuide (partner.getyourguide.com) + champ lien affilié stocké dans preferences.getyourguide_url, inséré via variable {activites} dans les modèles (run_automations_for_user + _render_message_vars).
 - Messagerie multi-canal : ContactGuestModal (src/components) déclenché depuis fiche réservation (bouton "Contacter le voyageur", editing only) et inbox thread (icône). Backend routers/messaging.py : GET /api/messaging/context (canaux dispo + modèles rendus), POST /api/messaging/send (email via Resend, platform via Channex send_booking_message). WhatsApp = lien wa.me côté client (pas de backend). inbox/{thread} renvoie désormais reservation_id.
 - Backend testé iteration_26 : 12/12 pass. Frontend smoke OK.
+
+## Session (2026-06 fork) — Bandeau félicitations + son + logo + Module Comptabilité
+### Accueil — bandeau dynamique
+- `src/components/CelebrationBanner.tsx` : bandeau permanent en haut de l'accueil (sous les stats).
+  - Mode "félicitations" (count>0) : dégradé vert animé (shimmer + icône trophée qui bouge), texte variable (Félicitations/Bravo/Bien joué/Youpi/Génial), résumé "N nouvelles réservations 🎉", son de caisse enregistreuse "cha-ching" (`assets/sounds/cash-register.mp3` via expo-audio, playsInSilentMode), fermable (croix) + cliquable (ouvre la résa si 1, sinon /planning).
+  - Mode "Bonjour !" (count=0) : STATIQUE (aucune animation), dégradé bleu, icône soleil, titre "Bonjour !" + sous-titre "Par quoi commençons-nous aujourd'hui ?", ni fermable ni cliquable, pas de son.
+- Détection : AsyncStorage `casaneo:lastSeenReservations:<user_id>` ; endpoint `GET /api/reservations/recent-confirmed?since=<iso>` (status != annulee/demande, created_at > since) -> {count, latest}. lastSeen avancé à chaque focus (affichage une fois).
+- Logo barre latérale remplacé : `assets/images/casaneo-logo.png` (logo Casanéo couleur recadré) dans `(tabs)/_layout.tsx`.
+
+### Module Comptabilité (nouveau)
+- Backend `routers/accounting.py` (collections `transactions`, `acct_recurring`). Endpoints:
+  - GET /api/accounting/meta (catégories recette/depense + taux TVA 0/5.5/10/20)
+  - CRUD GET/POST/PUT/DELETE /api/accounting/transactions (calcul auto HT/TVA depuis TTC + taux)
+  - CRUD /api/accounting/recurring (dépenses récurrentes mensuel/trimestriel/annuel, génération paresseuse `_materialize_recurring` à chaque GET, sans doublon, source=recurring)
+  - POST /api/accounting/import-revenues {month|start,end} -> crée 1 recette par réservation confirmée (nuitées+ménage, hors taxe séjour), source=reservation, idempotent (skip si déjà importée)
+  - POST /api/accounting/scan-receipt (multipart 'file') -> scan IA Claude Sonnet 4.6 vision (ImageContent base64) -> {supplier,date,amount_ttc,vat_amount,vat_rate,currency,category_guess}
+  - GET /api/accounting/summary -> P&L (recettes/depenses/resultat ttc+ht), TVA {collectee,deductible,nette}, by_category, by_property, by_owner (vue agence + par propriétaire)
+- Frontend : `app/accounting.tsx` (onglets Aperçu/Journal/Récurrent, sélecteur de mois, import revenus, cartes résultat/TVA, répartitions), `app/accounting-form.tsx` (écriture recette/dépense + photo justificatif + scan IA), `app/accounting-recurring-form.tsx`. Entrée menu latéral "Comptabilité" (Revenus, gate revenue). Écrans modaux enregistrés dans app/_layout.tsx.
+- FAQ mise à jour (`src/data/help.ts`) : topic "comptabilite" + SCREEN_HELP.accounting ; article bandeau félicitations + son dans topic "reservations".
+- Tests : iteration_27 backend 11/11 pass (dont scan IA réel : ticket Carrefour 16.05€ TVA 5.5% correctement lu). Aucune API mockée.

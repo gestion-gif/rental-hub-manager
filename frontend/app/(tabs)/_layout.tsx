@@ -26,6 +26,7 @@ const SECTIONS: { title: string | null; items: NavItem[] }[] = [
   ] },
   { title: "Revenus", items: [
     { key: "statement", label: "Relevé propriétaires", icon: "document-text-outline", kind: "tab", gate: "revenue" },
+    { key: "accounting", label: "Comptabilité", icon: "calculator-outline", kind: "stack", path: "/accounting", gate: "revenue" },
     { key: "kpi", label: "Tableau de bord", icon: "speedometer-outline", kind: "stack", path: "/kpi", gate: "revenue" },
     { key: "analytics", label: "Statistiques", icon: "stats-chart-outline", kind: "stack", path: "/analytics", gate: "revenue" },
     { key: "reviews", label: "Avis voyageurs", icon: "star-outline", kind: "stack", path: "/reviews", gate: "revenue" },
@@ -62,8 +63,7 @@ function CustomDrawer(props: any) {
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
       <DrawerContentScrollView {...props} contentContainerStyle={{ paddingTop: insets.top + spacing.lg }}>
         <View style={styles.brand}>
-          <View style={styles.logo}><Ionicons name="home" size={20} color={colors.onBrandPrimary} /></View>
-          <Text style={styles.brandText}>Casanéo</Text>
+          <Image source={require("@/assets/images/casaneo-logo.png")} style={styles.brandLogo} contentFit="contain" />
         </View>
 
         <View style={styles.userRow}>
@@ -149,7 +149,8 @@ export default function DrawerLayout() {
 }
 
 const styles = StyleSheet.create({
-  brand: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.lg },
+  brand: { paddingHorizontal: spacing.lg, marginBottom: spacing.lg },
+  brandLogo: { width: 170, height: 46 },
   logo: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
   brandText: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
   userRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.lg, marginBottom: spacing.md },

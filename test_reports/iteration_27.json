@@ -1,0 +1,53 @@
+{
+  "summary": "Iteration 27 backend testing — new /api/accounting/* module (comptabilité + TVA + récurrences + import réservations + scan IA reçu Claude Sonnet 4.6). 11/11 tests passing (meta, transactions CRUD with HT/VAT split, month filter with property_name/owner_name, PUT recalculation, DELETE + 404, summary P&L + TVA + by_category/by_property/by_owner, recurring create/materialize/idempotent/PUT/DELETE, import-revenues idempotency, real vision scan-receipt returning {supplier:'SUPERMARCHE CARREFOUR', date:'2026-01-14', amount_ttc:16.05, vat_amount:2.39, vat_rate:5.5, currency:'EUR', category_guess:'Alimentation / Courses'}). All acceptance criteria from the review request are met.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/accounting/scan-receipt", "issue": "MIME sniffing is done via substring only on content_type (png/webp/else jpeg). If the client sends 'image/svg+xml' or a wrong content_type, we still forward as image/jpeg. Not blocking (the model rejects gracefully) but could return 415 on unsupported types."},
+      {"endpoint": "GET /api/accounting/transactions", "issue": "_materialize_recurring is called on every LIST call. For a heavy owner with many active recurrences, this is O(recs × months). Consider caching last materialize timestamp per user."},
+      {"endpoint": "GET /api/accounting/summary", "issue": "'by_owner' bucket resolution uses owner_id if present, otherwise falls back to the property's owner. If a manual transaction has NO property_id AND NO owner_id, it goes into '_none' bucket labelled 'Non affecté' — acceptable but worth noting for the UI."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter27_accounting.py",
+    "/app/test_reports/pytest/pytest_iter27.xml"
+  ],
+  "action_items": [
+    "No blocking action. Optional: return 415 on unsupported receipt MIME types; optional: throttle _materialize_recurring calls (per-user cache) to avoid recomputing on every GET."
+  ],
+  "critical_code_review_comments": [
+    "backend/routers/accounting.py:66-71 — _split_tva rounds twice (ttc then ht) then computes vat as (ttc-ht); with 105.5/5.5% this gives HT=100.00, VAT=5.50 (verified). OK, but note the small drift on very large amounts (e.g. 999.99 / 20% -> HT=833.33, VAT=166.66; TTC does not exactly reconcile). Fine for consumer receipts.",
+    "backend/routers/accounting.py:141-163 — _materialize_recurring does N find_one lookups per due date. Consider a single find with $in on dates, or a compound index (user_id, recurring_id, date).",
+    "backend/routers/accounting.py:238-244 — DELETE returns 404 correctly on missing tx (verified). Note that recurring-generated transactions can be deleted by the user; the next GET will regenerate them (idempotent by date). This is expected but worth documenting in the UI (‘Cette écriture est récurrente, elle sera régénérée’).",
+    "backend/routers/accounting.py:335-343 — DELETE /accounting/recurring supports keep_generated=false — good. But when keep_generated=true (default) and start_date is later moved back via PUT, previously deleted months will be re-created. Acceptable.",
+    "backend/routers/accounting.py:349-390 — import-revenues excludes only 'annulee' and 'demande' statuses. Confirm that pending/hold states (e.g. 'option') are intentionally included as revenue.",
+    "backend/routers/accounting.py:271 — vision prompt uses a strict JSON schema; the endpoint gracefully returns empty strings if the model returns malformed JSON (verified by code path 282-297)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter27_accounting.py (new)"
+  ],
+  "success_rate": {"backend": "100% (11/11 passed)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "All entries prefixed with TEST_QA and cleaned in module-scope teardown (both manual tx and recurring rec + generated tx via keep_generated=false).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_iter27_accounting.py for regression on the accounting module. It logs into QA Admin, generates a realistic 480x720 JPEG receipt via PIL (SUPERMARCHE CARREFOUR ticket) and performs ONE real Claude Sonnet 4.6 vision call (~budget-conscious). If the Emergent LLM key changes or the vision endpoint is temporarily unavailable, only TestScanReceipt will fail — the rest is pure DB/logic and independent.",
+  "detailed_test_results": {
+    "TestMeta::test_meta_returns_categories_and_vat_rates": "PASS — categories.recette contains 'Nuitées / Loyer', categories.depense contains 'Ménage', vat_rates == [0, 5.5, 10, 20].",
+    "TestTransactionsCRUD::test_create_depense_20_and_verify_ht_vat_split": "PASS — 120 TTC @20% -> HT=100.00, VAT=20.00; property_name/owner_name present.",
+    "TestTransactionsCRUD::test_create_recette_vat0_ht_equals_ttc": "PASS — 200 TTC @0% -> HT=200, VAT=0.",
+    "TestTransactionsCRUD::test_update_transaction_recalculates_ht_vat": "PASS — PUT with 105.5 TTC @5.5% -> HT=100.00, VAT=5.50 (recalculated).",
+    "TestTransactionsCRUD::test_delete_then_second_delete_returns_404": "PASS — DELETE ok, second DELETE returns 404.",
+    "TestSummary::test_summary_reflects_created_entries": "PASS — recettes/depenses/resultat with ttc+ht, tva{collectee,deductible,nette} coherent (nette≈collectee-deductible), by_category/by_property/by_owner present.",
+    "TestRecurring::test_recurring_creates_transactions_and_no_duplicates": "PASS — monthly recurrence start=2 mois avant a généré >=2 tx (source=recurring, amount_ttc=60, HT=50, VAT=10). Second GET n'a pas dupliqué.",
+    "TestRecurring::test_recurring_put_ok": "PASS.",
+    "TestRecurring::test_recurring_delete_ok": "PASS — DELETE ok, second DELETE 404.",
+    "TestImportRevenues::test_import_revenues_then_no_duplicates": "PASS — POST 2026-09 returns {created, skipped, period_label}; second POST returns created=0 and skipped >= first_created (idempotent per reservation_id).",
+    "TestScanReceipt::test_scan_receipt_returns_valid_json": "PASS — Claude Sonnet 4.6 vision returned {supplier:'SUPERMARCHE CARREFOUR', date:'2026-01-14', amount_ttc:16.05 (numeric), vat_amount:2.39, vat_rate:5.5, currency:'EUR', category_guess:'Alimentation / Courses'}. All 7 required keys present."
+  }
+}

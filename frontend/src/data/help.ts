@@ -105,6 +105,10 @@ export const HELP_TOPICS: HelpTopic[] = [
         q: "Comment enregistrer un paiement ou une caution ?",
         a: "Ouvrez la réservation : vous pouvez ajouter des paiements, marquer la caution comme validée et envoyer les instructions de clés au voyageur.",
       },
+      {
+        q: "Qu'est-ce que le bandeau de félicitations sur l'accueil ?",
+        a: "À chaque nouvelle réservation confirmée reçue depuis votre dernière visite, un bandeau animé de félicitations 🎉 s'affiche en haut de l'accueil, accompagné d'un son de caisse enregistreuse « cha-ching » sur mobile. S'il y a plusieurs réservations, il indique le nombre (ex. « 3 nouvelles réservations »). Tapez le bandeau pour ouvrir la réservation (ou le calendrier), ou fermez-le avec la croix. Astuce : le son de caisse utilise le volume du téléphone ; vérifiez qu'il n'est pas coupé.",
+      },
     ],
   },
   {
@@ -147,6 +151,45 @@ export const HELP_TOPICS: HelpTopic[] = [
       {
         q: "Un rappel automatique est-il envoyé ?",
         a: "Oui, en début de mois vous recevez un rappel (email + notification) listant les relevés du mois écoulé restant à envoyer.",
+      },
+    ],
+  },
+  {
+    id: "comptabilite",
+    icon: "calculator-outline",
+    title: "Comptabilité",
+    summary: "Recettes, dépenses, TVA et compte de résultat.",
+    guides: [
+      {
+        title: "Enregistrer une dépense avec justificatif",
+        steps: [
+          "Menu → Revenus → Comptabilité.",
+          "Bouton + → choisissez « Dépense ».",
+          "« Scanner un justificatif » : l'IA lit le montant, la date, la TVA et le fournisseur.",
+          "Vérifiez, choisissez la catégorie et le logement/propriétaire, puis Ajoutez.",
+        ],
+      },
+      {
+        title: "Voir le compte de résultat",
+        steps: [
+          "Onglet « Aperçu » : recettes, dépenses et résultat de la période.",
+          "Utilisez « Importer les revenus de la période » pour créer une recette par réservation confirmée.",
+          "La TVA (collectée, déductible, nette) et la répartition par catégorie/propriétaire s'affichent.",
+        ],
+      },
+    ],
+    articles: [
+      {
+        q: "Comment fonctionne la TVA ?",
+        a: "Sur chaque écriture, indiquez le montant TTC et le taux de TVA (0, 5,5, 10 ou 20 %). Le HT et la TVA sont calculés automatiquement. L'Aperçu affiche la TVA collectée (recettes), déductible (dépenses) et la TVA nette à reverser.",
+      },
+      {
+        q: "Comment ajouter une dépense qui revient chaque mois ?",
+        a: "Onglet « Récurrent » → Ajouter. Définissez le libellé, le montant, la fréquence (mensuel/trimestriel/annuel) et la date de début. Les dépenses sont générées automatiquement à chaque échéance.",
+      },
+      {
+        q: "Le compte de résultat est-il disponible par propriétaire ?",
+        a: "Oui. L'Aperçu propose une répartition par propriétaire et par logement, en plus de la vue globale de l'agence.",
       },
     ],
   },
@@ -275,6 +318,7 @@ export const SCREEN_HELP: Record<string, ScreenHelp> = {
     intro: "Votre tableau de bord du jour : arrivées, départs et tâches à faire.",
     tips: [
       "Consultez les arrivées et départs du jour en un coup d'œil.",
+      "Un bandeau animé + son de caisse vous félicite à chaque nouvelle réservation confirmée.",
       "L'encart « Relevés à envoyer » peut être replié avec le chevron.",
       "Ouvrez le menu ☰ pour accéder à toutes les sections.",
     ],
@@ -317,6 +361,16 @@ export const SCREEN_HELP: Record<string, ScreenHelp> = {
       "Envoyez un relevé (email + PDF) par logement ou tous d'un coup.",
     ],
     topicId: "releves",
+  },
+  accounting: {
+    title: "Comptabilité",
+    intro: "Recettes, dépenses, TVA et compte de résultat par période.",
+    tips: [
+      "Bouton + : ajoutez une dépense (avec scan IA du justificatif) ou une recette.",
+      "Onglet Aperçu : résultat, TVA et répartition par propriétaire.",
+      "Onglet Récurrent : dépenses générées automatiquement chaque mois.",
+    ],
+    topicId: "comptabilite",
   },
   assistant: {
     title: "Assistant IA",
