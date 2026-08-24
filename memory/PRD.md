@@ -466,3 +466,11 @@
 ## Itération 31b — Phase 3 : validation réception (simulation)
 - Logique `process_channex_bookings` validée par simulation (feed mocké) : réservation créée (source channex, guests/dates/montant OK), dispo bloquée, ACK appelé. ✅
 - Création de réservation réelle via API bloquée par 403 : l'app « Booking CRS » doit être installée dans l'UI Channex par l'utilisateur. En attente de l'installation pour créer des bookings de test via /api/v1/bookings.
+
+## Certification Channex — questionnaire complété et envoyé (2026-08)
+- Propriété de test créée sur Channex Staging (USD) : « Propriété de test - Casanéo » (`26c71710-1083-4864-a7d1-1cb2007060ff`), 2 chambres (Twin `ce6c64ac…`, Double `b65d2e9d…`), 4 plans tarifaires (BAR + B&B par chambre).
+- 10 scénarios ARI exécutés (Full Sync 500j, single/multi date rates, min stay, stop sell, multi restrictions, half-year, single/multi availability) → tous `Success` + task ids, valeurs vérifiées en relecture.
+- Cas #11 Booking Receiving : cycle New→Modified→Cancelled via Booking CRS (Booking `44cecde4…`, revisions new `2d3c1358…`, modified `212f35d8…`, cancelled `16f26e17…`).
+- Rate limits & update logic : conformes (Outbox 3s/appel ~20/min + back-off 429/5xx ; deltas uniquement ; full-sync manuel à la demande, jamais sur minuterie).
+- ⚠️ BUG À CORRIGER avant prod : `routers/channex.py` full-sync envoie le tarif en centimes (`prix×100`) alors que `/restrictions` attend des unités décimales (« 100.00 ») → tarifs 100× trop élevés. La certif a été passée avec des pushs corrects manuels. Le delta-push (outbox) construit les valeurs via `_price_for_day` — À VÉRIFIER aussi le même souci de ×100.
+- Format confirmé empiriquement : rate_plan CREATION `options.rate` = centimes (10000→100.00) ; ARI `/restrictions` `rate` = unités décimales string ("333.00").
