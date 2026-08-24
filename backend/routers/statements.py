@@ -59,19 +59,25 @@ async def owner_statement(month: str = "", start: str = "", end: str = "",
         lines = []
         t_nights = t_clean = t_tax = t_comm = 0.0
         t_tax_sejour = t_tax_regional = 0.0
+        t_tax_airbnb = 0.0  # taxe de séjour perçue & reversée par Airbnb (pas par l'hôte)
         _tp = float(p.get("tourist_tax_pct") or 0)
         _rp = float(p.get("regional_tax_pct") or 0)
         _tot_pct = _tp + _rp
         for r in reservations:
             a = _res_amounts(r)
             t_nights += a["nights"]; t_clean += a["cleaning"]; t_tax += a["tax"]; t_comm += a["commission"]
-            # Répartition taxe de séjour / taxe additionnelle régionale (proportionnelle aux taux du logement)
-            if _tot_pct > 0:
-                sej = round(a["tax"] * _tp / _tot_pct, 2)
+            _is_airbnb = "airbnb" in (r.get("platform") or "").lower()
+            if _is_airbnb:
+                # Airbnb perçoit et reverse la taxe de séjour → l'hôte n'a rien à reverser
+                t_tax_airbnb += a["tax"]
             else:
-                sej = a["tax"]
-            reg = round(a["tax"] - sej, 2)
-            t_tax_sejour += sej; t_tax_regional += reg
+                # Répartition taxe de séjour / taxe additionnelle régionale (proportionnelle aux taux du logement)
+                if _tot_pct > 0:
+                    sej = round(a["tax"] * _tp / _tot_pct, 2)
+                else:
+                    sej = a["tax"]
+                reg = round(a["tax"] - sej, 2)
+                t_tax_sejour += sej; t_tax_regional += reg
             lines.append({
                 "id": r.get("id"), "guest_name": r.get("guest_name"),
                 "platform": r.get("platform"), "check_in": r.get("check_in"),
@@ -110,7 +116,8 @@ async def owner_statement(month: str = "", start: str = "", end: str = "",
                 "management_fee": mgmt_fee, "owner_expenses": owner_exp,
                 "concierge_expenses": concierge_exp,
                 "owner_revenue": owner_revenue, "concierge_revenue": concierge_revenue,
-                "tourist_tax_to_reverse": round(t_tax, 2),
+                "tourist_tax_to_reverse": round(t_tax_sejour + t_tax_regional, 2),
+                "tax_airbnb_collected": round(t_tax_airbnb, 2),
             },
             "expenses": expenses,
         })

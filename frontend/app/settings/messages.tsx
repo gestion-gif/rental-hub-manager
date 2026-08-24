@@ -136,8 +136,8 @@ export default function MessagesScreen() {
               </View>
               {!isPayment && (
                 <>
-                  <Field label="Message envoyé au voyageur" testID="tpl-body" value={form.body} onChangeText={(v: string) => setForm((f: any) => ({ ...f, body: v }))} placeholder="Utilisez {guest}, {property}, {welcome_book}, {caution}" multiline style={styles.textarea} />
-                  <Text style={styles.varHint}>Variables : {"{guest}"} (voyageur), {"{property}"} (logement), {"{welcome_book}"} (lien du livret d'accueil), {"{caution}"} (lien de paiement de la caution)</Text>
+                  <Field label="Message envoyé au voyageur" testID="tpl-body" value={form.body} onChangeText={(v: string) => setForm((f: any) => ({ ...f, body: v }))} placeholder="Utilisez {guest}, {property}, {welcome_book}, {caution}, {activites}" multiline style={styles.textarea} />
+                  <Text style={styles.varHint}>Variables : {"{guest}"} (voyageur), {"{property}"} (logement), {"{welcome_book}"} (lien du livret d'accueil), {"{caution}"} (lien de paiement de la caution), {"{activites}"} (lien GetYourGuide)</Text>
                   <Field label="Envoyer combien de jours avant l'arrivée ?" testID="tpl-days" value={String(form.trigger_days)} onChangeText={(v: string) => setForm((f: any) => ({ ...f, trigger_days: v.replace(/[^0-9]/g, "") }))} keyboardType="number-pad" placeholder="3" />
                   <View style={styles.switchRow}>
                     <View style={{ flex: 1 }}>

@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 26 backend testing — messaging multi-channel (context + send), preferences (getyourguide_url + cleaning_offset_days with auto-cleaning regeneration), Airbnb tourist-tax split in owner statement, and inbox thread reservation_id. All 12 executed backend tests pass; 1 test skipped due to no channel_settings/api_key configured in QA env (inbox thread requires adapter). Real email send via Resend to delivered@resend.dev verified OK. Code review of /api/inbox/{thread_uid} confirms reservation_id is derived from db.reservations lookup and included in the response payload.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter26_messaging_preferences.py",
+    "/app/test_reports/pytest/pytest_iter26.xml"
+  ],
+  "action_items": [
+    "None — all backend endpoints under review behave as specified. Only the inbox thread test is skipped because the QA env has no channel_settings.api_key; the 'reservation_id' addition is verified via code review (backend/routers/inbox.py line 78-82). Main agent can retest this after connecting a channel manager, or write a unit test that stubs get_channel_adapter."
+  ],
+  "critical_code_review_comments": [
+    "backend/routers/messaging.py:83 — email 'to' is trimmed but not validated as a well-formed email; malformed guest_email would be forwarded to Resend and could fail silently. Consider a basic regex check.",
+    "backend/routers/messaging.py:82-100 — no distinction between validation errors and provider (Resend/Channex) errors: if send_email raises, the client receives a 500 with no context. Wrapping in try/except and returning {sent:false, reason:'provider_error', detail:str(e)} would be friendlier.",
+    "backend/routers/preferences.py:104-108 — cleaning_offset_days is clamped 0..14 but the change-detection reads only cleaning_offset_days from prev; if the doc doesn't exist yet (first PUT for a new user) the diff still triggers regen only when new_offset != 0. Acceptable but worth noting.",
+    "backend/routers/statements.py:70-72 — the Airbnb branch attributes the FULL tourist tax to Airbnb; if a property has both séjour and regional taxes and Airbnb only collects séjour, the regional portion would be under-reported. Current spec matches the requested behavior, but this edge case may surface later."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter26_messaging_preferences.py (new)"
+  ],
+  "success_rate": {"backend": "100% (12 passed / 12 executed, 1 skipped by design)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "All test data is created inside the test with TEST_QA_ prefix and cleaned up in teardown (no persistent seed).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_iter26_messaging_preferences.py — it covers messaging/context, messaging/send (all 5 branches), preferences GET/PUT with clamp + regen, owner-statement Airbnb tax split, inbox thread reservation_id (skipped without channel_settings). Auth uses QA Admin email/password. If a channex/lodgify api_key is provisioned for user_e235f66c67c3, the inbox test will run automatically.",
+  "detailed_test_results": {
+    "TestMessagingContext::test_context_returns_all_channels_and_rendered_vars": "PASS — guest_phone digits-only, whatsapp+email true, platform.available=false (no channex_booking_id), templates & quick_replies rendered (no {guest}/{property}/{activites} placeholders left).",
+    "TestMessagingContext::test_context_not_found_returns_404": "PASS",
+    "TestMessagingSend::test_send_email_success": "PASS — {sent:true, channel:'email', to:'delivered@resend.dev'} via Resend.",
+    "TestMessagingSend::test_send_email_no_email_returns_reason": "PASS — {sent:false, reason:'no_email'} on reservation without guest_email.",
+    "TestMessagingSend::test_send_platform_no_channex_booking_returns_reason": "PASS — {sent:false, reason:'no_platform_thread'}.",
+    "TestMessagingSend::test_send_empty_body_returns_400": "PASS — HTTP 400 when body is whitespace-only.",
+    "TestMessagingSend::test_send_unknown_channel_returns_400": "PASS — HTTP 400 for unknown channel ('sms').",
+    "TestPreferences::test_get_preferences_has_new_fields": "PASS — cleaning_offset_days:int + getyourguide_url:str present.",
+    "TestPreferences::test_put_getyourguide_url_persists": "PASS — PUT persists and GET returns the same URL.",
+    "TestPreferences::test_put_cleaning_offset_persists_and_clamps": "PASS — 2 persists; 999 clamped to 14; -5 clamped to 0.",
+    "TestPreferences::test_cleaning_offset_regenerates_future_auto_cleanings": "PASS — changing offset removes previous auto-menage and creates a new one at check_out+new_offset.",
+    "TestOwnerStatementAirbnbTax::test_airbnb_tax_excluded_from_to_reverse": "PASS — For Airbnb reservation with tourist_tax=12.50: totals.tax_airbnb_collected=12.50, totals.tourist_tax_to_reverse=0, owner_revenue independent of the tax.",
+    "TestInboxThreadReservationId::test_inbox_thread_returns_reservation_id_field": "SKIP — QA owner has no channel_settings.api_key, endpoint returns 400 as designed. Code review confirms reservation_id is included in the response (backend/routers/inbox.py:78-82)."
+  }
+}

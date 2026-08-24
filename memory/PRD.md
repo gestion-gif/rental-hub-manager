@@ -474,3 +474,12 @@
 - Rate limits & update logic : conformes (Outbox 3s/appel ~20/min + back-off 429/5xx ; deltas uniquement ; full-sync manuel à la demande, jamais sur minuterie).
 - ⚠️ BUG À CORRIGER avant prod : `routers/channex.py` full-sync envoie le tarif en centimes (`prix×100`) alors que `/restrictions` attend des unités décimales (« 100.00 ») → tarifs 100× trop élevés. La certif a été passée avec des pushs corrects manuels. Le delta-push (outbox) construit les valeurs via `_price_for_day` — À VÉRIFIER aussi le même souci de ×100.
 - Format confirmé empiriquement : rate_plan CREATION `options.rate` = centimes (10000→100.00) ; ARI `/restrictions` `rate` = unités décimales string ("333.00").
+
+## Session (2026-08) — Ménage auto configurable + Messagerie multi-canal + GetYourGuide + Net Airbnb
+- Bug tarif Channex corrigé : /restrictions attend des unités décimales ("100.00"), pas des centimes. Fixé dans routers/channex.py (full-sync) et core.py enqueue_channex_rates (delta). Vérifié 150.00 vs 15000.
+- Fiche réservation Airbnb : Payé = Dû = Revenu net = Total − commission − taxe de séjour (Airbnb encaisse le voyageur + reverse le net). Lignes "Taxe de séjour (perçue par Airbnb)" ajoutées.
+- Réglage Ménage automatique (Paramètres → Ménage automatique) : décalage J..J+5 (cleaning_offset_days en preferences, 0..14). ensure_cleaning applique l'offset ; regenerate_auto_cleanings replanifie les ménages auto futurs non faits au changement d'offset.
+- Onglet "Clé API Lodgify" retiré du menu Paramètres (route existe encore mais non listée).
+- Intégrations : carte GetYourGuide (partner.getyourguide.com) + champ lien affilié stocké dans preferences.getyourguide_url, inséré via variable {activites} dans les modèles (run_automations_for_user + _render_message_vars).
+- Messagerie multi-canal : ContactGuestModal (src/components) déclenché depuis fiche réservation (bouton "Contacter le voyageur", editing only) et inbox thread (icône). Backend routers/messaging.py : GET /api/messaging/context (canaux dispo + modèles rendus), POST /api/messaging/send (email via Resend, platform via Channex send_booking_message). WhatsApp = lien wa.me côté client (pas de backend). inbox/{thread} renvoie désormais reservation_id.
+- Backend testé iteration_26 : 12/12 pass. Frontend smoke OK.

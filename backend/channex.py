@@ -111,6 +111,10 @@ class ChannexAdapter:
         """Acquitte une révision : elle ne réapparaîtra plus dans le feed."""
         return await self._post(http, f"/booking_revisions/{revision_id}/ack", {})
 
+    async def send_booking_message(self, http, booking_id: str, message: str):
+        """Envoie un message dans le fil de la réservation (Booking.com / Airbnb via Channex)."""
+        return await self._post(http, f"/bookings/{booking_id}/messages", {"message": {"message": message}})
+
     async def list_webhooks(self, http) -> list:
         body = await self._get(http, "/webhooks")
         return body.get("data", [])

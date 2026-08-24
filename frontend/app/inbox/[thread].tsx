@@ -9,6 +9,7 @@ import "dayjs/locale/fr";
 dayjs.locale("fr");
 
 import { api, ApiError } from "@/src/api";
+import { ContactGuestModal } from "@/src/components/ContactGuestModal";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 export default function ThreadDetail() {
@@ -27,6 +28,7 @@ export default function ThreadDetail() {
   const [tone, setTone] = useState<"chaleureux" | "professionnel" | "concis">("chaleureux");
   const [showTrans, setShowTrans] = useState(true);
   const [quickReplies, setQuickReplies] = useState<any[]>([]);
+  const [contactOpen, setContactOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -105,7 +107,15 @@ export default function ThreadDetail() {
         ) : (
           <View style={{ width: 34 }} />
         )}
+        {!!data?.reservation_id && (
+          <Pressable testID="thread-contact" onPress={() => setContactOpen(true)} style={styles.transToggle}>
+            <Ionicons name="paper-plane-outline" size={18} color={colors.onSurfaceSecondary} />
+          </Pressable>
+        )}
       </View>
+      {!!data?.reservation_id && (
+        <ContactGuestModal visible={contactOpen} reservationId={String(data.reservation_id)} onClose={() => setContactOpen(false)} />
+      )}
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>

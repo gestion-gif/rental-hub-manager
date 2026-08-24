@@ -8,7 +8,7 @@ from core import process_channex_bookings  # noqa: F401
 from routers import (  # noqa: F401
     auth, properties, reservations, public_site, interventions, ical, dashboard,
     analytics, ai, preferences, channex, policies, push, sync, inbox, team, owners,
-    statements, reviews, promotions, templates, automations, files,
+    statements, reviews, promotions, templates, automations, files, messaging,
 )
 
 # Route handlers referenced by the background loops below

@@ -34,6 +34,8 @@ export default function Integrations() {
   const [exportUrl, setExportUrl] = useState("");
   const [welcomeUrl, setWelcomeUrl] = useState("");
   const [savingWelcome, setSavingWelcome] = useState(false);
+  const [gygUrl, setGygUrl] = useState("");
+  const [savingGyg, setSavingGyg] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -44,6 +46,10 @@ export default function Integrations() {
         const cur = props.find((p: any) => p.id === selected) || props[0];
         selectProperty(cur);
       }
+    } catch {}
+    try {
+      const p = await api.get("/preferences");
+      setGygUrl(p.getyourguide_url || "");
     } catch {}
     setLoading(false);
   }, [selected]);
@@ -80,6 +86,18 @@ export default function Integrations() {
       Alert.alert("Erreur", "Enregistrement impossible.");
     }
     setSavingWelcome(false);
+  }
+
+  async function saveGyg() {
+    if (savingGyg) return;
+    setSavingGyg(true);
+    try {
+      await api.put("/preferences", { getyourguide_url: gygUrl.trim() });
+      Alert.alert("Enregistré", "Votre lien GetYourGuide est enregistré. Insérez-le dans vos messages avec la variable {activites}.");
+    } catch {
+      Alert.alert("Erreur", "Enregistrement impossible.");
+    }
+    setSavingGyg(false);
   }
 
   const selectedProp = properties.find((p) => p.id === selected);
@@ -231,6 +249,27 @@ export default function Integrations() {
             <Pressable testID="gyg-open" onPress={() => Linking.openURL(GYG_URL)} style={styles.secondaryBtn}>
               <Ionicons name="open-outline" size={16} color={colors.brandPrimary} />
               <Text style={styles.secondaryText}>Ouvrir GetYourGuide Partner</Text>
+            </Pressable>
+            <Text style={[styles.step, { marginTop: spacing.lg }]}>
+              Collez votre lien affilié GetYourGuide. Il sera inséré dans vos messages via la variable <Text style={styles.code}>{"{activites}"}</Text>.
+            </Text>
+            <TextInput
+              testID="gyg-url-input"
+              value={gygUrl}
+              onChangeText={setGygUrl}
+              placeholder="https://www.getyourguide.com/?partner_id=..."
+              placeholderTextColor={colors.onSurfaceTertiary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
+            <Pressable testID="gyg-save" onPress={saveGyg} disabled={savingGyg} style={[styles.primaryBtn, savingGyg && { opacity: 0.6 }]}>
+              {savingGyg ? <ActivityIndicator color={colors.onBrandPrimary} /> : (
+                <>
+                  <Ionicons name="save-outline" size={16} color={colors.onBrandPrimary} />
+                  <Text style={styles.primaryText}>Enregistrer le lien</Text>
+                </>
+              )}
             </Pressable>
           </View>
         </ScrollView>

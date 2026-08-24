@@ -27,6 +27,7 @@ import { Field, PrimaryButton } from "@/src/components/ui";
 import { Picker } from "@/src/components/Picker";
 import DateField from "@/src/components/DateField";
 import { PlatformLogo } from "@/src/components/PlatformLogo";
+import { ContactGuestModal } from "@/src/components/ContactGuestModal";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const PLATFORMS = ["Direct", "Airbnb", "Booking.com", "Vrbo"];
@@ -80,6 +81,7 @@ export default function ReservationForm() {
   const [cvBusy, setCvBusy] = useState(false);
   const [cvMsg, setCvMsg] = useState<string | null>(null);
   const [checklist, setChecklist] = useState({ caution: false, keys: false, welcome_book: false, cleaning: false });
+  const [contactOpen, setContactOpen] = useState(false);
 
   const [form, setForm] = useState({
     property_id: "",
@@ -598,6 +600,16 @@ export default function ReservationForm() {
           <Field label="Téléphone" testID="guest-phone" value={form.guest_phone} onChangeText={(v) => set("guest_phone", v)} placeholder="+33 6 12 34 56 78" keyboardType="phone-pad" />
           <Field label="Email" testID="guest-email" value={form.guest_email} onChangeText={(v) => set("guest_email", v)} placeholder="jean@email.com" keyboardType="email-address" autoCapitalize="none" />
 
+          {editing && (
+            <Pressable testID="contact-guest-btn" onPress={() => setContactOpen(true)} style={styles.contactBtn}>
+              <Ionicons name="paper-plane-outline" size={18} color={colors.brandPrimary} />
+              <Text style={styles.contactBtnText}>Contacter le voyageur</Text>
+            </Pressable>
+          )}
+          {editing && (
+            <ContactGuestModal visible={contactOpen} reservationId={String(id)} onClose={() => setContactOpen(false)} />
+          )}
+
           <Text style={styles.label}>Plateforme</Text>
           <ChipRow
             items={PLATFORMS.map((p) => ({ key: p, label: p }))}
@@ -916,6 +928,9 @@ function ChipRow({ items, value, onSelect, prefix }: any) {
 }
 
 const styles = StyleSheet.create({
+  contactBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: spacing.sm, paddingVertical: 12, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary + "10" },
+  contactBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.brandPrimary },
+
   cvCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
   clCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
   clHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },

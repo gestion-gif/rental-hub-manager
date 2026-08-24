@@ -75,8 +75,11 @@ async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
     await db.conversations.update_one(
         {"user_id": uid, "thread_uid": thread_uid},
         {"$set": {"unread": False}})
+    resa = await db.reservations.find_one(
+        {"user_id": uid, "thread_uid": thread_uid}, {"_id": 0, "id": 1})
     return {
         "thread_uid": thread_uid,
+        "reservation_id": (resa or {}).get("id"),
         "guest_name": thread.get("guest_name") or (conv or {}).get("guest_name"),
         "property_name": (conv or {}).get("property_name"),
         "source": (conv or {}).get("source"),

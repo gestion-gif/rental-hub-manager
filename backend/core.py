@@ -879,6 +879,7 @@ class PreferencesIn(BaseModel):
     review_request_enabled: Optional[bool] = None
     review_request_days: Optional[int] = None
     cleaning_offset_days: Optional[int] = None
+    getyourguide_url: Optional[str] = None
     public_site: Optional[dict] = None
 async def _ai_auto_draft_enabled(uid: str) -> bool:
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
@@ -1708,6 +1709,9 @@ def _statement_body_html(month: str, s: dict) -> str:
     reg = ""
     if (t.get("tax_regional") or 0) > 0:
         reg = line("Taxe add. régionale (à reverser)", m(t.get("tax_regional")))
+    airbnb_tax = ""
+    if (t.get("tax_airbnb_collected") or 0) > 0:
+        airbnb_tax = line("Taxe de séjour perçue par Airbnb", m(t.get("tax_airbnb_collected")), color="#777")
     res_header = ("<tr><td colspan=2 style='padding-top:8px;font-weight:700;color:#2A6F9E'>Réservations</td></tr>" + rows) if rows else ""
     prop_title = escape(str(s.get("property_name") or ""))
     gestion_lbl = "Frais de gestion (" + str(s.get("management_fee_pct", 0)) + "%)"
@@ -1722,6 +1726,7 @@ def _statement_body_html(month: str, s: dict) -> str:
         f"{line('Frais de ménage (conciergerie)', m(t.get('cleaning')))}"
         f"{line('Taxe de séjour (à reverser)', tax_sej)}"
         f"{reg}"
+        f"{airbnb_tax}"
         f"{line('Commissions OTA', '-' + m(t.get('commission')))}"
         f"{line(gestion_lbl, m(t.get('management_fee')))}"
         f"<tr><td colspan=2 style='border-top:2px solid #2A6F9E;padding-top:8px'></td></tr>"
@@ -1943,6 +1948,19 @@ async def _seed_quick_replies(uid: str):
             docs.append(doc)
     docs.sort(key=lambda x: x.get("order", 100))
     return docs
+def _render_message_vars(body: str, reservation: dict, prop: dict, prefs: dict) -> str:
+    """Remplace les variables d'un modèle de message pour une réservation donnée."""
+    reservation = reservation or {}
+    prop = prop or {}
+    prefs = prefs or {}
+    return (str(body or "")
+            .replace("{guest}", reservation.get("guest_name", "") or "")
+            .replace("{property}", reservation.get("property_name") or prop.get("name", "") or "")
+            .replace("{welcome_book}", prop.get("welcome_book_url", "") or "")
+            .replace("{caution}", prop.get("deposit_link", "") or "")
+            .replace("{activites}", prefs.get("getyourguide_url", "") or ""))
+
+
 async def run_automations_for_user(uid: str):
     """Send due automatic messages via Lodgify and set the corresponding markers.
     Envoie aussi automatiquement les instructions de clés aux voyageurs Airbnb (sans caution)."""
@@ -1950,6 +1968,8 @@ async def run_automations_for_user(uid: str):
     if not settings or not settings.get("api_key"):
         return 0
     templates = await get_templates(uid)
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0}) or {}
+    _gyg = prefs.get("getyourguide_url", "") or ""
     active = [t for t in templates if t.get("kind") == "message" and t.get("enabled")]
     tmap = {t["marker_key"]: t for t in templates}
     adapter = LodgifyAdapter(settings["api_key"])
@@ -1980,7 +2000,8 @@ async def run_automations_for_user(uid: str):
                     body = (t.get("body") or "").replace("{guest}", r.get("guest_name", "")).replace(
                         "{property}", r.get("property_name") or "").replace(
                         "{welcome_book}", (pmap.get(r.get("property_id"), {}) or {}).get("welcome_book_url", "") or "").replace(
-                        "{caution}", (pmap.get(r.get("property_id"), {}) or {}).get("deposit_link", "") or "")
+                        "{caution}", (pmap.get(r.get("property_id"), {}) or {}).get("deposit_link", "") or "").replace(
+                        "{activites}", _gyg)
                     try:
                         await adapter.send_message(http, r["lodgify_id"], body, t["name"])
                     except Exception:
@@ -2190,6 +2211,7 @@ __all__ = [
     'status_color_map',
     'ensure_cleaning',
     'regenerate_auto_cleanings',
+    '_render_message_vars',
     'CautionValidatedIn',
     '_build_keys_message',
     '_send_key_instructions',
