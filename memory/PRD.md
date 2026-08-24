@@ -433,3 +433,11 @@
 ## Itération 28 — Rate Plan Channex + import des prix (2026-06)
 - Créé pour l'utilisateur (compte staging) un Rate Plan « Tarif standard » (per_room, manual, EUR, occ 2) sur le logement « titi et gros minet » (Studio), prix 150 €/nuit sur 730 jours. NB : les tarifs Channex (POST /restrictions) s'envoient en CENTIMES (15000 = 150 €) ; à la lecture (GET /restrictions filter[restrictions][]=rate) ils reviennent en unités principales ("150.00").
 - Enrichi l'import : `ChannexAdapter.list_rates()` (channex.py) récupère les tarifs ARI (fenêtre today→+60j) ; `channex_import` (routers/channex.py) définit désormais `base_price` du rate plan ET du logement (si vide) à partir du premier tarif positif. Testé E2E : logement + rate plan importés à 150 €. 23/23 tests Channex OK.
+
+## Itération 29 — Channex Phase 1 : Synchro complète (certification test 1) (2026-06)
+- `ChannexAdapter` (channex.py) : ajout `_post` (retry/backoff 429/5xx), `push_availability`, `push_restrictions`.
+- Route `POST /api/channex/full-sync` (routers/channex.py) : pour chaque logement lié, 2 appels — 1× disponibilité (toutes chambres) + 1× tarifs/restrictions (tous rate plans), sur `days` (500 par défaut, max 730). Données réalistes : prix via saisons (`_price_for_day`, en centimes), dispo via `_booked_dates` (nb unités − réservé), regroupées en plages via `_date_ranges`. min stay envoyé en `min_stay_arrival` + `min_stay_through` (le `min_stay` simple n'est pas supporté par la property de test). Journalisé dans sync_logs + task_ids retournés.
+- Découverte clé : tarifs Channex en CENTIMES (POST) ; lecture en unités principales. Availability = entier par room_type.
+- UI : bouton « Synchronisation complète vers Channex (500 jours) » dans Paramètres → Channex (settings/channex.tsx).
+- Testé E2E (compte temp + saison + réservation) : 2 task_ids, 3 plages dispo + 3 plages tarifs (variation OK). 23/23 tests Channex OK.
+- RESTE À FAIRE pour certification : Phase 2 (push delta événementiel depuis les vrais écrans + file d'attente/rate limiter/retry), Phase 3 (webhook réception réservations Booking.com + accusé), Phase 4 (prépa tests + appel visio).

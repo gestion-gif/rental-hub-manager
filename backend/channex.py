@@ -78,6 +78,30 @@ class ChannexAdapter:
                                {**self._page(), "filter[property_id]": property_id})
         return body.get("data", [])
 
+    async def _post(self, http: httpx.AsyncClient, path: str, payload: dict):
+        """POST with retry/backoff on 429 & 5xx (respects Channex rate limits)."""
+        for attempt in range(4):
+            r = await http.post(f"{self.base}{path}", json=payload, headers=self._headers())
+            if (r.status_code == 429 or r.status_code >= 500) and attempt < 3:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if r.status_code in (401, 403):
+                raise HTTPException(status_code=400, detail="Clé API Channex invalide")
+            if r.status_code >= 400:
+                raise HTTPException(status_code=502, detail=f"Channex {r.status_code}: {r.text[:200]}")
+            return r.json()
+        raise HTTPException(status_code=502, detail="Channex indisponible")
+
+    async def push_availability(self, http, values: list) -> list:
+        """1 appel: disponibilité (toutes chambres). Retourne les task ids Channex."""
+        body = await self._post(http, "/availability", {"values": values})
+        return [t.get("id") for t in (body.get("data") or []) if isinstance(t, dict)]
+
+    async def push_restrictions(self, http, values: list) -> list:
+        """1 appel: tarifs + restrictions (tous rate plans). Retourne les task ids Channex."""
+        body = await self._post(http, "/restrictions", {"values": values})
+        return [t.get("id") for t in (body.get("data") or []) if isinstance(t, dict)]
+
     async def list_rates(self, http, property_id: str, date_from: str, date_to: str) -> dict:
         """Nightly rates (ARI) for a property over a window.
         Returns {rate_plan_id: {date: {'rate': '150.00', ...}}}. Rates are already in main

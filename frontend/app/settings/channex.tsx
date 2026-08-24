@@ -20,6 +20,7 @@ export default function ChannexSettings() {
   const [props, setProps] = useState<any[]>([]);
   const [loadingProps, setLoadingProps] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [reconfig, setReconfig] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
 
@@ -64,6 +65,31 @@ export default function ChannexSettings() {
     setImporting(false);
   }
 
+  async function fullSync() {
+    if (syncing) return;
+    Alert.alert(
+      "Synchronisation complète",
+      "Envoyer vers Channex 500 jours de disponibilités et de tarifs pour tous vos logements liés ? (recommandé lors de la mise en ligne)",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Envoyer", onPress: async () => {
+            setSyncing(true);
+            try {
+              const r = await api.post("/channex/full-sync", { days: 500 });
+              const tasks = (r.results || []).reduce((n: number, x: any) => n + (x.task_ids?.length || 0), 0);
+              Alert.alert("Synchronisation envoyée", `${r.properties} logement(s) synchronisé(s) sur ${r.days} jours. ${tasks} tâche(s) Channex générée(s).`);
+              await load();
+            } catch (e: any) {
+              Alert.alert("Erreur", e?.message || "Synchronisation impossible.");
+            }
+            setSyncing(false);
+          },
+        },
+      ]
+    );
+  }
+
   async function refreshProps() {
     setLoadingProps(true);
     try {
@@ -104,7 +130,7 @@ export default function ChannexSettings() {
         <KeyboardAwareScrollView bottomOffset={20} contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 80 }} showsVerticalScrollIndicator={false}>
           <Text style={styles.intro}>Channel manager Channex</Text>
           <Text style={styles.introSub}>
-            Connectez votre compte Channex en lecture seule. Cette intégration n'affecte pas Lodgify (les deux peuvent coexister).
+            Connectez votre compte Channex pour importer vos logements et envoyer vos disponibilités et tarifs (synchronisation). N'affecte pas Lodgify (les deux peuvent coexister).
           </Text>
 
           {status.connected && !reconfig ? (
@@ -131,6 +157,11 @@ export default function ChannexSettings() {
                 <Pressable testID="channex-import" onPress={importChannex} disabled={importing || (status.properties_count || 0) === 0} style={[styles.importBtn, ((status.properties_count || 0) === 0) && { opacity: 0.5 }]}>
                   {importing ? <ActivityIndicator size="small" color="#fff" /> : (
                     <><Ionicons name="download-outline" size={16} color="#fff" /><Text style={styles.importText}>Importer dans Casanéo (logements, chambres, tarifs)</Text></>
+                  )}
+                </Pressable>
+                <Pressable testID="channex-fullsync" onPress={fullSync} disabled={syncing || (status.properties_count || 0) === 0} style={[styles.syncBtn, ((status.properties_count || 0) === 0) && { opacity: 0.5 }]}>
+                  {syncing ? <ActivityIndicator size="small" color="#fff" /> : (
+                    <><Ionicons name="cloud-upload-outline" size={16} color="#fff" /><Text style={styles.importText}>Synchronisation complète vers Channex (500 jours)</Text></>
                   )}
                 </Pressable>
                 <Pressable testID="channex-reconfig" onPress={() => { setEnv((status.environment === "production" ? "production" : "staging")); setReconfig(true); }} style={styles.reconfigBtn}>
@@ -243,6 +274,7 @@ const styles = StyleSheet.create({
   dangerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: "#E5484D", borderRadius: radius.md, paddingVertical: 12, paddingHorizontal: 16 },
   dangerText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: "#E5484D" },
   importBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#17B0A6", borderRadius: radius.md, paddingVertical: 12, marginTop: spacing.sm },
+  syncBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#2A6F9E", borderRadius: radius.md, paddingVertical: 12, marginTop: spacing.sm },
   importText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: "#fff", flexShrink: 1 },
   reconfigBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 10, marginTop: 4 },
   reconfigText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.brandPrimary },

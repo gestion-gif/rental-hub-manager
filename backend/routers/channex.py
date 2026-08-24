@@ -98,6 +98,111 @@ async def channex_sync_logs(user=Depends(get_current_user)):
     return {"logs": logs}
 
 
+def _date_ranges(start, end, value_fn, build_fn):
+    """Regroupe les jours consécutifs de même valeur en plages (payload ARI compact & réaliste)."""
+    out = []
+    cur = start
+    run_start = None
+    run_val = None
+    while cur <= end:
+        v = value_fn(cur)
+        if run_val is None:
+            run_start, run_val = cur, v
+        elif v != run_val:
+            e = build_fn(run_val)
+            e["date_from"] = run_start.isoformat()
+            e["date_to"] = (cur - timedelta(days=1)).isoformat()
+            out.append(e)
+            run_start, run_val = cur, v
+        cur += timedelta(days=1)
+    if run_val is not None:
+        e = build_fn(run_val)
+        e["date_from"] = run_start.isoformat()
+        e["date_to"] = end.isoformat()
+        out.append(e)
+    return out
+
+
+class FullSyncIn(BaseModel):
+    property_id: Optional[str] = None
+    days: int = 500
+
+
+@api_router.post("/channex/full-sync")
+async def channex_full_sync(payload: FullSyncIn = Body(default=FullSyncIn()),
+                            user=Depends(get_current_user)):
+    """Synchronisation complète Channex (exigence certification) : pour chaque logement lié,
+    2 appels — disponibilité (toutes chambres, `days` jours) + tarifs/restrictions (tous les
+    rate plans). Données réalistes issues des saisons (prix) et des réservations (dispo)."""
+    uid = user["user_id"]
+    adapter, doc = await get_channex_adapter(uid)
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channex non connecté")
+    days = max(1, min(int(payload.days or 500), 730))
+    q = {"user_id": uid, "channex_id": {"$nin": [None, ""]}}
+    if payload.property_id:
+        q["id"] = payload.property_id
+    props = await db.properties.find(q, {"_id": 0}).to_list(200)
+    if not props:
+        raise HTTPException(status_code=400, detail="Aucun logement lié à Channex. Importez d'abord vos logements.")
+    today = now_utc().date()
+    end = today + timedelta(days=days - 1)
+    end_excl = (end + timedelta(days=1)).isoformat()
+    results = []
+    async with httpx.AsyncClient(timeout=120) as http:
+        for prop in props:
+            cx_pid = prop["channex_id"]
+            rooms = await db.rooms.find(
+                {"user_id": uid, "property_id": prop["id"], "channex_room_type_id": {"$nin": [None, ""]}},
+                {"_id": 0}).to_list(100)
+            rate_plans = await db.rate_plans.find(
+                {"user_id": uid, "property_id": prop["id"], "channex_rate_plan_id": {"$nin": [None, ""]}},
+                {"_id": 0}).to_list(100)
+            booked = await _booked_dates(uid, prop["id"], today.isoformat(), end_excl)
+
+            # 1 appel disponibilité : toutes les chambres (dispo = nb d'unités - réservé)
+            avail_values = []
+            for room in rooms:
+                cap = int(room.get("count_of_rooms") or 1)
+                cx_rt = room["channex_room_type_id"]
+                avail_values += _date_ranges(
+                    today, end,
+                    lambda d: max(0, cap - (1 if d.isoformat() in booked else 0)),
+                    lambda v, rt=cx_rt: {"property_id": cx_pid, "room_type_id": rt, "availability": v},
+                )
+            # 1 appel tarifs+restrictions : tous les rate plans (prix saison → centimes, min stay)
+            rest_values = []
+            for rpn in rate_plans:
+                cx_rp = rpn["channex_rate_plan_id"]
+                ms = int(rpn.get("min_stay") or 1)
+                rest_values += _date_ranges(
+                    today, end,
+                    lambda d: int(round(_price_for_day(prop, d.isoformat()) * 100)),
+                    lambda v, rp=cx_rp, m=ms: {
+                        "property_id": cx_pid, "rate_plan_id": rp, "rate": v,
+                        "min_stay_arrival": m, "min_stay_through": m,
+                    },
+                )
+
+            task_ids = []
+            if avail_values:
+                task_ids += await adapter.push_availability(http, avail_values)
+            if rest_values:
+                task_ids += await adapter.push_restrictions(http, rest_values)
+            results.append({
+                "property": prop.get("name"), "channex_id": cx_pid,
+                "rooms": len(rooms), "rate_plans": len(rate_plans),
+                "availability_ranges": len(avail_values), "rate_ranges": len(rest_values),
+                "task_ids": task_ids,
+            })
+            await _sync_log(uid, "full_sync", "success",
+                            f"{prop.get('name')}: {len(avail_values)} plages dispo, "
+                            f"{len(rest_values)} plages tarifs — tasks={task_ids}")
+            await asyncio.sleep(1)  # espacer les logements (rate limit)
+    return {"ok": True, "environment": doc.get("environment"), "days": days,
+            "properties": len(props), "results": results}
+
+
 @api_router.post("/channex/import")
 async def channex_import(user=Depends(get_current_user)):
     """Importe les logements Channex → Property + Room + RatePlan (idempotent par channex_id).
