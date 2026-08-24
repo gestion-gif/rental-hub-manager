@@ -115,12 +115,23 @@ function CustomDrawer(props: any) {
             <Text style={styles.itemText}>Avis voyageurs</Text>
           </Pressable>
         )}
+        {canModify(user) && (
+          <Pressable testID="drawer-website" onPress={() => goStack("/settings/booking-site")} style={styles.item}>
+            <Ionicons name="globe-outline" size={20} color={colors.onSurfaceSecondary} />
+            <Text style={styles.itemText}>Site Web</Text>
+          </Pressable>
+        )}
         {canSeeSettings(user) && (
           <Pressable testID="drawer-settings" onPress={() => goStack("/settings")} style={styles.item}>
             <Ionicons name="settings-outline" size={20} color={colors.onSurfaceSecondary} />
             <Text style={styles.itemText}>Paramètres</Text>
           </Pressable>
         )}
+
+        <Pressable testID="drawer-help" onPress={() => goStack("/help")} style={styles.item}>
+          <Ionicons name="help-buoy-outline" size={20} color={colors.onSurfaceSecondary} />
+          <Text style={styles.itemText}>Aide</Text>
+        </Pressable>
       </DrawerContentScrollView>
 
       <Pressable

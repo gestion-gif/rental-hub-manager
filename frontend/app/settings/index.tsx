@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
+import { HelpButton } from "@/src/components/HelpButton";
 
 const OPTIONS = [
   { path: "/settings/company", icon: "business-outline", title: "Ma société", sub: "Coordonnées sur les relevés (PDF & email)" },
@@ -38,7 +39,7 @@ export default function SettingsHub() {
           <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
         </Pressable>
         <Text style={styles.title}>Paramètres</Text>
-        <View style={{ width: 34 }} />
+        <HelpButton screen="settings" />
       </View>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + 40 }}>
         {OPTIONS.map((o) => (

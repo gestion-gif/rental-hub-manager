@@ -14,6 +14,7 @@ import "dayjs/locale/fr";
 
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
+import { HelpButton } from "@/src/components/HelpButton";
 import { PropertyPicker } from "@/src/components/PropertyPicker";
 import { useAuth } from "@/src/context/AuthContext";
 import { canModify } from "@/src/permissions";
@@ -292,6 +293,8 @@ export default function Statement() {
         <View style={styles.titleRow}>
           <MenuButton />
           <Text style={styles.title}>Relevé propriétaires</Text>
+          <View style={{ flex: 1 }} />
+          <HelpButton screen="statement" />
           {editable && data.length > 0 && (
             <Pressable testID="stmt-email-all" onPress={emailAll} disabled={emailAllBusy} style={styles.emailAllBtn}>
               {emailAllBusy ? <ActivityIndicator size="small" color={colors.onBrandPrimary} /> : (

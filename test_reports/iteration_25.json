@@ -1,0 +1,33 @@
+{
+  "summary": "Nouvelle zone d'aide Casanéo testée de bout-en-bout. Backend: 9/9 tests passent (100%) — POST /api/ai/help-ask renvoie une réponse française, 401 sans token, 400 sur question vide, prend en compte {screen}. Non-régression après refactor server.py → core.py + routers/: /api/ai/guest-reply et /api/ai/pricing-suggestion fonctionnent (auth requise, propriété inconnue → 404, réponse JSON avec saisons). Frontend: /help charge en mobile, testIDs présents (help-ask-input, help-ask-send, help-search, 11 help-topic-*), recherche filtre les thèmes, thèmes se déplient avec guides numérotés et FAQ. Après login QA (qa.admin@casaneo.test), bouton contextuel '?' présent et fonctionnel sur index, calendar, planning, statement, assistant, integrations, settings, booking-site — chaque modal affiche le bon titre 'Aide — <écran>', help-modal-close/help-modal-ask-input/help-modal-ask-send/help-open-center OK, appel IA depuis le modal retourne une vraie réponse française, help-open-center navigue vers /help. drawer-help dans le menu latéral navigue vers /help. UN MANQUE : HelpButton absent de l'écran Logements (/properties) — testID help-button-properties introuvable, alors qu'il est listé dans les features (avec un '?' qui laissait planer un doute).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "PropertiesScreen", "issue": "HelpButton non intégré dans /app/frontend/app/(tabs)/properties.tsx — testID 'help-button-properties' absent. Toutes les autres cibles (index, calendar, planning, statement, assistant, integrations, settings, booking-site) ont bien le bouton '?'.", "testID": "help-button-properties", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_help_ai.py",
+    "/app/test_reports/pytest/pytest_iter25_help_ai.xml"
+  ],
+  "action_items": [
+    "Ajouter <HelpButton screen=\"properties\" /> dans l'en-tête de /app/frontend/app/(tabs)/properties.tsx (à côté de sort-az / channel-manager-btn) pour couvrir l'écran Logements comme prévu par la spec."
+  ],
+  "critical_code_review_comments": [
+    "core.py fait ~1400+ lignes et concentre modèles Pydantic, helpers Stripe, iCal, Channex, push, tarification dynamique et divers utilitaires — envisager de le scinder (models/, services/, integrations/) pour maintenir la lisibilité après le refactor."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_help_ai.py (créé)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "~95% (HelpButton manquant sur /properties)"},
+  "seed_data_creation": "Aucune donnée persistée en base : conftest crée un user + session_token éphémères, et le test pricing crée/supprime une propriété TEST_ dédiée.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Le compte QA email/mot de passe existant (qa.admin@casaneo.test / CasaneoQA2026!) permet de tester tous les écrans côté frontend sans passer par Google OAuth (bouton 'Se connecter avec un email et un mot de passe' → testIDs login-email / login-password / email-signin-button). Le menu latéral s'ouvre via testID 'menu-button'. Pour re-tester après ajout du HelpButton sur Properties, il suffit de charger /properties et vérifier help-button-properties + modal 'Aide — Logements'."
+}

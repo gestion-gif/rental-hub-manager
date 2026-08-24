@@ -1,0 +1,166 @@
+# ruff: noqa: F403, F405
+from core import *  # noqa: F401
+
+
+@api_router.get("/interventions")
+async def list_interventions(property_id: Optional[str] = None, user=Depends(get_current_user)):
+    query = {"user_id": user["user_id"], **_prop_scope(user, "property_id")}
+    if property_id:
+        query["property_id"] = property_id
+    # Purge past ménages (cleaning tasks before today) and exclude them from results
+    today_iso = date.today().isoformat()
+    await db.interventions.delete_many(
+        {"user_id": user["user_id"], "kind": "menage", "date": {"$lt": today_iso}})
+    items = await db.interventions.find(query, {"_id": 0}).sort("date", 1).to_list(1000)
+    return items
+
+
+@api_router.post("/interventions")
+async def create_intervention(payload: InterventionIn, user=Depends(get_current_user)):
+    doc = payload.dict()
+    if doc.get("intervenants"):
+        doc["intervenant"] = ", ".join([x for x in doc["intervenants"] if x])
+    elif doc.get("intervenant"):
+        doc["intervenants"] = [doc["intervenant"]]
+    doc["id"] = str(uuid.uuid4())
+    doc["user_id"] = user["user_id"]
+    doc["created_at"] = now_utc().isoformat()
+    await db.interventions.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/interventions/{intervention_id}")
+async def update_intervention(intervention_id: str, payload: InterventionIn, user=Depends(get_current_user)):
+    data = payload.dict()
+    if data.get("intervenants"):
+        data["intervenant"] = ", ".join([x for x in data["intervenants"] if x])
+    elif data.get("intervenant"):
+        data["intervenants"] = [data["intervenant"]]
+    res = await db.interventions.update_one(
+        {"id": intervention_id, "user_id": user["user_id"]},
+        {"$set": data},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Intervention not found")
+    item = await db.interventions.find_one({"id": intervention_id}, {"_id": 0})
+    return item
+
+
+@api_router.delete("/interventions/{intervention_id}")
+async def delete_intervention(intervention_id: str, user=Depends(get_current_user)):
+    await db.interventions.delete_one({"id": intervention_id, "user_id": user["user_id"]})
+    return {"ok": True}
+
+
+@api_router.get("/cleaning-schedule")
+async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_user)):
+    """Vue quotidienne : départs, ménages, interventions, remises de clés,
+    cautions à encaisser et arrivées (vérification caution le jour de l'arrivée)."""
+    uid = user["user_id"]
+    try:
+        target = date.fromisoformat(day) if day else date.today()
+    except ValueError:
+        target = date.today()
+    tstr = target.isoformat()
+    scope = _prop_scope(user, "property_id")
+    props = await db.properties.find(
+        {"user_id": uid, **_prop_scope(user)}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    pmap = {p["id"]: p.get("name", "Logement") for p in props}
+
+    deps = await db.reservations.find(
+        {"user_id": uid, "check_out": tstr, "status": {"$ne": "annulee"}, **scope}, {"_id": 0}).to_list(500)
+    departures = [{
+        "id": r["id"], "property_id": r["property_id"],
+        "property_name": pmap.get(r["property_id"], "Logement"),
+        "guest_name": r.get("guest_name"), "checkout_time": r.get("checkout_time") or "",
+        "platform": r.get("platform") or "",
+    } for r in deps if r["property_id"] in pmap]
+
+    arr = await db.reservations.find(
+        {"user_id": uid, "check_in": tstr, "status": {"$ne": "annulee"}, **scope}, {"_id": 0}).to_list(500)
+    arrivals = [{
+        "id": r["id"], "property_id": r["property_id"],
+        "property_name": pmap.get(r["property_id"], "Logement"),
+        "guest_name": r.get("guest_name"), "checkin_time": r.get("checkin_time") or "",
+        "platform": r.get("platform") or "",
+        "deposit_collected": bool((r.get("finance") or {}).get("deposit_collected")),
+        "deposit_amount": (r.get("finance") or {}).get("deposit_amount") or 0,
+        "damage_deposit": r.get("damage_deposit") or "",
+    } for r in arr if r["property_id"] in pmap]
+
+    # Toutes les interventions du jour, regroupées par type
+    ivs = await db.interventions.find(
+        {"user_id": uid, "date": tstr, **scope}, {"_id": 0}).to_list(1000)
+
+    def _iv(iv):
+        return {
+            "id": iv["id"], "property_id": iv["property_id"],
+            "property_name": pmap.get(iv["property_id"], "Logement"),
+            "description": iv.get("description", ""), "intervenant": iv.get("intervenant", ""),
+            "done": bool(iv.get("done")),
+            "caution_amount": iv.get("caution_amount") or 0,
+            "caution_debited": bool(iv.get("caution_debited")),
+        }
+
+    cleanings, interventions, key_handovers, cautions = [], [], [], []
+    for iv in ivs:
+        if iv["property_id"] not in pmap:
+            continue
+        kind = iv.get("kind", "menage")
+        item = _iv(iv)
+        if kind == "menage":
+            cleanings.append(item)
+        elif kind == "remise_cles":
+            key_handovers.append(item)
+        elif kind == "caution":
+            cautions.append(item)
+        else:
+            interventions.append(item)
+
+    departures.sort(key=lambda x: (x["checkout_time"] or "~", x["property_name"]))
+    arrivals.sort(key=lambda x: (x["checkin_time"] or "~", x["property_name"]))
+    for lst in (cleanings, interventions, key_handovers, cautions):
+        lst.sort(key=lambda x: x["property_name"])
+
+    return {
+        "date": tstr,
+        "departures": departures,
+        "arrivals": arrivals,
+        "cleanings": cleanings,
+        "interventions": interventions,
+        "key_handovers": key_handovers,
+        "cautions": cautions,
+    }
+
+
+@api_router.patch("/interventions/{intervention_id}/done")
+async def set_intervention_done(intervention_id: str, payload: DoneIn, user=Depends(get_current_user)):
+    """Marquer une tâche (ménage, intervention, remise de clés) comme faite.
+    Autorisé au personnel de terrain. La caution N'EST PAS gérée ici."""
+    iv = await db.interventions.find_one(
+        {"id": intervention_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not iv or (user.get("allowed_property_ids") is not None
+                  and iv.get("property_id") not in user["allowed_property_ids"]):
+        raise HTTPException(status_code=404, detail="Intervention introuvable")
+    if iv.get("kind") == "caution":
+        raise HTTPException(status_code=403, detail="La caution ne peut pas être modifiée ici")
+    await db.interventions.update_one(
+        {"id": intervention_id, "user_id": user["user_id"]},
+        {"$set": {"done": payload.done}})
+    return {"id": intervention_id, "done": payload.done}
+
+
+@api_router.patch("/interventions/{intervention_id}/caution")
+async def set_caution_state(intervention_id: str, payload: CautionActionIn, user=Depends(get_current_user)):
+    """Marquer une caution comme encaissée (debited=true) ou rendue (debited=false)."""
+    iv = await db.interventions.find_one(
+        {"id": intervention_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not iv or (user.get("allowed_property_ids") is not None
+                  and iv.get("property_id") not in user["allowed_property_ids"]):
+        raise HTTPException(status_code=404, detail="Intervention introuvable")
+    await db.interventions.update_one(
+        {"id": intervention_id, "user_id": user["user_id"]},
+        {"$set": {"caution_debited": payload.debited, "done": payload.done}})
+    return {"id": intervention_id, "caution_debited": payload.debited, "done": payload.done}
+

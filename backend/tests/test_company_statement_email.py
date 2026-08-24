@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import server  # noqa: E402
+from routers import statements as stmt  # noqa: E402
 
 OWNER_UID = "user_e235f66c67c3"  # QA owner (gestion@mhpimmo.fr)
 
@@ -52,18 +53,18 @@ def test_email_all_groups_by_owner_mocked():
         sent.append({"to": to, "subject": subject, "html": html})
         return "mock-id"
 
-    orig = server.send_email
-    server.send_email = _mock_send_email
+    orig = stmt.send_email
+    stmt.send_email = _mock_send_email
     try:
         payload = server.StatementEmailAllIn(
             month="2026-06",
             base_url="https://rental-hub-manager.preview.emergentagent.com",
         )
         res = asyncio.get_event_loop().run_until_complete(
-            server.email_all_owner_statements(payload, user=_fake_user(OWNER_UID))
+            stmt.email_all_owner_statements(payload, user=_fake_user(OWNER_UID))
         )
     finally:
-        server.send_email = orig
+        stmt.send_email = orig
 
     print("RESULT:", res.get("sent"), "owners:", len(res.get("results", [])))
     # Number of real sends equals number of results marked sent

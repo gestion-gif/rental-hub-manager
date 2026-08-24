@@ -15,6 +15,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
+import { HelpButton } from "@/src/components/HelpButton";
 import { useAuth } from "@/src/context/AuthContext";
 import { canModify } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
@@ -54,6 +55,7 @@ export default function Properties() {
           <Text style={styles.title}>Logements</Text>
         </View>
         <View style={styles.headerRight}>
+          <HelpButton screen="properties" />
           <Pressable testID="sort-az" onPress={() => setSortAZ((v) => !v)} style={[styles.sortBtn, sortAZ && styles.sortBtnOn]}>
             <Ionicons name="swap-vertical" size={15} color={sortAZ ? colors.onBrandPrimary : colors.onSurface} />
             <Text style={[styles.sortBtnText, sortAZ && { color: colors.onBrandPrimary }]}>A→Z</Text>

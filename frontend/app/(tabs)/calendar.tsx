@@ -18,6 +18,7 @@ dayjs.locale("fr");
 
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
+import { HelpButton } from "@/src/components/HelpButton";
 import StatusBadge from "@/src/components/StatusBadge";
 import { PlatformLogo } from "@/src/components/PlatformLogo";
 import { usePreferences } from "@/src/context/PreferencesContext";
@@ -73,9 +74,12 @@ export default function CalendarScreen() {
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
-        <View style={styles.titleRow}>
-          <MenuButton />
-          <Text style={styles.title}>Réservations</Text>
+        <View style={[styles.titleRow, { justifyContent: "space-between" }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs }}>
+            <MenuButton />
+            <Text style={styles.title}>Réservations</Text>
+          </View>
+          <HelpButton screen="calendar" />
         </View>
         <View style={styles.chipRow}>
           <ScrollView

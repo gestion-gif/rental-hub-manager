@@ -1,11 +1,14 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView, Switch, ActivityIndicator, TextInput, Platform, Linking, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 
-import { api } from "@/src/api";
+import { api, uploadFile, fileUrl } from "@/src/api";
+import { HelpButton } from "@/src/components/HelpButton";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 export default function BookingSiteSettings() {
@@ -14,6 +17,13 @@ export default function BookingSiteSettings() {
   const [enabled, setEnabled] = useState(false);
   const [slug, setSlug] = useState("");
   const [depositPolicyId, setDepositPolicyId] = useState("");
+  const [balanceAuto, setBalanceAuto] = useState(true);
+  const [balanceDays, setBalanceDays] = useState(7);
+  const [scEnabled, setScEnabled] = useState(false);
+  const [scTitle, setScTitle] = useState("");
+  const [scIntro, setScIntro] = useState("");
+  const [scHero, setScHero] = useState("");
+  const [uploadingHero, setUploadingHero] = useState(false);
   const [policies, setPolicies] = useState<any[]>([]);
   const [props, setProps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,6 +35,10 @@ export default function BookingSiteSettings() {
       setEnabled(!!p.public_site?.enabled);
       setSlug(p.public_site?.slug || "");
       setDepositPolicyId(p.public_site?.deposit_policy_id || "");
+      setBalanceAuto(p.public_site?.balance_auto ?? true);
+      setBalanceDays(p.public_site?.balance_days ?? 7);
+      const s = p.public_site?.showcase || {};
+      setScEnabled(!!s.enabled); setScTitle(s.title || ""); setScIntro(s.intro || ""); setScHero(s.hero_photo || "");
       setProps(pr);
       setPolicies(pol.policies || []);
     } catch {}
@@ -39,7 +53,11 @@ export default function BookingSiteSettings() {
   async function save() {
     setSaving(true);
     try {
-      const p = await api.put("/preferences", { public_site: { enabled, slug: slug.trim(), deposit_policy_id: depositPolicyId } });
+      const p = await api.put("/preferences", { public_site: {
+        enabled, slug: slug.trim(), deposit_policy_id: depositPolicyId,
+        balance_auto: balanceAuto, balance_days: balanceDays,
+        showcase: { enabled: scEnabled, title: scTitle, intro: scIntro, hero_photo: scHero },
+      } });
       setSlug(p.public_site?.slug || "");
       setEnabled(!!p.public_site?.enabled);
       setDepositPolicyId(p.public_site?.deposit_policy_id || "");
@@ -57,6 +75,20 @@ export default function BookingSiteSettings() {
   async function copyLink() {
     await Clipboard.setStringAsync(publicUrl);
     Alert.alert("Copié", "Le lien du site a été copié.");
+  }
+
+  async function pickHero() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8 });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    setUploadingHero(true);
+    try {
+      const path = await uploadFile(asset.uri, asset.fileName || `hero_${Date.now()}.jpg`, asset.mimeType || "image/jpeg");
+      setScHero(path);
+    } catch { Alert.alert("Erreur", "Téléversement impossible."); }
+    setUploadingHero(false);
   }
 
   if (loading) {
@@ -122,6 +154,53 @@ export default function BookingSiteSettings() {
         </View>
         {policies.length === 0 && <Text style={styles.note}>Créez d'abord une politique de réservation (Paramètres → Politique de réservation) pour proposer un acompte.</Text>}
 
+        <Text style={styles.group}>Solde automatique</Text>
+        <View style={styles.card}>
+          <View style={styles.optRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.optTitle}>Envoyer un lien de paiement du solde</Text>
+              <Text style={styles.optSub}>Le client reçoit automatiquement un email pour régler le solde avant l'arrivée.</Text>
+            </View>
+            <Switch testID="balance-auto" value={balanceAuto} onValueChange={setBalanceAuto}
+              trackColor={{ false: colors.border, true: colors.brandPrimary }} thumbColor="#fff" />
+          </View>
+          {balanceAuto && (
+            <View style={{ marginTop: spacing.md }}>
+              <Text style={styles.optSub}>Combien de jours avant l'arrivée ?</Text>
+              <View style={styles.chips}>
+                {[3, 5, 7, 14].map((d) => (
+                  <Pressable key={d} testID={`balance-days-${d}`} onPress={() => setBalanceDays(d)} style={[styles.chip, balanceDays === d && styles.chipOn]}>
+                    <Text style={[styles.chipText, balanceDays === d && styles.chipTextOn]}>J-{d}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+        </View>
+
+        <Text style={styles.group}>Page vitrine (accueil)</Text>
+        <View style={styles.card}>
+          <View style={styles.optRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.optTitle}>Afficher une page d'accueil</Text>
+              <Text style={styles.optSub}>Photo, titre et texte d'intro affichés avant la liste des logements.</Text>
+            </View>
+            <Switch testID="showcase-enabled" value={scEnabled} onValueChange={setScEnabled}
+              trackColor={{ false: colors.border, true: colors.brandPrimary }} thumbColor="#fff" />
+          </View>
+          {scEnabled && (
+            <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
+              <Pressable testID="showcase-hero" onPress={pickHero} disabled={uploadingHero} style={styles.heroBox}>
+                {scHero ? <Image source={{ uri: fileUrl(scHero) }} style={styles.heroImg} contentFit="cover" /> :
+                  uploadingHero ? <ActivityIndicator color={colors.brandPrimary} /> :
+                  <View style={{ alignItems: "center", gap: 4 }}><Ionicons name="image-outline" size={26} color={colors.onSurfaceTertiary} /><Text style={styles.optSub}>Ajouter une photo de couverture</Text></View>}
+              </Pressable>
+              <TextInput testID="showcase-title" value={scTitle} onChangeText={setScTitle} placeholder="Titre (ex. MHP Immobilier)" placeholderTextColor={colors.onSurfaceTertiary} style={styles.scInput} />
+              <TextInput testID="showcase-intro" value={scIntro} onChangeText={setScIntro} placeholder="Texte d'introduction (à propos)…" placeholderTextColor={colors.onSurfaceTertiary} style={[styles.scInput, { minHeight: 80, textAlignVertical: "top" }]} multiline />
+            </View>
+          )}
+        </View>
+
         <Pressable testID="site-save" onPress={save} disabled={saving} style={[styles.saveBtn, saving && { opacity: 0.6 }]}>
           {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Enregistrer</Text>}
         </Pressable>
@@ -148,7 +227,7 @@ function Header({ insets, onBack }: any) {
         <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
       </Pressable>
       <Text style={styles.title}>Site de réservation</Text>
-      <View style={{ width: 34 }} />
+      <HelpButton screen="booking-site" />
     </View>
   );
 }
@@ -184,4 +263,7 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: colors.brandPrimary },
   chipText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
   chipTextOn: { color: colors.onBrandPrimary },
+  heroBox: { height: 130, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, borderStyle: "dashed", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  heroImg: { width: "100%", height: "100%" },
+  scInput: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: 12, fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurface },
 });

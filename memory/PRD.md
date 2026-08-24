@@ -405,3 +405,22 @@
 - **Landing domaine** : GET /api/public/default-site → slug du 1er site actif ; page `app/book/index.tsx` redirige /book → /book/{slug} (pour brancher mhpimmo.fr/book au déploiement).
 - Frontend fiche : devis affiche « Acompte X% — à payer maintenant » + « Solde à régler plus tard », bouton « Payer l'acompte …€ ». Fix warning web (nœud texte).
 - Vérifié : backend 7/7 pytest (acompte 170,70€/398,30€, checkout débite l'acompte, default-site, check-in GET/POST 404 gérés) + frontend (/book redirige, page check-in soumet, réglages acompte persistent). Politique « Acompte 30% » liée par défaut. Réservations de test nettoyées.
+
+## Itération 25 — Refactoring P0 de server.py (2026-06)
+- **Objectif** : découper le monolithe `server.py` (5 603 lignes) sans changer le comportement, pour la maintenabilité.
+- **Nouvelle architecture backend** :
+  - `core.py` (~2100 l) : imports, config, connexion Mongo (`db`/`client`), `app`, `api_router`, TOUS les modèles Pydantic et TOUS les helpers (auth, permissions, stockage objet, email/push, Stripe, prix, devis, HTML relevés/rapports, `_apply_stripe_payment`, `run_automations_for_user`, `run_channel_sync`, `run_ical_sync`, etc.). Expose tout via `__all__` (inclut les noms préfixés `_`).
+  - `routers/*.py` (23 modules, ~3000 l) : uniquement les handlers de routes, groupés par domaine (auth, properties, reservations, public_site, interventions, ical, dashboard, analytics, ai, preferences, channex, policies, push, sync, inbox, team, owners, statements, reviews, promotions, templates, automations, files). Chaque module fait `from core import *`.
+  - `server.py` (~360 l) : point d'entrée. Importe core + tous les routers (enregistre les 147 routes sur `api_router`), définit les boucles automatiques + middleware `enforce_write_permissions` + startup/shutdown + CORS, puis `app.include_router(api_router)`.
+- **Vérifié** : 147 routes API identiques à l'original (aucun doublon), backend redémarré et sert des 200 réels (auth/session, dashboard, preferences, public/site, booking-policies…), pytest 256 passés. Correctif inclus : boucle `_statement_reminder_loop` sans `await asyncio.sleep` en fin de `while True` (famine de l'event-loop) → sleep 6 h ajouté.
+- **Notes** : la fonction `channex_import` était orpheline (jamais décorée en route) dans l'original — comportement conservé (non enregistrée), placée dans `core.py`. Sauvegarde de l'original dans `/app/memory/server_pre_refactor_backup.py`. Test `test_company_statement_email` mis à jour pour patcher `routers.statements.send_email`.
+
+## Itération 26 — Zone d'aide (FAQ + guides + assistant IA + aide contextuelle) (2026-06)
+- **Demande utilisateur** : créer une zone d'aide. Choix : (1d) mélange FAQ + guides pas-à-pas + assistant IA, (2c) écran dédié dans le menu + bouton « ? » contextuel sur chaque écran, (3a) contenu généré, (4b) libre-service (pas de contact support), (5a) français uniquement.
+- **Backend** : `POST /api/ai/help-ask` (routers/ai.py) → répond en français à {question} + {screen} optionnel via make_chat (EMERGENT_LLM_KEY), avec une base de connaissances Casanéo intégrée. 401 sans token, 400 si question vide.
+- **Frontend** :
+  - `app/help.tsx` — Centre d'aide : carte « Assistant d'aide » (question → réponse IA), barre de recherche filtrant les thèmes, thèmes repliables (11 thèmes) avec guides numérotés + FAQ.
+  - `src/data/help.ts` — contenu éditable : `HELP_TOPICS` (thèmes/FAQ/guides) + `SCREEN_HELP` (aide contextuelle par écran). Facile à corriger.
+  - `src/components/HelpButton.tsx` — bouton « ? » réutilisable ouvrant un modal (conseils de l'écran + mini-assistant IA + lien « Ouvrir le centre d'aide »).
+  - Bouton « ? » ajouté aux en-têtes : Accueil, Réservations, Calendrier, Logements, Relevé propriétaires, Assistant IA, Intégrations, Paramètres, Site de réservation. Entrée « Aide » (drawer-help) ajoutée au menu latéral. Route `help` enregistrée dans `_layout.tsx`.
+- **Testé** : backend 9/9 (test_help_ai.py) dont non-régression guest-reply/pricing-suggestion après refactor ; frontend validé (écran /help, recherche, thèmes, bouton « ? » sur les 9 écrans, modal + réponse IA authentifiée, navigation menu → /help). Rien de mocké.

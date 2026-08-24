@@ -135,6 +135,7 @@ export default function RootLayout() {
                 <Stack.Screen name="cleaning" />
                 <Stack.Screen name="inbox" />
                 <Stack.Screen name="inbox/[thread]" />
+                <Stack.Screen name="help" />
               </Stack>
             </PreferencesProvider>
           </AuthProvider>

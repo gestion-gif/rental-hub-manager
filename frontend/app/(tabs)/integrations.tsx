@@ -17,6 +17,7 @@ import * as Clipboard from "expo-clipboard";
 
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
+import { HelpButton } from "@/src/components/HelpButton";
 import { Picker } from "@/src/components/Picker";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
@@ -85,9 +86,12 @@ export default function Integrations() {
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
-        <View style={styles.titleRow}>
-          <MenuButton />
-          <Text style={styles.title}>Intégrations</Text>
+        <View style={[styles.titleRow, { justifyContent: "space-between" }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs }}>
+            <MenuButton />
+            <Text style={styles.title}>Intégrations</Text>
+          </View>
+          <HelpButton screen="integrations" />
         </View>
       </View>
 

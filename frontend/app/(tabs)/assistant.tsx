@@ -21,6 +21,7 @@ import { Platform } from "react-native";
 
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
+import { HelpButton } from "@/src/components/HelpButton";
 import { PrimaryButton } from "@/src/components/ui";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
@@ -35,9 +36,12 @@ export default function Assistant() {
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.md }]}>
-        <View style={styles.titleRow}>
-          <MenuButton />
-          <Text style={styles.title}>Assistant IA</Text>
+        <View style={[styles.titleRow, { justifyContent: "space-between" }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs }}>
+            <MenuButton />
+            <Text style={styles.title}>Assistant IA</Text>
+          </View>
+          <HelpButton screen="assistant" />
         </View>
         <View style={styles.segment}>
           {(["messages", "prix"] as const).map((t) => (

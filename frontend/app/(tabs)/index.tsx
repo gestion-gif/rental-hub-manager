@@ -20,6 +20,7 @@ dayjs.locale("fr");
 import { useAuth } from "@/src/context/AuthContext";
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
+import { HelpButton } from "@/src/components/HelpButton";
 import StatusBadge from "@/src/components/StatusBadge";
 import { getInterventionType } from "@/src/interventionTypes";
 import { InterventionIcon } from "@/src/components/InterventionIcon";
@@ -147,6 +148,7 @@ export default function Dashboard() {
             </View>
           </View>
           <View style={styles.headerActions}>
+            <HelpButton screen="index" />
             {canSeeInbox(user) && (
               <Pressable testID="dash-inbox" onPress={() => router.push("/inbox")} style={styles.iconBtn}>
                 <Ionicons name="mail-outline" size={20} color={colors.onSurfaceSecondary} />

@@ -37,16 +37,27 @@ export default function PublicSiteHome() {
   );
 
   const company = data.company || {};
+  const sc = data.showcase || {};
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
-      <View style={[styles.hero, { paddingTop: insets.top + spacing.xl }]}>
-        {company.logo_path ? (
-          <Image source={{ uri: fileUrl(company.logo_path) }} style={styles.logo} contentFit="contain" />
-        ) : null}
-        <Text style={styles.brand}>{company.name || "Nos hébergements"}</Text>
-        <Text style={styles.tagline}>Réservez en direct, sans intermédiaire</Text>
-      </View>
+      {sc.enabled && sc.hero_photo ? (
+        <View style={styles.showcaseHero}>
+          <Image source={{ uri: fileUrl(sc.hero_photo) }} style={styles.showcaseImg} contentFit="cover" />
+          <View style={styles.showcaseOverlay} />
+          <View style={[styles.showcaseContent, { paddingTop: insets.top + spacing.xl }]}>
+            {company.logo_path ? <Image source={{ uri: fileUrl(company.logo_path) }} style={styles.logoLight} contentFit="contain" /> : null}
+            <Text style={styles.showcaseTitle}>{sc.title || company.name || "Nos hébergements"}</Text>
+            {!!sc.intro && <Text style={styles.showcaseIntro}>{sc.intro}</Text>}
+          </View>
+        </View>
+      ) : (
+        <View style={[styles.hero, { paddingTop: insets.top + spacing.xl }]}>
+          {company.logo_path ? <Image source={{ uri: fileUrl(company.logo_path) }} style={styles.logo} contentFit="contain" /> : null}
+          <Text style={styles.brand}>{sc.title || company.name || "Nos hébergements"}</Text>
+          <Text style={styles.tagline}>{sc.intro || "Réservez en direct, sans intermédiaire"}</Text>
+        </View>
+      )}
 
       <View style={[styles.wrap, { maxWidth: 1100, alignSelf: "center", width: "100%" }]}>
         <Text style={styles.sectionTitle}>{data.count} hébergement{data.count > 1 ? "s" : ""} disponible{data.count > 1 ? "s" : ""}</Text>
@@ -87,6 +98,13 @@ const styles = StyleSheet.create({
   logo: { width: 120, height: 54, marginBottom: spacing.sm },
   brand: { fontFamily: font.bold, fontSize: 26, color: "#fff", textAlign: "center" },
   tagline: { fontFamily: font.regular, fontSize: fontSize.base, color: "#D6E7F3", marginTop: 4 },
+  showcaseHero: { height: 340, position: "relative" },
+  showcaseImg: { ...StyleSheet.absoluteFillObject },
+  showcaseOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(20,40,60,0.45)" },
+  showcaseContent: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.lg },
+  logoLight: { width: 130, height: 56, marginBottom: spacing.md },
+  showcaseTitle: { fontFamily: font.bold, fontSize: 30, color: "#fff", textAlign: "center" },
+  showcaseIntro: { fontFamily: font.regular, fontSize: fontSize.lg, color: "#EAF3FA", textAlign: "center", marginTop: spacing.sm, maxWidth: 560, lineHeight: 24 },
   wrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
   sectionTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.md },
   grid: { flexDirection: "row", flexWrap: "wrap" },

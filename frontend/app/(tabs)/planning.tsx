@@ -20,6 +20,7 @@ import "dayjs/locale/fr";
 
 import { api } from "@/src/api";
 import { MenuButton } from "@/src/components/MenuButton";
+import { HelpButton } from "@/src/components/HelpButton";
 import { usePreferences } from "@/src/context/PreferencesContext";
 import { useAuth } from "@/src/context/AuthContext";
 import { guestLabel, canModify } from "@/src/permissions";
@@ -239,13 +240,16 @@ export default function Planning() {
             <MenuButton />
             <Text style={styles.title}>Calendrier</Text>
           </View>
-          <Pressable
-            testID="open-color-settings"
-            onPress={() => router.push("/settings/status-colors")}
-            style={styles.gear}
-          >
-            <Ionicons name="color-palette-outline" size={20} color={colors.onSurface} />
-          </Pressable>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs }}>
+            <HelpButton screen="planning" />
+            <Pressable
+              testID="open-color-settings"
+              onPress={() => router.push("/settings/status-colors")}
+              style={styles.gear}
+            >
+              <Ionicons name="color-palette-outline" size={20} color={colors.onSurface} />
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.priceControls}>
