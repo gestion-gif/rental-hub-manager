@@ -2,6 +2,7 @@
 from core import *  # noqa: F401,F403
 from core import app, api_router, client
 from core import _drain_channex_outbox  # noqa: F401
+from core import process_channex_bookings  # noqa: F401
 
 # Import router modules so their endpoints register on api_router
 from routers import (  # noqa: F401
@@ -115,6 +116,26 @@ async def startup():
     asyncio.create_task(_monthly_report_loop())
     asyncio.create_task(_public_site_loop())
     asyncio.create_task(_channex_outbox_loop())
+    asyncio.create_task(_channex_bookings_loop())
+
+
+async def _channex_bookings_loop():
+    """Poll de secours du feed des réservations Channex (+ acquittement) toutes les ~90 s.
+    Complète le webhook (Channex recommande feed + webhook)."""
+    await asyncio.sleep(45)
+    while True:
+        try:
+            settings = await db.channex_settings.find(
+                {"api_key": {"$nin": [None, ""]}}, {"_id": 0, "user_id": 1}).to_list(1000)
+            for s in settings:
+                try:
+                    await process_channex_bookings(s["user_id"])
+                except Exception:
+                    logger.exception("channex bookings poll error %s", s.get("user_id"))
+                await asyncio.sleep(2)
+        except Exception:
+            logger.exception("channex bookings loop error")
+        await asyncio.sleep(90)
 
 
 async def _channex_outbox_loop():

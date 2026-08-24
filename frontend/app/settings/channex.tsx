@@ -21,6 +21,8 @@ export default function ChannexSettings() {
   const [loadingProps, setLoadingProps] = useState(false);
   const [importing, setImporting] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [webhookBusy, setWebhookBusy] = useState(false);
+  const [bookingBusy, setBookingBusy] = useState(false);
   const [reconfig, setReconfig] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
 
@@ -63,6 +65,33 @@ export default function ChannexSettings() {
       Alert.alert("Erreur", e?.message || "Import impossible.");
     }
     setImporting(false);
+  }
+
+  async function registerWebhook() {
+    if (webhookBusy) return;
+    setWebhookBusy(true);
+    try {
+      const callback = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/channex/webhook`;
+      await api.post("/channex/webhook/register", { callback_url: callback });
+      Alert.alert("Réception activée", "Casanéo recevra désormais automatiquement les réservations Airbnb/Booking depuis Channex.");
+      await load();
+    } catch (e: any) {
+      Alert.alert("Erreur", e?.message || "Activation impossible.");
+    }
+    setWebhookBusy(false);
+  }
+
+  async function syncBookings() {
+    if (bookingBusy) return;
+    setBookingBusy(true);
+    try {
+      const r = await api.post("/channex/bookings/sync", {});
+      Alert.alert("Réservations récupérées", `${r.processed} réservation(s) traitée(s) depuis Channex.`);
+      await load();
+    } catch (e: any) {
+      Alert.alert("Erreur", e?.message || "Récupération impossible.");
+    }
+    setBookingBusy(false);
   }
 
   async function fullSync() {
@@ -162,6 +191,16 @@ export default function ChannexSettings() {
                 <Pressable testID="channex-fullsync" onPress={fullSync} disabled={syncing || (status.properties_count || 0) === 0} style={[styles.syncBtn, ((status.properties_count || 0) === 0) && { opacity: 0.5 }]}>
                   {syncing ? <ActivityIndicator size="small" color="#fff" /> : (
                     <><Ionicons name="cloud-upload-outline" size={16} color="#fff" /><Text style={styles.importText}>Synchronisation complète vers Channex (500 jours)</Text></>
+                  )}
+                </Pressable>
+                <Pressable testID="channex-webhook" onPress={registerWebhook} disabled={webhookBusy} style={[styles.syncBtn, { backgroundColor: status.webhook_id ? "#17B0A6" : "#7A5AF8" }]}>
+                  {webhookBusy ? <ActivityIndicator size="small" color="#fff" /> : (
+                    <><Ionicons name={status.webhook_id ? "checkmark-circle-outline" : "notifications-outline"} size={16} color="#fff" /><Text style={styles.importText}>{status.webhook_id ? "Réception des réservations activée ✓ (réactiver)" : "Activer la réception des réservations (webhook)"}</Text></>
+                  )}
+                </Pressable>
+                <Pressable testID="channex-bookings-sync" onPress={syncBookings} disabled={bookingBusy} style={styles.reconfigBtn}>
+                  {bookingBusy ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : (
+                    <><Ionicons name="download-outline" size={14} color={colors.brandPrimary} /><Text style={styles.reconfigText}>Récupérer les réservations maintenant</Text></>
                   )}
                 </Pressable>
                 <Pressable testID="channex-reconfig" onPress={() => { setEnv((status.environment === "production" ? "production" : "staging")); setReconfig(true); }} style={styles.reconfigBtn}>

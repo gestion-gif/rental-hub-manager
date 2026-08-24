@@ -1,6 +1,63 @@
 # ruff: noqa: F403, F405
 from core import *  # noqa: F401
-from core import _date_ranges  # noqa: F401
+from core import _date_ranges, process_channex_bookings  # noqa: F401
+
+
+class WebhookRegisterIn(BaseModel):
+    callback_url: str
+
+
+@api_router.post("/channex/webhook")
+async def channex_webhook(request: Request):
+    """Point d'entrée public appelé par Channex à chaque réservation. Déclenche le
+    traitement immédiat du feed pour l'utilisateur concerné. Répond 200 rapidement."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    payload = body.get("payload") if isinstance(body.get("payload"), dict) else body
+    cx_pid = (payload or {}).get("property_id") or ((payload or {}).get("data") or {}).get("property_id")
+    if cx_pid:
+        prop = await db.properties.find_one({"channex_id": cx_pid}, {"_id": 0, "user_id": 1})
+        if prop:
+            try:
+                await process_channex_bookings(prop["user_id"])
+            except Exception:
+                logger.exception("channex webhook processing error")
+    return {"ok": True}
+
+
+@api_router.post("/channex/webhook/register")
+async def channex_register_webhook(payload: WebhookRegisterIn, user=Depends(get_current_user)):
+    adapter, _ = await get_channex_adapter(user["user_id"])
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channex non connecté")
+    url = (payload.callback_url or "").rstrip("/")
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="URL de rappel invalide")
+    async with httpx.AsyncClient(timeout=40) as http:
+        try:
+            existing = await adapter.list_webhooks(http)
+        except Exception:
+            existing = []
+        for w in existing:
+            if ((w.get("attributes") or {}).get("callback_url") or "").rstrip("/") == url:
+                await db.channex_settings.update_one(
+                    {"user_id": user["user_id"]}, {"$set": {"webhook_id": w.get("id"), "webhook_url": url}})
+                return {"ok": True, "webhook_id": w.get("id"), "already": True}
+        res = await adapter.create_webhook(http, url)
+    wid = ((res or {}).get("data") or {}).get("id")
+    await db.channex_settings.update_one(
+        {"user_id": user["user_id"]}, {"$set": {"webhook_id": wid, "webhook_url": url}})
+    await _sync_log(user["user_id"], "webhook_register", "success", url)
+    return {"ok": True, "webhook_id": wid}
+
+
+@api_router.post("/channex/bookings/sync")
+async def channex_bookings_sync(user=Depends(get_current_user)):
+    """Récupère manuellement les réservations Channex non traitées (feed) et les acquitte."""
+    r = await process_channex_bookings(user["user_id"])
+    return {"ok": True, **r}
 
 
 @api_router.post("/channex/connect")
@@ -43,6 +100,7 @@ async def channex_status(user=Depends(get_current_user)):
         "properties_count": doc.get("properties_count", 0),
         "connected_at": doc.get("connected_at"),
         "last_read_at": doc.get("last_read_at"),
+        "webhook_id": doc.get("webhook_id"),
     }
 
 

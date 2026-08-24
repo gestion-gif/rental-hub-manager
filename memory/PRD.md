@@ -453,3 +453,12 @@
 - Le prix poussé = `_price_for_day(property)` (source de vérité prix de l'app). Rate en centimes, min_stay via min_stay_arrival + min_stay_through.
 - Testé E2E (staging) : price change, min_stay, booking → outbox 'done' + valeurs correctes dans Channex. 71 tests OK.
 - RESTE : Phase 3 (webhook réception réservations Booking.com + accusé) ; Phase 4 (prépa formulaire + appel visio certif).
+
+## Itération 31 — Channex Phase 3 : réception des réservations (2026-06)
+- Adapter (channex.py) : `booking_feed` (GET /booking_revisions/feed), `ack_revision` (POST /booking_revisions/{id}/ack), `list_webhooks`, `create_webhook` (is_global=true requis).
+- core.py : `process_channex_bookings(uid)` — lit le feed, mappe property_id Channex→logement, crée/màj/annule la réservation (source 'channex', channex_booking_id), bloque/libère la dispo locale (PAS de re-push → pas de boucle), déclenche ménage, puis ACK. `CHANNEX_BOOKING_STATUS`, `_rev_guests`.
+- routers/channex.py : `POST /channex/webhook` (public, 200 rapide → déclenche process pour l'user du property_id), `POST /channex/webhook/register` (crée webhook is_global + stocke webhook_id/url), `POST /channex/bookings/sync` (manuel). `channex_status` expose webhook_id.
+- server.py : `_channex_bookings_loop` (poll feed toutes 90s, secours + ack — recommandé par Channex feed+webhook).
+- UI (settings/channex.tsx) : boutons « Activer la réception des réservations (webhook) » + « Récupérer les réservations maintenant ».
+- Testé staging : register webhook 200 (is_global), feed vide→0, webhook public→200, no-loop. 23 tests OK. NON testé : ingestion d'une vraie réservation (nécessite un canal + booking test Booking.com côté user).
+- RESTE : Phase 4 (config canaux + création property test conforme au mapping certif + remplir formulaire Google + appel visio).

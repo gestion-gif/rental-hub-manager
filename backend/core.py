@@ -992,6 +992,92 @@ async def enqueue_channex_ari(uid: str, property_id: str, date_from: str, date_t
         logger.exception("enqueue_channex_ari failed")
 
 
+CHANNEX_BOOKING_STATUS = {
+    "new": "confirmee", "modified": "confirmee", "modification": "confirmee",
+    "cancellation": "annulee", "cancelled": "annulee", "canceled": "annulee",
+}
+
+
+def _rev_guests(a: dict) -> int:
+    occ = a.get("occupancy") or {}
+    if isinstance(occ, dict) and occ:
+        return max(1, int(occ.get("adults", 0) or 0) + int(occ.get("children", 0) or 0))
+    tot = 0
+    for r in (a.get("rooms") or []):
+        o = (r or {}).get("occupancy") or {}
+        tot += int(o.get("adults", 0) or 0) + int(o.get("children", 0) or 0)
+    return max(1, tot)
+
+
+async def process_channex_bookings(uid: str) -> dict:
+    """Récupère le feed des réservations Channex, crée/màj/annule dans Casanéo, puis acquitte.
+    Source primaire (feed) + point d'entrée du webhook. N'entraîne PAS de re-push ARI (pas de boucle)."""
+    adapter, _ = await get_channex_adapter(uid)
+    if not adapter:
+        return {"processed": 0}
+    async with httpx.AsyncClient(timeout=60) as http:
+        try:
+            revisions = await adapter.booking_feed(http)
+        except Exception:
+            logger.exception("channex booking feed error")
+            return {"processed": 0}
+        if not revisions:
+            return {"processed": 0}
+        props = await db.properties.find(
+            {"user_id": uid, "channex_id": {"$nin": [None, ""]}}, {"_id": 0}).to_list(500)
+        by_cx = {p["channex_id"]: p for p in props}
+        processed = 0
+        for rev in revisions:
+            a = rev.get("attributes") or {}
+            prop = by_cx.get(a.get("property_id"))
+            if not prop:
+                continue  # logement non importé chez nous → on laisse (non acquitté)
+            rev_id = rev.get("id")
+            booking_id = str(a.get("booking_id") or a.get("unique_id") or rev_id)
+            status = CHANNEX_BOOKING_STATUS.get((a.get("status") or "new").lower(), "confirmee")
+            ci = a.get("arrival_date") or a.get("arrival") or ""
+            co = a.get("departure_date") or a.get("departure") or ""
+            cust = a.get("customer") or {}
+            gname = " ".join(x for x in [cust.get("name"), cust.get("surname")] if x).strip() \
+                or (a.get("ota_name") or "Voyageur")
+            gemail = cust.get("mail") or cust.get("email") or ""
+            ota = a.get("ota_name") or a.get("channel") or "Channex"
+            try:
+                amount = float(a.get("amount") or 0)
+            except Exception:
+                amount = 0.0
+            currency = a.get("currency") or "EUR"
+            q = {"user_id": uid, "channex_booking_id": booking_id}
+            existing = await db.reservations.find_one(q)
+            base_doc = {
+                "user_id": uid, "property_id": prop["id"], "property_name": prop.get("name", ""),
+                "guest_name": gname, "guest_email": gemail, "platform": ota, "source": "channex",
+                "channex_booking_id": booking_id, "channex_revision_id": rev_id,
+                "check_in": ci, "check_out": co, "guests": _rev_guests(a),
+                "total_price": amount, "status": status,
+                "finance": {"total": amount, "paid": 0.0, "due": amount, "currency": currency,
+                            "stay": amount, "fees": 0.0, "taxes": 0.0},
+            }
+            if existing:
+                await db.reservations.update_one(q, {"$set": base_doc})
+            else:
+                base_doc["id"] = str(uuid.uuid4())
+                base_doc["created_at"] = now_utc().isoformat()
+                base_doc["payments"] = []
+                await db.reservations.insert_one(base_doc)
+            await _set_property_rooms_availability(uid, prop["id"], ci, co, status != "annulee")
+            await ensure_cleaning(uid, prop["id"], co, status)
+            try:
+                await adapter.ack_revision(http, rev_id)
+            except Exception:
+                logger.exception("channex ack failed for %s", rev_id)
+            await _sync_log(uid, "booking_received", "success",
+                            f"{ota} · {gname} · {ci}→{co} ({status})")
+            processed += 1
+    return {"processed": processed}
+
+
+
 async def _drain_channex_outbox() -> int:
     """Vide la file ARI→Channex (FIFO), 1 appel par entrée, espacé (limite 20/min)."""
     pending = await db.channex_outbox.find(

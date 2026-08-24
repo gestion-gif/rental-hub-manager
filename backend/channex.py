@@ -102,6 +102,24 @@ class ChannexAdapter:
         body = await self._post(http, "/restrictions", {"values": values})
         return [t.get("id") for t in (body.get("data") or []) if isinstance(t, dict)]
 
+    async def booking_feed(self, http) -> list:
+        """Révisions de réservation NON acquittées (source primaire des réservations Channex)."""
+        body = await self._get(http, "/booking_revisions/feed")
+        return body.get("data", [])
+
+    async def ack_revision(self, http, revision_id: str):
+        """Acquitte une révision : elle ne réapparaîtra plus dans le feed."""
+        return await self._post(http, f"/booking_revisions/{revision_id}/ack", {})
+
+    async def list_webhooks(self, http) -> list:
+        body = await self._get(http, "/webhooks")
+        return body.get("data", [])
+
+    async def create_webhook(self, http, callback_url: str, event_mask: str = "booking"):
+        payload = {"webhook": {"callback_url": callback_url, "event_mask": event_mask,
+                               "is_active": True, "send_data": True, "is_global": True}}
+        return await self._post(http, "/webhooks", payload)
+
     async def list_rates(self, http, property_id: str, date_from: str, date_to: str) -> dict:
         """Nightly rates (ARI) for a property over a window.
         Returns {rate_plan_id: {date: {'rate': '150.00', ...}}}. Rates are already in main
