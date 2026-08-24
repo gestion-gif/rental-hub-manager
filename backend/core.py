@@ -197,37 +197,62 @@ async def status_color_map(uid: str):
         m.setdefault(k, v)
     return m
 async def ensure_cleaning(user_id: str, property_id: str, checkout_date: Optional[str], status: Optional[str]):
-    """Auto-create a ménage intervention on the guest departure day (idempotent)."""
+    """Auto-create a ménage intervention on the guest departure day (+ configurable offset)."""
     if not checkout_date or status == "annulee":
         return
-    # Do not create cleaning tasks for past departures
+    # Décalage configurable (J, J+1, J+2…) défini par l'utilisateur
+    pref = await db.preferences.find_one({"user_id": user_id}, {"_id": 0, "cleaning_offset_days": 1})
+    offset = max(0, min(14, int((pref or {}).get("cleaning_offset_days") or 0)))
+    clean_date = checkout_date
     try:
-        if date.fromisoformat(checkout_date) < date.today():
+        clean_date = (date.fromisoformat(checkout_date) + timedelta(days=offset)).isoformat()
+    except Exception:
+        pass
+    # Do not create cleaning tasks for past dates
+    try:
+        if date.fromisoformat(clean_date) < date.today():
             return
     except Exception:
         pass
     exists = await db.interventions.find_one({
         "user_id": user_id,
         "property_id": property_id,
-        "date": checkout_date,
+        "date": clean_date,
         "kind": "menage",
         "auto": True,
     })
     if exists:
         return
+    desc = "Ménage après départ" if offset == 0 else f"Ménage (J+{offset} après départ)"
     await db.interventions.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": user_id,
         "property_id": property_id,
         "kind": "menage",
-        "date": checkout_date,
-        "description": "Ménage après départ",
+        "date": clean_date,
+        "description": desc,
         "intervenant": "",
         "done": False,
         "not_done_reason": "",
         "auto": True,
         "created_at": now_utc().isoformat(),
     })
+
+
+async def regenerate_auto_cleanings(user_id: str):
+    """Recrée les ménages automatiques (futurs) selon le décalage courant.
+    Appelé quand l'utilisateur change le paramètre de décalage du ménage."""
+    today_iso = date.today().isoformat()
+    # Supprime les ménages auto non effectués à venir (les auto passés/faits ne bougent pas)
+    await db.interventions.delete_many({
+        "user_id": user_id, "kind": "menage", "auto": True,
+        "done": {"$ne": True}, "date": {"$gte": today_iso},
+    })
+    reservations = await db.reservations.find(
+        {"user_id": user_id, "status": {"$ne": "annulee"}, "check_out": {"$gte": today_iso}},
+        {"_id": 0, "property_id": 1, "check_out": 1, "status": 1}).to_list(5000)
+    for r in reservations:
+        await ensure_cleaning(user_id, r.get("property_id"), r.get("check_out"), r.get("status"))
 class CautionValidatedIn(BaseModel):
     validated: bool
     base_url: str = ""
@@ -853,6 +878,7 @@ class PreferencesIn(BaseModel):
     monthly_report_enabled: Optional[bool] = None
     review_request_enabled: Optional[bool] = None
     review_request_days: Optional[int] = None
+    cleaning_offset_days: Optional[int] = None
     public_site: Optional[dict] = None
 async def _ai_auto_draft_enabled(uid: str) -> bool:
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
@@ -2163,6 +2189,7 @@ __all__ = [
     'AppleAuthIn',
     'status_color_map',
     'ensure_cleaning',
+    'regenerate_auto_cleanings',
     'CautionValidatedIn',
     '_build_keys_message',
     '_send_key_instructions',

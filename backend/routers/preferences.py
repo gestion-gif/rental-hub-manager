@@ -17,6 +17,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "monthly_report_enabled": bool((doc or {}).get("monthly_report_enabled", True)),
         "review_request_enabled": bool((doc or {}).get("review_request_enabled", False)),
         "review_request_days": int((doc or {}).get("review_request_days", 1)),
+        "cleaning_offset_days": int((doc or {}).get("cleaning_offset_days", 0)),
         "public_site": _build_public_site(doc),
     }
 
@@ -97,6 +98,14 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
     if payload.review_request_days is not None:
         set_doc["review_request_days"] = max(0, min(30, int(payload.review_request_days)))
 
+    cleaning_offset_changed = False
+    if payload.cleaning_offset_days is not None:
+        new_offset = max(0, min(14, int(payload.cleaning_offset_days)))
+        prev = await db.preferences.find_one({"user_id": uid}, {"_id": 0, "cleaning_offset_days": 1})
+        if int((prev or {}).get("cleaning_offset_days", 0)) != new_offset:
+            cleaning_offset_changed = True
+        set_doc["cleaning_offset_days"] = new_offset
+
     if payload.public_site is not None:
         ps = payload.public_site or {}
         existing = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
@@ -130,6 +139,8 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         }
 
     await db.preferences.update_one({"user_id": uid}, {"$set": set_doc}, upsert=True)
+    if cleaning_offset_changed:
+        await regenerate_auto_cleanings(uid)
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     statuses = _build_statuses(doc)
     return {
@@ -143,6 +154,7 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "monthly_report_enabled": bool((doc or {}).get("monthly_report_enabled", True)),
         "review_request_enabled": bool((doc or {}).get("review_request_enabled", False)),
         "review_request_days": int((doc or {}).get("review_request_days", 1)),
+        "cleaning_offset_days": int((doc or {}).get("cleaning_offset_days", 0)),
         "public_site": _build_public_site(doc),
     }
 

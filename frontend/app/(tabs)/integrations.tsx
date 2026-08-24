@@ -25,6 +25,7 @@ const BASE = process.env.EXPO_PUBLIC_BACKEND_URL as string;
 const TURNO_URL = "https://turno.com/fr-fr";
 const LIVRET_URL = "https://livretaccueil.com/";
 const LIVRET_CAUTION_URL = "https://livretaccueil.com/account/caution";
+const GYG_URL = "https://partner.getyourguide.com";
 
 export default function Integrations() {
   const insets = useSafeAreaInsets();
@@ -212,6 +213,26 @@ export default function Integrations() {
               </Text>
             </>
           )}
+
+          {/* ---------------- GETYOURGUIDE ---------------- */}
+          <View style={styles.serviceCard}>
+            <View style={styles.serviceHead}>
+              <View style={[styles.serviceIcon, { backgroundColor: "#FF5533" }]}>
+                <Ionicons name="ticket" size={20} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.serviceName}>GetYourGuide · Activités</Text>
+                <Text style={styles.serviceDesc}>Recommandez des activités locales à vos voyageurs et touchez une commission</Text>
+              </View>
+            </View>
+            <Text style={styles.step}>
+              Rejoignez le programme partenaire GetYourGuide pour proposer excursions et activités à vos voyageurs, et générer des revenus complémentaires.
+            </Text>
+            <Pressable testID="gyg-open" onPress={() => Linking.openURL(GYG_URL)} style={styles.secondaryBtn}>
+              <Ionicons name="open-outline" size={16} color={colors.brandPrimary} />
+              <Text style={styles.secondaryText}>Ouvrir GetYourGuide Partner</Text>
+            </Pressable>
+          </View>
         </ScrollView>
       )}
     </View>
