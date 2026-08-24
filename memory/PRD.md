@@ -462,3 +462,7 @@
 - UI (settings/channex.tsx) : boutons « Activer la réception des réservations (webhook) » + « Récupérer les réservations maintenant ».
 - Testé staging : register webhook 200 (is_global), feed vide→0, webhook public→200, no-loop. 23 tests OK. NON testé : ingestion d'une vraie réservation (nécessite un canal + booking test Booking.com côté user).
 - RESTE : Phase 4 (config canaux + création property test conforme au mapping certif + remplir formulaire Google + appel visio).
+
+## Itération 31b — Phase 3 : validation réception (simulation)
+- Logique `process_channex_bookings` validée par simulation (feed mocké) : réservation créée (source channex, guests/dates/montant OK), dispo bloquée, ACK appelé. ✅
+- Création de réservation réelle via API bloquée par 403 : l'app « Booking CRS » doit être installée dans l'UI Channex par l'utilisateur. En attente de l'installation pour créer des bookings de test via /api/v1/bookings.
