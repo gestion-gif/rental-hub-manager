@@ -1,5 +1,6 @@
 # ruff: noqa: F403, F405
 from core import *  # noqa: F401
+from core import enqueue_channex_ari, enqueue_channex_availability  # noqa: F401
 
 
 @api_router.get("/properties")
@@ -46,6 +47,10 @@ async def update_property(property_id: str, payload: PropertyIn, user=Depends(ge
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Property not found")
     item = await db.properties.find_one({"id": property_id}, {"_id": 0})
+    # Prix/saisons modifiés → pousser les tarifs vers Channex (500 j)
+    _today = now_utc().date()
+    await enqueue_channex_ari(user["user_id"], property_id, _today.isoformat(),
+                              (_today + timedelta(days=499)).isoformat(), avail=False)
     return item
 
 
@@ -89,8 +94,11 @@ async def update_room(room_id: str, payload: RoomIn, user=Depends(get_current_us
     r = await db.rooms.find_one({"id": room_id, "user_id": user["user_id"]}, {"_id": 0})
     if not r:
         raise HTTPException(status_code=404, detail="Chambre introuvable")
-    await db.rooms.update_one({"id": room_id}, {"$set": payload.dict()})
-    return {**r, **payload.dict()}
+    data = payload.dict()
+    if data.get("channex_room_type_id") is None:
+        data.pop("channex_room_type_id", None)  # ne pas écraser le mapping Channex
+    await db.rooms.update_one({"id": room_id}, {"$set": data})
+    return {**r, **data}
 
 
 @api_router.delete("/rooms/{room_id}")
@@ -118,6 +126,9 @@ async def create_rate_plan(property_id: str, payload: RatePlanIn, user=Depends(g
                 "created_at": now_utc().isoformat()})
     await db.rate_plans.insert_one(doc)
     doc.pop("_id", None)
+    _t = now_utc().date()
+    await enqueue_channex_ari(user["user_id"], property_id, _t.isoformat(),
+                              (_t + timedelta(days=499)).isoformat(), avail=False)
     return doc
 
 
@@ -126,8 +137,14 @@ async def update_rate_plan(plan_id: str, payload: RatePlanIn, user=Depends(get_c
     p = await db.rate_plans.find_one({"id": plan_id, "user_id": user["user_id"]}, {"_id": 0})
     if not p:
         raise HTTPException(status_code=404, detail="Tarif introuvable")
-    await db.rate_plans.update_one({"id": plan_id}, {"$set": payload.dict()})
-    return {**p, **payload.dict()}
+    data = payload.dict()
+    if data.get("channex_rate_plan_id") is None:
+        data.pop("channex_rate_plan_id", None)  # ne pas écraser le mapping Channex
+    await db.rate_plans.update_one({"id": plan_id}, {"$set": data})
+    _t = now_utc().date()
+    await enqueue_channex_ari(user["user_id"], p["property_id"], _t.isoformat(),
+                              (_t + timedelta(days=499)).isoformat(), avail=False)
+    return {**p, **data}
 
 
 @api_router.delete("/rate-plans/{plan_id}")
@@ -166,6 +183,10 @@ async def set_availability(room_id: str, payload: AvailabilitySetIn, user=Depend
                       "min_stay": payload.min_stay}},
             upsert=True)
         d += timedelta(days=1); n += 1
+    # Blocage/déblocage manuel → pousser la disponibilité (+ min stay) vers Channex
+    await enqueue_channex_availability(user["user_id"], room["property_id"], payload.date_from, payload.date_to)
+    if payload.min_stay is not None:
+        await enqueue_channex_ari(user["user_id"], room["property_id"], payload.date_from, payload.date_to, avail=False)
     return {"ok": True, "days": n}
 
 

@@ -441,3 +441,15 @@
 - UI : bouton « Synchronisation complète vers Channex (500 jours) » dans Paramètres → Channex (settings/channex.tsx).
 - Testé E2E (compte temp + saison + réservation) : 2 task_ids, 3 plages dispo + 3 plages tarifs (variation OK). 23/23 tests Channex OK.
 - RESTE À FAIRE pour certification : Phase 2 (push delta événementiel depuis les vrais écrans + file d'attente/rate limiter/retry), Phase 3 (webhook réception réservations Booking.com + accusé), Phase 4 (prépa tests + appel visio).
+
+## Itération 30 — Channex Phase 2 : push delta événementiel (2026-06)
+- Nouvelle file d'attente `channex_outbox` + worker `_channex_outbox_loop` (server.py, tick 8s) → `_drain_channex_outbox` (core.py) : 1 appel par entrée, espacé ~3s (limite 20/min), retry/backoff (via ChannexAdapter._post), 5 tentatives puis status 'error'. Journalisé (sync_logs type 'delta_push').
+- Helpers core : `enqueue_channex_availability`, `enqueue_channex_rates`, `enqueue_channex_ari`, `_channex_linked_prop`, `_date_ranges` (déplacé en core ; routers/channex.py l'importe). Push seulement si Channex connecté + logement lié.
+- Hooks branchés sur les VRAIS chemins (exigence certif — pas de script) :
+  - Prix/saisons : `update_property` → enqueue rates (500 j). ✅ testé (250 € poussé).
+  - Rate plan create/update → enqueue rates (min_stay). Bug corrigé : update_room/update_rate_plan écrasaient `channex_room_type_id`/`channex_rate_plan_id` quand omis → mapping perdu ; désormais préservés (comme lodgify_id).
+  - Réservations create/update/status/delete → enqueue availability (dispo = count_of_rooms − réservé/bloqué). ✅ testé (avail 1).
+  - Blocage manuel `set_availability` → enqueue availability (+ rates si min_stay).
+- Le prix poussé = `_price_for_day(property)` (source de vérité prix de l'app). Rate en centimes, min_stay via min_stay_arrival + min_stay_through.
+- Testé E2E (staging) : price change, min_stay, booking → outbox 'done' + valeurs correctes dans Channex. 71 tests OK.
+- RESTE : Phase 3 (webhook réception réservations Booking.com + accusé) ; Phase 4 (prépa formulaire + appel visio certif).

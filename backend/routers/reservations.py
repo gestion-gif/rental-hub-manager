@@ -1,5 +1,6 @@
 # ruff: noqa: F403, F405
 from core import *  # noqa: F401
+from core import enqueue_channex_ari  # noqa: F401
 
 
 @api_router.get("/reservations")
@@ -40,6 +41,7 @@ async def create_reservation(payload: ReservationIn, user=Depends(get_current_us
     await ensure_cleaning(user["user_id"], doc["property_id"], doc.get("check_out"), doc.get("status"))
     if doc.get("status") != "annulee":
         await _set_property_rooms_availability(user["user_id"], doc["property_id"], doc.get("check_in"), doc.get("check_out"), True)
+    await enqueue_channex_ari(user["user_id"], doc["property_id"], doc.get("check_in"), doc.get("check_out"), rates=False)
     return doc
 
 
@@ -78,6 +80,7 @@ async def update_reservation(reservation_id: str, payload: ReservationIn, user=D
     await ensure_cleaning(user["user_id"], item["property_id"], item.get("check_out"), item.get("status"))
     await _set_property_rooms_availability(user["user_id"], item["property_id"], item.get("check_in"), item.get("check_out"),
                                            item.get("status") != "annulee")
+    await enqueue_channex_ari(user["user_id"], item["property_id"], item.get("check_in"), item.get("check_out"), rates=False)
     return item
 
 
@@ -101,6 +104,7 @@ async def update_status(reservation_id: str, body: dict, user=Depends(get_curren
     item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     await _set_property_rooms_availability(user["user_id"], item["property_id"], item.get("check_in"), item.get("check_out"),
                                            new_status != "annulee")
+    await enqueue_channex_ari(user["user_id"], item["property_id"], item.get("check_in"), item.get("check_out"), rates=False)
     return item
 
 
@@ -378,6 +382,7 @@ async def delete_reservation(reservation_id: str, user=Depends(get_current_user)
     await db.reservations.delete_one({"id": reservation_id, "user_id": user["user_id"]})
     if r:
         await _set_property_rooms_availability(user["user_id"], r.get("property_id"), r.get("check_in"), r.get("check_out"), False)
+        await enqueue_channex_ari(user["user_id"], r.get("property_id"), r.get("check_in"), r.get("check_out"), rates=False)
     return {"ok": True}
 
 

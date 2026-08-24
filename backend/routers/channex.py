@@ -1,5 +1,6 @@
 # ruff: noqa: F403, F405
 from core import *  # noqa: F401
+from core import _date_ranges  # noqa: F401
 
 
 @api_router.post("/channex/connect")
@@ -96,31 +97,6 @@ async def channex_sync_logs(user=Depends(get_current_user)):
         {"user_id": user["user_id"], "provider": "channex"}, {"_id": 0}
     ).sort("date", -1).to_list(50)
     return {"logs": logs}
-
-
-def _date_ranges(start, end, value_fn, build_fn):
-    """Regroupe les jours consécutifs de même valeur en plages (payload ARI compact & réaliste)."""
-    out = []
-    cur = start
-    run_start = None
-    run_val = None
-    while cur <= end:
-        v = value_fn(cur)
-        if run_val is None:
-            run_start, run_val = cur, v
-        elif v != run_val:
-            e = build_fn(run_val)
-            e["date_from"] = run_start.isoformat()
-            e["date_to"] = (cur - timedelta(days=1)).isoformat()
-            out.append(e)
-            run_start, run_val = cur, v
-        cur += timedelta(days=1)
-    if run_val is not None:
-        e = build_fn(run_val)
-        e["date_from"] = run_start.isoformat()
-        e["date_to"] = end.isoformat()
-        out.append(e)
-    return out
 
 
 class FullSyncIn(BaseModel):

@@ -1,6 +1,7 @@
 # ruff: noqa: F403, F405
 from core import *  # noqa: F401,F403
 from core import app, api_router, client
+from core import _drain_channex_outbox  # noqa: F401
 
 # Import router modules so their endpoints register on api_router
 from routers import (  # noqa: F401
@@ -113,6 +114,18 @@ async def startup():
     asyncio.create_task(_statement_reminder_loop())
     asyncio.create_task(_monthly_report_loop())
     asyncio.create_task(_public_site_loop())
+    asyncio.create_task(_channex_outbox_loop())
+
+
+async def _channex_outbox_loop():
+    """Vide la file d'attente ARI→Channex (push delta événementiel) toutes les ~8 s."""
+    await asyncio.sleep(20)
+    while True:
+        try:
+            await _drain_channex_outbox()
+        except Exception:
+            logger.exception("channex outbox loop error")
+        await asyncio.sleep(8)
 
 
 async def _lodgify_auto_sync_loop():

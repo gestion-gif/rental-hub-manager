@@ -874,6 +874,159 @@ async def get_channex_adapter(user_id: str):
     if not doc or not doc.get("api_key"):
         return None, None
     return ChannexAdapter(doc["api_key"], doc.get("environment", "staging")), doc
+
+
+def _date_ranges(start, end, value_fn, build_fn):
+    """Regroupe les jours consécutifs de même valeur en plages (payload ARI compact)."""
+    out = []
+    cur = start
+    run_start = None
+    run_val = None
+    while cur <= end:
+        v = value_fn(cur)
+        if run_val is None:
+            run_start, run_val = cur, v
+        elif v != run_val:
+            e = build_fn(run_val)
+            e["date_from"] = run_start.isoformat()
+            e["date_to"] = (cur - timedelta(days=1)).isoformat()
+            out.append(e)
+            run_start, run_val = cur, v
+        cur += timedelta(days=1)
+    if run_val is not None:
+        e = build_fn(run_val)
+        e["date_from"] = run_start.isoformat()
+        e["date_to"] = end.isoformat()
+        out.append(e)
+    return out
+
+
+async def _channex_linked_prop(uid: str, property_id: str):
+    """Retourne le logement si l'utilisateur est connecté à Channex ET le logement est lié."""
+    s = await db.channex_settings.find_one({"user_id": uid}, {"_id": 0})
+    if not s or not s.get("api_key"):
+        return None
+    return await db.properties.find_one(
+        {"id": property_id, "user_id": uid, "channex_id": {"$nin": [None, ""]}}, {"_id": 0})
+
+
+async def enqueue_channex_availability(uid: str, property_id: str, date_from: str, date_to: str):
+    prop = await _channex_linked_prop(uid, property_id)
+    if not prop:
+        return
+    rooms = await db.rooms.find(
+        {"user_id": uid, "property_id": property_id, "channex_room_type_id": {"$nin": [None, ""]}},
+        {"_id": 0}).to_list(100)
+    if not rooms:
+        return
+    try:
+        d0 = date.fromisoformat(date_from); d1 = date.fromisoformat(date_to)
+    except Exception:
+        return
+    if d1 < d0:
+        d0, d1 = d1, d0
+    booked = await _booked_dates(uid, property_id, d0.isoformat(), (d1 + timedelta(days=1)).isoformat())
+    cx_pid = prop["channex_id"]
+    values = []
+    for room in rooms:
+        cap = int(room.get("count_of_rooms") or 1)
+        cx_rt = room["channex_room_type_id"]
+        closed_docs = await db.availability.find(
+            {"user_id": uid, "room_id": room["id"], "closed": True,
+             "date": {"$gte": d0.isoformat(), "$lte": d1.isoformat()}}, {"_id": 0, "date": 1}).to_list(1000)
+        closed_dates = {c["date"] for c in closed_docs}
+        values += _date_ranges(
+            d0, d1,
+            lambda d, cd=closed_dates, c=cap: max(0, c - (1 if (d.isoformat() in booked or d.isoformat() in cd) else 0)),
+            lambda v, rt=cx_rt: {"property_id": cx_pid, "room_type_id": rt, "availability": v},
+        )
+    if values:
+        await db.channex_outbox.insert_one({
+            "id": str(uuid.uuid4()), "user_id": uid, "property_id": property_id,
+            "kind": "availability", "values": values, "status": "pending",
+            "attempts": 0, "created_at": now_utc().isoformat()})
+
+
+async def enqueue_channex_rates(uid: str, property_id: str, date_from: str, date_to: str):
+    prop = await _channex_linked_prop(uid, property_id)
+    if not prop:
+        return
+    rate_plans = await db.rate_plans.find(
+        {"user_id": uid, "property_id": property_id, "channex_rate_plan_id": {"$nin": [None, ""]}},
+        {"_id": 0}).to_list(100)
+    if not rate_plans:
+        return
+    try:
+        d0 = date.fromisoformat(date_from); d1 = date.fromisoformat(date_to)
+    except Exception:
+        return
+    if d1 < d0:
+        d0, d1 = d1, d0
+    cx_pid = prop["channex_id"]
+    values = []
+    for rpn in rate_plans:
+        cx_rp = rpn["channex_rate_plan_id"]
+        ms = int(rpn.get("min_stay") or 1)
+        values += _date_ranges(
+            d0, d1,
+            lambda d: int(round(_price_for_day(prop, d.isoformat()) * 100)),
+            lambda v, rp=cx_rp, m=ms: {"property_id": cx_pid, "rate_plan_id": rp, "rate": v,
+                                       "min_stay_arrival": m, "min_stay_through": m},
+        )
+    if values:
+        await db.channex_outbox.insert_one({
+            "id": str(uuid.uuid4()), "user_id": uid, "property_id": property_id,
+            "kind": "restrictions", "values": values, "status": "pending",
+            "attempts": 0, "created_at": now_utc().isoformat()})
+
+
+async def enqueue_channex_ari(uid: str, property_id: str, date_from: str, date_to: str,
+                              rates: bool = True, avail: bool = True):
+    """Met un changement ARI en file vers Channex (jamais bloquant pour l'action utilisateur)."""
+    try:
+        if avail:
+            await enqueue_channex_availability(uid, property_id, date_from, date_to)
+        if rates:
+            await enqueue_channex_rates(uid, property_id, date_from, date_to)
+    except Exception:
+        logger.exception("enqueue_channex_ari failed")
+
+
+async def _drain_channex_outbox() -> int:
+    """Vide la file ARI→Channex (FIFO), 1 appel par entrée, espacé (limite 20/min)."""
+    pending = await db.channex_outbox.find(
+        {"status": "pending"}, {"_id": 0}).sort("created_at", 1).to_list(40)
+    if not pending:
+        return 0
+    sent = 0
+    for doc in pending:
+        adapter, _ = await get_channex_adapter(doc["user_id"])
+        if not adapter:
+            await db.channex_outbox.update_one({"id": doc["id"]}, {"$set": {"status": "skipped"}})
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=60) as http:
+                if doc["kind"] == "availability":
+                    tasks = await adapter.push_availability(http, doc["values"])
+                else:
+                    tasks = await adapter.push_restrictions(http, doc["values"])
+            await db.channex_outbox.update_one(
+                {"id": doc["id"]},
+                {"$set": {"status": "done", "task_ids": tasks, "sent_at": now_utc().isoformat()}})
+            await _sync_log(doc["user_id"], "delta_push", "success",
+                            f"{doc['kind']} {len(doc['values'])} plage(s) — tasks={tasks}")
+            sent += 1
+        except Exception as e:
+            attempts = int(doc.get("attempts", 0)) + 1
+            status = "error" if attempts >= 5 else "pending"
+            await db.channex_outbox.update_one(
+                {"id": doc["id"]}, {"$set": {"attempts": attempts, "status": status, "last_error": str(e)[:200]}})
+            if status == "error":
+                await _sync_log(doc["user_id"], "delta_push", "error", str(e)[:200])
+        await asyncio.sleep(3)  # ~20 appels/min max
+    return sent
+
+
 class ChannexConnectIn(BaseModel):
     api_key: str
     environment: str = "staging"  # staging | production
