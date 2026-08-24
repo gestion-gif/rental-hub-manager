@@ -97,3 +97,68 @@ async def channex_sync_logs(user=Depends(get_current_user)):
     ).sort("date", -1).to_list(50)
     return {"logs": logs}
 
+
+@api_router.post("/channex/import")
+async def channex_import(user=Depends(get_current_user)):
+    """Importe les logements Channex → Property + Room + RatePlan (idempotent par channex_id).
+    Conserve les IDs Lodgify existants (mapping provider-neutre)."""
+    uid = user["user_id"]
+    adapter, doc = await get_channex_adapter(uid)
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channex non connecté")
+    imported_props = imported_rooms = imported_rates = 0
+    async with httpx.AsyncClient(timeout=60) as http:
+        raw_props = await adapter.list_properties(http)
+        for rp in raw_props:
+            cp = map_channex_property(rp)
+            cid = cp["channex_id"]
+            existing = await db.properties.find_one({"user_id": uid, "channex_id": cid}, {"_id": 0})
+            if existing:
+                pid = existing["id"]
+            else:
+                pid = str(uuid.uuid4())
+                await db.properties.insert_one({
+                    "id": pid, "user_id": uid, "name": cp["title"],
+                    "channex_id": cid, "location": cp.get("city") or "",
+                    "base_price": 0, "capacity": 2, "bedrooms": 1,
+                    "seasons": [], "ical_links": [],
+                    "created_at": now_utc().isoformat(),
+                })
+                imported_props += 1
+            rooms = await adapter.list_room_types(http, cid)
+            for rr in rooms:
+                cr = map_channex_room(rr)
+                rtid = cr["channex_room_type_id"]
+                ex_room = await db.rooms.find_one({"user_id": uid, "channex_room_type_id": rtid}, {"_id": 0})
+                if ex_room:
+                    room_id = ex_room["id"]
+                else:
+                    room_id = str(uuid.uuid4())
+                    await db.rooms.insert_one({
+                        "id": room_id, "user_id": uid, "property_id": pid,
+                        "name": cr["title"], "channex_room_type_id": rtid,
+                        "max_guests": cr.get("occ_adults") or 2,
+                        "count_of_rooms": cr.get("count_of_rooms") or 1,
+                        "created_at": now_utc().isoformat(),
+                    })
+                    imported_rooms += 1
+            rates = await adapter.list_rate_plans(http, cid)
+            for rpn in rates:
+                crp = map_channex_rate_plan(rpn)
+                rpid = crp["channex_rate_plan_id"]
+                ex_rate = await db.rate_plans.find_one({"user_id": uid, "channex_rate_plan_id": rpid}, {"_id": 0})
+                if not ex_rate:
+                    linked = await db.rooms.find_one(
+                        {"user_id": uid, "channex_room_type_id": crp.get("channex_room_type_id")}, {"_id": 0, "id": 1})
+                    await db.rate_plans.insert_one({
+                        "id": str(uuid.uuid4()), "user_id": uid, "property_id": pid,
+                        "room_id": (linked or {}).get("id"), "name": crp["title"],
+                        "channex_rate_plan_id": rpid, "base_price": 0, "min_stay": 1,
+                        "closed": False, "created_at": now_utc().isoformat(),
+                    })
+                    imported_rates += 1
+    await _sync_log(uid, "import", "success",
+                    f"{imported_props} logements, {imported_rooms} chambres, {imported_rates} tarifs")
+    return {"ok": True, "imported_properties": imported_props,
+            "imported_rooms": imported_rooms, "imported_rate_plans": imported_rates}
+

@@ -424,3 +424,8 @@
   - `src/components/HelpButton.tsx` — bouton « ? » réutilisable ouvrant un modal (conseils de l'écran + mini-assistant IA + lien « Ouvrir le centre d'aide »).
   - Bouton « ? » ajouté aux en-têtes : Accueil, Réservations, Calendrier, Logements, Relevé propriétaires, Assistant IA, Intégrations, Paramètres, Site de réservation. Entrée « Aide » (drawer-help) ajoutée au menu latéral. Route `help` enregistrée dans `_layout.tsx`.
 - **Testé** : backend 9/9 (test_help_ai.py) dont non-régression guest-reply/pricing-suggestion après refactor ; frontend validé (écran /help, recherche, thèmes, bouton « ? » sur les 9 écrans, modal + réponse IA authentifiée, navigation menu → /help). Rien de mocké.
+
+## Itération 27 — Channex import câblé (P1) (2026-06)
+- La route `POST /api/channex/import` (fonction orpheline non décorée depuis le refactor) est désormais enregistrée dans `routers/channex.py` ; copie orpheline retirée de `core.py` (+ __all__).
+- Vérifié E2E avec une vraie clé staging (compte contact@mhpimmo.fr) : connect (1 logement détecté) → import → 1 Property « titi et gros minet » (Blausasc) + 1 Room « Studio », 0 rate plan (aucun plan tarifaire côté Channex). Test réalisé sur un utilisateur temporaire puis nettoyé.
+- La clé fournie est une clé **staging** valide ; sur production (app.channex.io) elle renvoie 401.
