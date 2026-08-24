@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Switch } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -55,6 +55,7 @@ export default function PropertyForm() {
   const [keyPhotos, setKeyPhotos] = useState<string[]>([]);
   const [photos, setPhotos] = useState<string[]>([]);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [published, setPublished] = useState(true);
   const [uploadingKeys, setUploadingKeys] = useState(false);
 
   useEffect(() => {
@@ -94,6 +95,7 @@ export default function PropertyForm() {
         setKeyInstructions(p.key_instructions || "");
         setKeyPhotos(p.key_photos || []);
         setPhotos(p.photos || []);
+        setPublished(p.published !== false);
       } catch {}
       setLoading(false);
     })();
@@ -175,6 +177,7 @@ export default function PropertyForm() {
       key_instructions: keyInstructions.trim(),
       key_photos: keyPhotos,
       photos,
+      published,
       rooms,
       amenities,
       seasons: existing.current.seasons || [],
@@ -299,6 +302,16 @@ export default function PropertyForm() {
           </View>
         </View>
         <Text style={styles.helper}>Calculées en % du prix des nuitées et pré-remplies automatiquement dans la réservation. Modifiable aussi dans Paramètres → Taxe de séjour.</Text>
+
+        <SectionLabel text="Site de réservation" />
+        <View style={styles.pubRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pubTitle}>Afficher sur le site public</Text>
+            <Text style={styles.helper}>Rendre ce logement réservable en direct sur votre site.</Text>
+          </View>
+          <Switch testID="prop-published" value={published} onValueChange={setPublished}
+            trackColor={{ false: colors.border, true: colors.brandPrimary }} thumbColor="#fff" />
+        </View>
 
         <SectionLabel text="Descriptif" />
         <Field
@@ -453,6 +466,8 @@ const styles = StyleSheet.create({
   },
   textarea: { minHeight: 96, textAlignVertical: "top", paddingTop: 12 },
   helper: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: -spacing.sm, marginBottom: spacing.md, lineHeight: 17 },
+  pubRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.md },
+  pubTitle: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface, marginBottom: 4 },
   keyPhotoLabel: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary, marginBottom: spacing.sm },
   photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.md },
   photoWrap: { width: 84, height: 84, borderRadius: radius.md, overflow: "hidden", position: "relative" },

@@ -110,6 +110,7 @@ class PropertyIn(BaseModel):
     lodgify_id: Optional[str] = None
     owner_id: Optional[str] = None
     dynamic_pricing: Optional[dict] = None   # config tarification dynamique (par logement)
+    published: bool = True                    # visible sur le site public de réservation
 
 
 class ReservationIn(BaseModel):
@@ -847,6 +848,20 @@ async def payments_pending(user=Depends(get_current_user)):
 CHECKLIST_KEYS = ["caution", "keys", "welcome_book", "cleaning"]
 
 
+class PublishIn(BaseModel):
+    published: bool
+
+
+@api_router.patch("/properties/{property_id}/published")
+async def set_property_published(property_id: str, payload: PublishIn, user=Depends(get_current_user)):
+    res = await db.properties.update_one(
+        {"id": property_id, "user_id": user["user_id"]},
+        {"$set": {"published": bool(payload.published)}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return {"id": property_id, "published": bool(payload.published)}
+
+
 class ChecklistIn(BaseModel):
     checklist: dict
 
@@ -945,6 +960,62 @@ async def create_checkout(reservation_id: str, payload: CheckoutIn, user=Depends
     return {"url": session.url, "session_id": session.session_id}
 
 
+async def _send_booking_confirmation(uid: str, r: dict, tx: dict):
+    """Email de confirmation au voyageur après paiement en ligne (récap + lien check-in)."""
+    email = (r.get("guest_email") or "").strip()
+    if not email:
+        return
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0}) or {}
+    company = _build_company(prefs)
+    brand = company.get("name") or "Casanéo"
+    logo_url = _logo_url_from_base(tx.get("origin", ""), company)
+    m = _money
+    fin = r.get("finance") or {}
+    total = float(fin.get("total") or r.get("total_price") or 0)
+    paid = round(float(tx.get("amount") or 0), 2)
+    balance = round(float(tx.get("balance_due") or 0), 2)
+    ci = r.get("check_in", ""); co = r.get("check_out", "")
+    rows = (
+        f"<tr><td style='padding:4px 0;color:#555'>Séjour</td><td style='padding:4px 0;text-align:right'>{ci} → {co}</td></tr>"
+        f"<tr><td style='padding:4px 0;color:#555'>Voyageurs</td><td style='padding:4px 0;text-align:right'>{r.get('guests', 1)}</td></tr>"
+        f"<tr><td style='padding:4px 0;color:#555'>Total séjour</td><td style='padding:4px 0;text-align:right'>{m(total)}</td></tr>"
+        f"<tr><td style='padding:4px 0;color:#111;font-weight:700'>{'Acompte réglé' if tx.get('is_deposit') else 'Payé en ligne'}</td>"
+        f"<td style='padding:4px 0;text-align:right;color:#2FB350;font-weight:700'>{m(paid)}</td></tr>"
+    )
+    if balance > 0:
+        rows += (f"<tr><td style='padding:4px 0;color:#555'>Solde à régler</td>"
+                 f"<td style='padding:4px 0;text-align:right'>{m(balance)}</td></tr>")
+
+    checkin_block = ""
+    oc = prefs.get("online_checkin") or {}
+    slug = tx.get("slug") or (prefs.get("public_site") or {}).get("slug") or ""
+    origin = (tx.get("origin") or "").rstrip("/")
+    if oc.get("enabled") and origin and slug:
+        link = f"{origin}/book/{slug}/checkin/{r.get('id')}"
+        checkin_block = (
+            "<div style='margin-top:20px;padding:16px;background:#EAF3FA;border-radius:12px'>"
+            "<div style='font-weight:700;color:#111;margin-bottom:6px'>Enregistrement en ligne</div>"
+            "<div style='color:#555;font-size:14px;margin-bottom:12px'>Merci de compléter votre formulaire d'arrivée avant votre séjour.</div>"
+            f"<a href='{link}' style='display:inline-block;background:#2A6F9E;color:#fff;text-decoration:none;"
+            "padding:10px 18px;border-radius:8px;font-weight:600'>Compléter mon enregistrement</a></div>"
+        )
+
+    html = (
+        "<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:16px'>"
+        f"{_company_header_html(company, logo_url)}"
+        f"<h2 style='color:#111;margin:0 0 4px'>Réservation confirmée ✅</h2>"
+        f"<p style='color:#555;margin:0 0 16px'>Bonjour {escape(r.get('guest_name') or '')}, votre réservation pour "
+        f"<b>{escape(r.get('property_name') or 'votre logement')}</b> est confirmée. Merci !</p>"
+        "<table style='width:100%;border-collapse:collapse;font-size:14px'>"
+        f"{rows}</table>"
+        f"{checkin_block}"
+        f"<p style='color:#aaa;font-size:12px;margin-top:24px'>{escape(brand)}</p>"
+        "</div>"
+    )
+    await send_email(to=email, subject=f"{brand} — Réservation confirmée", html=html)
+
+
+
 async def _apply_stripe_payment(tx: dict):
     """Enregistre l'effet d'un paiement Stripe réussi sur la réservation (idempotent)."""
     if tx.get("processed"):
@@ -953,6 +1024,35 @@ async def _apply_stripe_payment(tx: dict):
     rid = tx["reservation_id"]
     r = await db.reservations.find_one({"id": rid, "user_id": uid}, {"_id": 0})
     if not r:
+        return
+    if tx["kind"] == "public_booking":
+        # Réservation issue du site public : confirmer + payer + bloquer le calendrier
+        payments = r.get("payments") or []
+        payments.append({
+            "id": str(uuid.uuid4()), "amount": round(float(tx["amount"]), 2),
+            "date": date.today().isoformat(), "note": tx.get("label") or "Paiement en ligne (site)",
+            "stripe_session": tx["session_id"],
+        })
+        r["payments"] = payments
+        recompute_payment(r)
+        markers = set(r.get("markers") or [])
+        if not tx.get("is_deposit"):
+            markers.add("paid")
+        tmap = {t["marker_key"]: t for t in await get_templates(uid)}
+        await db.reservations.update_one(
+            {"id": rid, "user_id": uid},
+            {"$set": {"status": "confirmee", "payments": payments, "finance": r["finance"],
+                      "markers": list(markers), "marker_color": marker_color_for(list(markers), tmap),
+                      "pending_payment": False}})
+        await _set_property_rooms_availability(uid, r["property_id"], r.get("check_in"), r.get("check_out"), True)
+        await db.payment_transactions.update_one(
+            {"session_id": tx["session_id"]},
+            {"$set": {"processed": True, "payment_status": "paid", "status": "complete"}})
+        try:
+            r2 = await db.reservations.find_one({"id": rid, "user_id": uid}, {"_id": 0})
+            await _send_booking_confirmation(uid, r2, tx)
+        except Exception as e:
+            logger.warning("email confirmation client échoué: %s", e)
         return
     if tx["kind"] == "deposit":
         fin = dict(r.get("finance") or {})
@@ -1017,6 +1117,335 @@ async def stripe_webhook(request: Request):
         if tx and not tx.get("processed"):
             await _apply_stripe_payment(tx)
     return {"received": True}
+
+
+# ---------------------------------------------------------------------------
+# Site public de réservation directe (sans authentification)
+# ---------------------------------------------------------------------------
+async def _resolve_public_site(slug: str):
+    prefs = await db.preferences.find_one(
+        {"public_site.slug": slug, "public_site.enabled": True}, {"_id": 0})
+    if not prefs:
+        raise HTTPException(status_code=404, detail="Site introuvable")
+    return prefs["user_id"], prefs
+
+
+def _public_prop_card(p: dict) -> dict:
+    return {
+        "id": p["id"], "name": p.get("name", ""), "city": p.get("city") or p.get("location") or "",
+        "description": p.get("description", ""), "photos": p.get("photos") or [],
+        "image_url": p.get("image_url", ""), "capacity": p.get("capacity", 0),
+        "bedrooms": p.get("bedrooms", 0), "surface": p.get("surface", 0),
+        "amenities": p.get("amenities") or [], "base_price": p.get("base_price", 0),
+    }
+
+
+async def _booked_dates(uid: str, property_id: str, frm: str, to: str):
+    """Ensembles de dates indisponibles (réservations non annulées) sur [frm,to]."""
+    res = await db.reservations.find(
+        {"user_id": uid, "property_id": property_id, "status": {"$nin": ["annulee"]},
+         "check_in": {"$lt": to}, "check_out": {"$gt": frm}}, {"_id": 0}).to_list(2000)
+    dates = set()
+    for r in res:
+        try:
+            cur = date.fromisoformat(r["check_in"]); end = date.fromisoformat(r["check_out"])
+        except Exception:
+            continue
+        while cur < end:
+            dates.add(cur.isoformat()); cur += timedelta(days=1)
+    return dates
+
+
+def _match_promo(promos: list, code: str, property_id: str, check_in: str) -> Optional[dict]:
+    code = (code or "").strip().upper()
+    for p in promos:
+        if not p.get("enabled", True):
+            continue
+        if p.get("require_code"):
+            if not code or (p.get("code") or "").strip().upper() != code:
+                continue
+        pids = p.get("property_ids") or []
+        if pids and property_id not in pids:
+            continue
+        if p.get("period_enabled"):
+            if p.get("start_date") and check_in < p["start_date"]:
+                continue
+            if p.get("end_date") and check_in > p["end_date"]:
+                continue
+        return p
+    return None
+
+
+async def _public_quote(uid: str, property_id: str, check_in: str, check_out: str,
+                        guests: int, promo_code: str = ""):
+    prop = await db.properties.find_one({"id": property_id, "user_id": uid}, {"_id": 0})
+    if not prop or prop.get("published") is False:
+        raise HTTPException(status_code=404, detail="Logement indisponible")
+    try:
+        ci = date.fromisoformat(check_in); co = date.fromisoformat(check_out)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Dates invalides")
+    nights = (co - ci).days
+    if nights < 1 or nights > 90:
+        raise HTTPException(status_code=400, detail="Durée de séjour invalide")
+    if guests and prop.get("capacity") and int(guests) > int(prop["capacity"]):
+        raise HTTPException(status_code=400, detail="Nombre de voyageurs supérieur à la capacité")
+    # Disponibilité
+    booked = await _booked_dates(uid, property_id, check_in, check_out)
+    cur = ci
+    while cur < co:
+        if cur.isoformat() in booked:
+            raise HTTPException(status_code=409, detail="Dates indisponibles")
+        cur += timedelta(days=1)
+    # Prix des nuitées (tarif par jour)
+    nights_total = 0.0
+    cur = ci
+    while cur < co:
+        nights_total += _price_for_day(prop, cur.isoformat())
+        cur += timedelta(days=1)
+    nights_total = round(nights_total, 2)
+    cleaning = round(float(prop.get("default_cleaning_fee") or 0), 2)
+    tax = round(nights_total * float(prop.get("tourist_tax_pct") or 0) / 100.0, 2)
+    tax += round(float(prop.get("default_tourist_tax") or 0) * int(guests or 1) * nights, 2) if prop.get("default_tourist_tax") else 0
+    tax = round(tax, 2)
+    # Promotion
+    promos = await db.promotions.find({"user_id": uid}, {"_id": 0}).to_list(200)
+    promo = _match_promo(promos, promo_code, property_id, check_in)
+    discount = 0.0
+    promo_label = ""
+    if promo:
+        if promo.get("calc_type") == "percentage":
+            discount = round(nights_total * float(promo.get("amount") or 0) / 100.0, 2)
+        elif promo.get("calc_type") == "fixed":
+            discount = round(float(promo.get("amount") or 0), 2)
+        discount = min(discount, nights_total)
+        promo_label = promo.get("name") or promo.get("code") or "Promotion"
+    total = round(max(0.0, nights_total + cleaning + tax - discount), 2)
+    # Acompte selon la politique de réservation choisie pour le site
+    deposit_amount = total
+    balance_due = 0.0
+    deposit_label = ""
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0}) or {}
+    pol_id = ((prefs.get("public_site") or {}).get("deposit_policy_id") or "")
+    if pol_id:
+        pol = await db.booking_policies.find_one({"id": pol_id, "user_id": uid}, {"_id": 0})
+        if pol and int(pol.get("payment_count", 1)) > 1:
+            pays = pol.get("payments") or []
+            pct = round(float((pays[0] or {}).get("percent", 0)), 2) if pays else 0
+            if 0 < pct < 100:
+                deposit_amount = round(total * pct / 100.0, 2)
+                balance_due = round(total - deposit_amount, 2)
+                deposit_label = f"Acompte {pct:g}%"
+    return {
+        "property_id": property_id, "property_name": prop.get("name", ""),
+        "check_in": check_in, "check_out": check_out, "guests": int(guests or 1),
+        "nights": nights, "nights_total": nights_total, "cleaning_fee": cleaning,
+        "tourist_tax": tax, "discount": discount, "promo_label": promo_label,
+        "total": total, "currency": "EUR",
+        "deposit_amount": deposit_amount, "balance_due": balance_due, "deposit_label": deposit_label,
+    }
+
+
+@api_router.get("/public/site/{slug}")
+async def public_site(slug: str):
+    uid, prefs = await _resolve_public_site(slug)
+    props = await db.properties.find({"user_id": uid}, {"_id": 0}).to_list(500)
+    published = [_public_prop_card(p) for p in props if p.get("published") is not False]
+    published.sort(key=lambda x: x["name"].lower())
+    company = _build_company(prefs)
+    return {"slug": slug, "company": company, "properties": published, "count": len(published)}
+
+
+@api_router.get("/public/site/{slug}/property/{property_id}")
+async def public_property(slug: str, property_id: str):
+    uid, prefs = await _resolve_public_site(slug)
+    prop = await db.properties.find_one({"id": property_id, "user_id": uid}, {"_id": 0})
+    if not prop or prop.get("published") is False:
+        raise HTTPException(status_code=404, detail="Logement indisponible")
+    today = date.today()
+    horizon = (today + timedelta(days=365)).isoformat()
+    booked = await _booked_dates(uid, property_id, today.isoformat(), horizon)
+    policy = None
+    pol_id = prop.get("booking_policy_id")
+    if pol_id:
+        policy = await db.booking_policies.find_one({"id": pol_id, "user_id": uid}, {"_id": 0})
+    card = _public_prop_card(prop)
+    card.update({
+        "unavailable_dates": sorted(booked),
+        "default_cleaning_fee": prop.get("default_cleaning_fee", 0),
+        "tourist_tax_pct": prop.get("tourist_tax_pct", 0),
+        "booking_policy": policy,
+    })
+    return card
+
+
+class PublicQuoteIn(BaseModel):
+    property_id: str
+    check_in: str
+    check_out: str
+    guests: int = 1
+    promo_code: str = ""
+
+
+@api_router.post("/public/site/{slug}/quote")
+async def public_quote(slug: str, payload: PublicQuoteIn):
+    uid, _ = await _resolve_public_site(slug)
+    return await _public_quote(uid, payload.property_id, payload.check_in,
+                               payload.check_out, payload.guests, payload.promo_code)
+
+
+class PublicBookingIn(BaseModel):
+    property_id: str
+    check_in: str
+    check_out: str
+    guests: int = 1
+    promo_code: str = ""
+    guest_name: str
+    guest_email: str
+    guest_phone: str = ""
+    notes: str = ""
+    origin_url: str = ""
+
+
+async def _create_public_reservation(uid: str, q: dict, payload: PublicBookingIn, status: str):
+    rid = str(uuid.uuid4())
+    doc = {
+        "id": rid, "user_id": uid, "property_id": q["property_id"],
+        "property_name": q.get("property_name", ""),
+        "guest_name": payload.guest_name.strip(), "guest_email": payload.guest_email.strip(),
+        "guest_phone": payload.guest_phone.strip(), "platform": "Site direct", "source": "site",
+        "check_in": q["check_in"], "check_out": q["check_out"], "guests": q["guests"],
+        "nights_total": q["nights_total"], "cleaning_fee": q["cleaning_fee"],
+        "tourist_tax": q["tourist_tax"], "total_price": q["total"],
+        "status": status, "notes": payload.notes.strip(),
+        "created_at": now_utc().isoformat(),
+        "finance": {"total": q["total"], "paid": 0.0, "due": q["total"], "currency": "EUR",
+                    "stay": q["nights_total"], "fees": q["cleaning_fee"], "taxes": q["tourist_tax"]},
+        "payments": [], "pending_payment": status != "confirmee",
+    }
+    await db.reservations.insert_one(doc)
+    return rid
+
+
+@api_router.post("/public/site/{slug}/request")
+async def public_booking_request(slug: str, payload: PublicBookingIn):
+    """Demande de réservation sans paiement (le gestionnaire valide dans l'app)."""
+    uid, _ = await _resolve_public_site(slug)
+    q = await _public_quote(uid, payload.property_id, payload.check_in, payload.check_out,
+                            payload.guests, payload.promo_code)
+    rid = await _create_public_reservation(uid, q, payload, "demande")
+    return {"reservation_id": rid, "status": "demande", "total": q["total"]}
+
+
+@api_router.post("/public/site/{slug}/checkout")
+async def public_checkout(slug: str, payload: PublicBookingIn):
+    """Réservation + paiement en ligne (Stripe Checkout hébergé)."""
+    uid, _ = await _resolve_public_site(slug)
+    q = await _public_quote(uid, payload.property_id, payload.check_in, payload.check_out,
+                            payload.guests, payload.promo_code)
+    pay_now = round(float(q.get("deposit_amount") or q["total"]), 2)
+    if pay_now <= 0:
+        raise HTTPException(status_code=400, detail="Montant invalide")
+    rid = await _create_public_reservation(uid, q, payload, "demande")
+    origin = (payload.origin_url or "").rstrip("/")
+    success_url = f"{origin}/book/{slug}/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/book/{slug}/{payload.property_id}?stripe=cancel"
+    client = stripe_client()
+    req = CheckoutSessionRequest(
+        amount=pay_now, currency="eur",
+        success_url=success_url, cancel_url=cancel_url,
+        metadata={"reservation_id": rid, "user_id": uid, "kind": "public_booking", "slug": slug},
+    )
+    session = await client.create_checkout_session(req)
+    await db.payment_transactions.insert_one({
+        "id": str(uuid.uuid4()), "user_id": uid, "reservation_id": rid,
+        "kind": "public_booking", "session_id": session.session_id,
+        "amount": pay_now, "currency": "eur", "label": q.get("deposit_label") or "Réservation site",
+        "is_deposit": bool(q.get("deposit_label")), "balance_due": q.get("balance_due", 0),
+        "origin": origin, "slug": slug,
+        "payment_status": "initiated", "status": "open", "processed": False,
+        "created_at": now_utc().isoformat(),
+    })
+    return {"url": session.url, "session_id": session.session_id, "reservation_id": rid, "amount": pay_now}
+
+
+@api_router.get("/public/booking/status/{session_id}")
+async def public_booking_status(session_id: str):
+    tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction inconnue")
+    client = stripe_client()
+    st = await client.get_checkout_status(session_id)
+    await db.payment_transactions.update_one(
+        {"session_id": session_id}, {"$set": {"payment_status": st.payment_status, "status": st.status}})
+    if st.payment_status == "paid" and not tx.get("processed"):
+        await _apply_stripe_payment(tx)
+    r = await db.reservations.find_one({"id": tx["reservation_id"]}, {"_id": 0})
+    return {
+        "payment_status": st.payment_status, "status": st.status,
+        "reservation_status": (r or {}).get("status"),
+        "amount": tx["amount"], "currency": tx.get("currency", "eur"),
+    }
+
+
+@api_router.get("/public/default-site")
+async def public_default_site():
+    """Renvoie le slug du premier site public activé (utile pour un domaine dédié)."""
+    prefs = await db.preferences.find_one({"public_site.enabled": True}, {"_id": 0})
+    if not prefs:
+        raise HTTPException(status_code=404, detail="Aucun site actif")
+    return {"slug": (prefs.get("public_site") or {}).get("slug", "")}
+
+
+CHECKIN_QUESTION_LABELS = {
+    "guests_count": "Combien d'invités séjourneront ?",
+    "phone_email": "Votre numéro de téléphone et votre email",
+    "arrival_info": "Informations pouvant faciliter votre arrivée",
+    "arrival_time": "À quelle heure pensez-vous arriver ?",
+    "holder_id": "Nom complet et numéro de pièce d'identité du titulaire",
+    "other_guests_id": "Noms et pièces d'identité des autres invités",
+    "upload_id": "Copies des pièces d'identité",
+}
+
+
+@api_router.get("/public/site/{slug}/checkin/{reservation_id}")
+async def public_checkin_form(slug: str, reservation_id: str):
+    uid, prefs = await _resolve_public_site(slug)
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Réservation introuvable")
+    oc = _build_checkin(prefs)
+    questions = []
+    for key in CHECKIN_PREDEFINED_KEYS:
+        if oc["predefined"].get(key):
+            questions.append({"id": key, "label": CHECKIN_QUESTION_LABELS.get(key, key),
+                              "required": key == "guests_count", "type": "upload" if key == "upload_id" else "text"})
+    for q in oc["custom_questions"]:
+        questions.append({"id": q["id"], "label": q["label"], "required": False, "type": "text"})
+    return {
+        "property_name": r.get("property_name", ""), "guest_name": r.get("guest_name", ""),
+        "check_in": r.get("check_in", ""), "check_out": r.get("check_out", ""),
+        "enabled": oc["enabled"], "questions": questions,
+        "submitted": bool(r.get("checkin_submission")),
+    }
+
+
+class CheckinSubmissionIn(BaseModel):
+    answers: dict
+
+
+@api_router.post("/public/site/{slug}/checkin/{reservation_id}")
+async def public_checkin_submit(slug: str, reservation_id: str, payload: CheckinSubmissionIn):
+    uid, _ = await _resolve_public_site(slug)
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Réservation introuvable")
+    submission = {"answers": payload.answers or {}, "submitted_at": now_utc().isoformat()}
+    await db.reservations.update_one(
+        {"id": reservation_id, "user_id": uid},
+        {"$set": {"checkin_submission": submission, "checkin_done": True}})
+    return {"ok": True}
+
 
 
 # ---------------------------------------------------------------------------
@@ -1958,6 +2387,24 @@ DEFAULT_CHECKIN = {
 }
 
 
+def _slugify(text: str) -> str:
+    import re
+    s = (text or "").strip().lower()
+    s = re.sub(r"[àâä]", "a", s); s = re.sub(r"[éèêë]", "e", s)
+    s = re.sub(r"[îï]", "i", s); s = re.sub(r"[ôö]", "o", s); s = re.sub(r"[ûü]", "u", s)
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s or "site"
+
+
+def _build_public_site(doc: Optional[dict]) -> dict:
+    c = (doc or {}).get("public_site") or {}
+    return {
+        "enabled": bool(c.get("enabled", False)),
+        "slug": str(c.get("slug") or ""),
+        "deposit_policy_id": str(c.get("deposit_policy_id") or ""),
+    }
+
+
 def _build_checkin(doc: Optional[dict]) -> dict:
     c = (doc or {}).get("online_checkin") or {}
     pre_in = c.get("predefined") or {}
@@ -1988,6 +2435,7 @@ class PreferencesIn(BaseModel):
     monthly_report_enabled: Optional[bool] = None
     review_request_enabled: Optional[bool] = None
     review_request_days: Optional[int] = None
+    public_site: Optional[dict] = None
 
 
 async def _ai_auto_draft_enabled(uid: str) -> bool:
@@ -2010,6 +2458,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "monthly_report_enabled": bool((doc or {}).get("monthly_report_enabled", True)),
         "review_request_enabled": bool((doc or {}).get("review_request_enabled", False)),
         "review_request_days": int((doc or {}).get("review_request_days", 1)),
+        "public_site": _build_public_site(doc),
     }
 
 
@@ -2089,6 +2538,27 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
     if payload.review_request_days is not None:
         set_doc["review_request_days"] = max(0, min(30, int(payload.review_request_days)))
 
+    if payload.public_site is not None:
+        ps = payload.public_site or {}
+        existing = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
+        cur = (existing or {}).get("public_site") or {}
+        slug = str(ps.get("slug") or cur.get("slug") or "").strip().lower()
+        if not slug:
+            comp = (existing or {}).get("company") or {}
+            slug = _slugify(comp.get("name") or ps.get("name") or "site")
+        else:
+            slug = _slugify(slug)
+        # unicité du slug entre comptes
+        clash = await db.preferences.find_one(
+            {"public_site.slug": slug, "user_id": {"$ne": uid}}, {"_id": 0})
+        if clash:
+            slug = f"{slug}-{uid[:6]}"
+        dep = ps["deposit_policy_id"] if ("deposit_policy_id" in ps) else cur.get("deposit_policy_id")
+        set_doc["public_site"] = {
+            "enabled": bool(ps.get("enabled", False)), "slug": slug,
+            "deposit_policy_id": str(dep or ""),
+        }
+
     await db.preferences.update_one({"user_id": uid}, {"$set": set_doc}, upsert=True)
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     statuses = _build_statuses(doc)
@@ -2103,6 +2573,7 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "monthly_report_enabled": bool((doc or {}).get("monthly_report_enabled", True)),
         "review_request_enabled": bool((doc or {}).get("review_request_enabled", False)),
         "review_request_days": int((doc or {}).get("review_request_days", 1)),
+        "public_site": _build_public_site(doc),
     }
 
 

@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 23 - Public direct-booking site + Stripe Checkout. Backend: 14/14 pytest passed (public site, quote validations, request+delete, checkout returns cs_* + status endpoint, preferences persist, publish/unpublish hides property, security: total/amount fields ignored server-side). Frontend web: /book/mhpimmo renders MHP IMMOBILIER brand + 24 property grid; detail page shows gallery/description/amenities/calendar/stepper/promo; selecting 15-18 Oct 2026 produces server quote (360€ + 65€ ménage + 18€ taxe = 443€) and reveals form + 'Réserver et payer 443€' + 'Envoyer une demande'. Admin settings page /settings/booking-site renders with all testIDs (site-enabled, site-slug, site-save). No React Native deprecated packages detected in scope. All DO_NOT_CALL endpoints avoided. Test reservations created via /request and /checkout were properly cleaned up via DELETE /api/reservations/{id}.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_public_booking_site.py",
+    "/app/test_reports/pytest/pytest_iter23.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Server-side amount recalculation confirmed: PublicQuoteIn/PublicBookingIn pydantic models do not accept price fields; injecting total/amount/nights_total in the body has no effect on the server-computed total (verified explicitly for both /quote and /checkout).",
+    "Public endpoints (/api/public/site/*, /api/public/booking/status/*) correctly bypass get_current_user dependency and 404 on unknown slugs.",
+    "Overlap detection: /quote correctly returns 409 when the requested range intersects an existing non-cancelled reservation (status in {demande, confirmee, ...}).",
+    "Preferences.public_site persists via PUT /api/preferences and PATCH /api/properties/{id}/published correctly toggles visibility on the public listing.",
+    "success.tsx polls /public/booking/status/{session_id} with backoff (8 tries) — sensible UX."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_public_booking_site.py (new)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% of tested flows (home listing, detail with date range → quote → form + pay/request buttons rendered; admin settings page renders with expected testIDs)"},
+  "seed_data_creation": "None persistent. Created and deleted 3 test reservations (2027-06-10..06-15 overlap fixture, 2027-04-10..04-13 request test, 2027-05-01..05-04 & 2027-07-01..07-03 checkout tests) via DELETE /api/reservations/{id} with QA admin bearer token.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reusable pytest suite at /app/backend/tests/test_public_booking_site.py covers the full public booking + Stripe checkout API surface. It logs in with qa.admin@casaneo.test and self-cleans reservations it creates. Frontend flow verified via Playwright on mobile viewport 390x844 by clicking site-prop card → calendar navigation via mouse click on the '>' arrow at (cal_box.x + width - 24, cal_box.y + 25) → day cells targeted by innerText='NN' filtered by bounding-rect top > 400 (react-native-calendars responds to raw DOM click via TouchableOpacity on web). Login via /login-password requires selectors that were not fully identified in this run; API paths already validated equivalent admin operations.",
+  "rca_of_issue": "N/A — no bugs found."
+}

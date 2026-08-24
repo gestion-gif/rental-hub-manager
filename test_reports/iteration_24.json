@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 24 — Deposit (acompte), Public check-in, /book landing redirect. Backend: 7 passed + 1 xfail (known clear-policy bug documented). All new endpoints validated: (1) POST /api/public/site/mhpimmo/quote returns deposit_amount/balance_due/deposit_label — with policy 'Acompte 30%' (already linked) deposit_amount ≈ 30% of total, balance_due = total - deposit, deposit_label = 'Acompte 30%'; (2) POST /api/public/site/mhpimmo/checkout returns cs_* session_id + amount == deposit_amount (170.7€) instead of total (569€) for 2027-08-10..08-13 — reservation deleted via admin DELETE; (3) GET /api/public/default-site returns {slug:'mhpimmo'} (200); (4) Public check-in GET returns property_name/check_in/check_out/enabled:true/questions/submitted:false with guests_count.required==true; unknown slug and unknown id both 404; POST /checkin/{rid} with {answers:{guests_count:'2', arrival_time:'18h'}} returns {ok:true}, re-GET reflects submitted:true. Test reservation cleaned via DELETE admin. Frontend web (sans login) verified: /book redirects to /book/mhpimmo (MHP IMMOBILIER brand + property grid); /book/mhpimmo/checkin/<rid> renders questions with testIDs checkin-q-<id>, checkin-submit works and shows success screen 'Enregistrement complété'. Frontend admin Paramètres → Site de réservation: 'Paiement à la réservation' section renders with chips testIDs dep-none (Paiement intégral) and dep-d788e0ce-... (Acompte 30% (30%)); selecting policy + save persists deposit_policy_id via PUT /preferences. Calendar-driven deposit UI on booking detail page was not verified interactively via Playwright (tap gestures did not register onPress in react-native-calendars via DOM click/pointer events after 3 attempts — Loop Prevention triggered) but code review confirms lines 206-234 in /app/frontend/app/book/[slug]/[id].tsx correctly gate on quote.deposit_label to render 'Acompte 30% — à payer maintenant', 'Solde à régler plus tard', and button text 'Payer l'acompte {amount}€'. Confirmation email on paid webhook cannot be tested without completing a real Stripe payment — as instructed, the checkout flow was only exercised up to the returned Stripe URL and no error was raised.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/preferences (public_site.deposit_policy_id)", "issue": "Empty-string deposit_policy_id cannot clear an existing policy: server.py:2558 uses `str(ps.get('deposit_policy_id') or cur.get('deposit_policy_id') or '')` which falls back to the current stored value when '' is sent. This breaks the frontend chip 'Paiement intégral' (dep-none) — selecting it and clicking Enregistrer visibly succeeds but the policy stays applied on subsequent quotes. Suggested fix: use explicit None sentinel or check `'deposit_policy_id' in ps` to allow explicit clear."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "settings/booking-site.tsx (dep-none)", "issue": "Chip 'Paiement intégral' calls setDepositPolicyId('') then PUT sends '' but backend does not clear the field (see minor backend issue). UI appears to save but has no effect.", "testID": "dep-none", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "book/[slug]/[id].tsx", "issue": "Console warning 'Unexpected text node: . A text node cannot be a child of a <View>.' emitted on the property detail page. Somewhere a stray whitespace/text is rendered directly inside a <View> instead of inside <Text>. Reference: /app/frontend/app/book/[slug]/[id].tsx (detail rendering — inspect around JSX between components for stray spaces/newlines)."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter24_deposit_checkin.py",
+    "/app/test_reports/pytest/pytest_iter24.xml"
+  ],
+  "action_items": [
+    "Fix server.py:2558 so PUT /api/preferences can explicitly clear public_site.deposit_policy_id (needed for the 'Paiement intégral' chip to work).",
+    "Locate and remove the stray text node inside a <View> on /app/frontend/app/book/[slug]/[id].tsx to silence the React Native web warning.",
+    "(Optional) Add a data-testid to react-native-calendars day cells to make automated calendar interaction reliable in Playwright tests."
+  ],
+  "critical_code_review_comments": [
+    "Deposit computation in server.py:1224-1245 correctly rounds deposit and balance_due when payments[0].percent is in (0,100). Fallback to total is intentional.",
+    "public_checkout at server.py:1346 correctly charges min(deposit_amount, total) via pay_now and stores is_deposit + balance_due — verified in checkout response amount and via reservation total_price unchanged.",
+    "Public /checkin endpoints correctly scope by (slug → uid) via _resolve_public_site and by (id, user_id) on the reservation.",
+    "GET /public/default-site returns 404 with 'Aucun site actif' when no preferences.public_site.enabled=true document exists — appropriate."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter24_deposit_checkin.py (new)"
+  ],
+  "success_rate": {"backend": "100% (7 pass, 1 xfail-documented-bug)", "frontend": "3/4 flows verified (landing redirect, public check-in submit, admin settings save). Deposit UI on booking detail confirmed via code review only — react-native-calendars interaction blocked in Playwright."},
+  "seed_data_creation": "None persistent. Created 3 test reservations via /public/site/mhpimmo/request and /checkout during backend + frontend tests, all deleted via DELETE /api/reservations/{id} with QA admin bearer token.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Reusable pytest suite at /app/backend/tests/test_iter24_deposit_checkin.py. The 'Acompte 30%' policy id in QA account is d788e0ce-bac2-4f76-9606-7dea7b645521 and is linked to preferences.public_site.deposit_policy_id. On the QA account, online_checkin is enabled. AsyncStorage on web stores auth token under key 'session_token' as JSON-stringified string (i.e. `localStorage.setItem('session_token', JSON.stringify(token))`) — needed for logged-in Playwright flows against /settings/*. For calendar interactions with react-native-calendars on web, plain page.mouse.click and dispatched PointerEvents did not trigger the touchable onPress; explicit testIDs on day cells would help.",
+  "rca_of_issue": "Deposit clear bug: PUT /api/preferences at /app/backend/server.py line 2558 uses Python `or` for coalescing, which treats empty string as falsy and falls back to the stored value. As a result, sending {public_site: {..., deposit_policy_id: ''}} keeps the previous policy id. Reproduction: 1) Ensure a policy is set. 2) PUT /api/preferences with public_site.deposit_policy_id=''. 3) GET /api/preferences — deposit_policy_id is unchanged. Mitigation: change to `str(ps.get('deposit_policy_id') if 'deposit_policy_id' in ps else cur.get('deposit_policy_id') or '')` or introduce an explicit sentinel."
+}
