@@ -211,7 +211,7 @@ async def channex_full_sync(payload: FullSyncIn = Body(default=FullSyncIn()),
                 ms = int(rpn.get("min_stay") or 1)
                 rest_values += _date_ranges(
                     today, end,
-                    lambda d: int(round(_price_for_day(prop, d.isoformat()) * 100)),
+                    lambda d: f"{_price_for_day(prop, d.isoformat()):.2f}",
                     lambda v, rp=cx_rp, m=ms: {
                         "property_id": cx_pid, "rate_plan_id": rp, "rate": v,
                         "min_stay_arrival": m, "min_stay_through": m,

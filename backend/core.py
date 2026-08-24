@@ -969,7 +969,7 @@ async def enqueue_channex_rates(uid: str, property_id: str, date_from: str, date
         ms = int(rpn.get("min_stay") or 1)
         values += _date_ranges(
             d0, d1,
-            lambda d: int(round(_price_for_day(prop, d.isoformat()) * 100)),
+            lambda d: f"{_price_for_day(prop, d.isoformat()):.2f}",
             lambda v, rp=cx_rp, m=ms: {"property_id": cx_pid, "rate_plan_id": rp, "rate": v,
                                        "min_stay_arrival": m, "min_stay_through": m},
         )
