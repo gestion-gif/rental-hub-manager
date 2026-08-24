@@ -703,7 +703,7 @@ function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayme
     <View style={styles.finWrap}>
       {/* Payé / Dû / Total */}
       <View style={styles.payRow}>
-        <View style={styles.payCell}><Text style={styles.payLabel}>Payé</Text><Text style={styles.payVal}>{money(f.paid)}</Text></View>
+        <View style={styles.payCell}><Text style={styles.payLabel}>Payé</Text><Text style={styles.payVal}>{money(isAirbnb ? dueToValidate : f.paid)}</Text></View>
         <View style={styles.payCell}><Text style={styles.payLabel}>Dû</Text><Text style={styles.payVal}>{money(dueToValidate)}</Text></View>
         <View style={styles.payCell}><Text style={styles.payLabel}>Total</Text><Text style={[styles.payVal, styles.qBold]}>{money(f.total)}</Text></View>
       </View>
