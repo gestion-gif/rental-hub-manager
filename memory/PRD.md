@@ -429,3 +429,7 @@
 - La route `POST /api/channex/import` (fonction orpheline non décorée depuis le refactor) est désormais enregistrée dans `routers/channex.py` ; copie orpheline retirée de `core.py` (+ __all__).
 - Vérifié E2E avec une vraie clé staging (compte contact@mhpimmo.fr) : connect (1 logement détecté) → import → 1 Property « titi et gros minet » (Blausasc) + 1 Room « Studio », 0 rate plan (aucun plan tarifaire côté Channex). Test réalisé sur un utilisateur temporaire puis nettoyé.
 - La clé fournie est une clé **staging** valide ; sur production (app.channex.io) elle renvoie 401.
+
+## Itération 28 — Rate Plan Channex + import des prix (2026-06)
+- Créé pour l'utilisateur (compte staging) un Rate Plan « Tarif standard » (per_room, manual, EUR, occ 2) sur le logement « titi et gros minet » (Studio), prix 150 €/nuit sur 730 jours. NB : les tarifs Channex (POST /restrictions) s'envoient en CENTIMES (15000 = 150 €) ; à la lecture (GET /restrictions filter[restrictions][]=rate) ils reviennent en unités principales ("150.00").
+- Enrichi l'import : `ChannexAdapter.list_rates()` (channex.py) récupère les tarifs ARI (fenêtre today→+60j) ; `channex_import` (routers/channex.py) définit désormais `base_price` du rate plan ET du logement (si vide) à partir du premier tarif positif. Testé E2E : logement + rate plan importés à 150 €. 23/23 tests Channex OK.

@@ -143,9 +143,27 @@ async def channex_import(user=Depends(get_current_user)):
                     })
                     imported_rooms += 1
             rates = await adapter.list_rate_plans(http, cid)
+            today = now_utc().date()
+            try:
+                rate_map = await adapter.list_rates(
+                    http, cid, today.isoformat(), (today + timedelta(days=60)).isoformat())
+            except Exception:
+                rate_map = {}
+            prop_price = 0.0
             for rpn in rates:
                 crp = map_channex_rate_plan(rpn)
                 rpid = crp["channex_rate_plan_id"]
+                # first upcoming positive nightly rate = representative base price
+                price = 0.0
+                for _d in sorted(rate_map.get(rpid) or {}):
+                    try:
+                        v = float((rate_map[rpid][_d] or {}).get("rate") or 0)
+                    except Exception:
+                        v = 0.0
+                    if v > 0:
+                        price = v
+                        break
+                prop_price = max(prop_price, price)
                 ex_rate = await db.rate_plans.find_one({"user_id": uid, "channex_rate_plan_id": rpid}, {"_id": 0})
                 if not ex_rate:
                     linked = await db.rooms.find_one(
@@ -153,10 +171,19 @@ async def channex_import(user=Depends(get_current_user)):
                     await db.rate_plans.insert_one({
                         "id": str(uuid.uuid4()), "user_id": uid, "property_id": pid,
                         "room_id": (linked or {}).get("id"), "name": crp["title"],
-                        "channex_rate_plan_id": rpid, "base_price": 0, "min_stay": 1,
+                        "channex_rate_plan_id": rpid, "base_price": price, "min_stay": 1,
                         "closed": False, "created_at": now_utc().isoformat(),
                     })
                     imported_rates += 1
+                elif price > 0 and not ex_rate.get("base_price"):
+                    await db.rate_plans.update_one(
+                        {"user_id": uid, "channex_rate_plan_id": rpid}, {"$set": {"base_price": price}})
+            # propagate a base price to the property so the calendar shows a price
+            if prop_price > 0:
+                cur = await db.properties.find_one({"id": pid, "user_id": uid}, {"_id": 0, "base_price": 1})
+                if cur is not None and not cur.get("base_price"):
+                    await db.properties.update_one(
+                        {"id": pid, "user_id": uid}, {"$set": {"base_price": prop_price}})
     await _sync_log(uid, "import", "success",
                     f"{imported_props} logements, {imported_rooms} chambres, {imported_rates} tarifs")
     return {"ok": True, "imported_properties": imported_props,

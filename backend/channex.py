@@ -78,6 +78,16 @@ class ChannexAdapter:
                                {**self._page(), "filter[property_id]": property_id})
         return body.get("data", [])
 
+    async def list_rates(self, http, property_id: str, date_from: str, date_to: str) -> dict:
+        """Nightly rates (ARI) for a property over a window.
+        Returns {rate_plan_id: {date: {'rate': '150.00', ...}}}. Rates are already in main
+        currency units (e.g. '150.00' EUR)."""
+        q = {"filter[property_id]": property_id, "filter[date][gte]": date_from,
+             "filter[date][lte]": date_to, "filter[restrictions][]": "rate"}
+        body = await self._get(http, "/restrictions", q)
+        data = body.get("data")
+        return data if isinstance(data, dict) else {}
+
 
 def map_channex_property(p: dict) -> dict:
     """Normalize a Channex property record to a light provider-neutral shape."""
