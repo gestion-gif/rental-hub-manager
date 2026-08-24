@@ -1094,6 +1094,16 @@ async def process_channex_bookings(uid: str) -> dict:
                 await db.reservations.insert_one(base_doc)
             await _set_property_rooms_availability(uid, prop["id"], ci, co, status != "annulee")
             await ensure_cleaning(uid, prop["id"], co, status)
+            # Journalise chaque révision reçue (via feed/webhook) pour audit & récupération d'IDs
+            try:
+                await db.channex_booking_events.update_one(
+                    {"revision_id": rev_id},
+                    {"$set": {"user_id": uid, "revision_id": rev_id, "booking_id": booking_id,
+                              "status": (a.get("status") or "new"), "received_at": now_utc().isoformat(),
+                              "via": "feed"}},
+                    upsert=True)
+            except Exception:
+                logger.exception("channex booking event log failed")
             try:
                 await adapter.ack_revision(http, rev_id)
             except Exception:

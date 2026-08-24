@@ -215,6 +215,10 @@ async def channex_full_sync(payload: FullSyncIn = Body(default=FullSyncIn()),
                     lambda v, rp=cx_rp, m=ms: {
                         "property_id": cx_pid, "rate_plan_id": rp, "rate": v,
                         "min_stay_arrival": m, "min_stay_through": m,
+                        "max_stay": 0,
+                        "closed_to_arrival": False,
+                        "closed_to_departure": False,
+                        "stop_sell": False,
                     },
                 )
 
