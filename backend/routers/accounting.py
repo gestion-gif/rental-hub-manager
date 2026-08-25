@@ -391,6 +391,71 @@ async def import_revenues(body: dict = Body(...), user=Depends(get_current_user)
 
 
 # ---------------------------------------------------------------------------
+# Vue annuelle (mois par mois, avec comparaison N-1)
+# ---------------------------------------------------------------------------
+def _blank_months(year: int):
+    return [{"month": f"{year}-{m:02d}", "recettes": 0.0, "depenses": 0.0,
+             "recettes_ht": 0.0, "depenses_ht": 0.0} for m in range(1, 13)]
+
+
+def _finalize_months(months: list):
+    for m in months:
+        for k in ("recettes", "depenses", "recettes_ht", "depenses_ht"):
+            m[k] = round(m[k], 2)
+        m["resultat"] = round(m["recettes"] - m["depenses"], 2)
+        m["resultat_ht"] = round(m["recettes_ht"] - m["depenses_ht"], 2)
+    return months
+
+
+@api_router.get("/accounting/annual")
+async def accounting_annual(
+    year: int, property_id: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    uid = user["user_id"]
+    await _materialize_recurring(uid)
+    q = {
+        "user_id": uid, **_prop_scope(user, "property_id"),
+        "date": {"$gte": f"{year - 1}-01-01", "$lte": f"{year}-12-31"},
+    }
+    if property_id:
+        q["property_id"] = property_id
+    items = await db.transactions.find(
+        q, {"_id": 0, "date": 1, "type": 1, "amount_ttc": 1, "amount_ht": 1}).to_list(100000)
+
+    months = _blank_months(year)
+    prev = _blank_months(year - 1)
+    for it in items:
+        d = str(it.get("date") or "")
+        try:
+            y, mi = int(d[:4]), int(d[5:7]) - 1
+        except Exception:
+            continue
+        if not 0 <= mi <= 11:
+            continue
+        target = months if y == year else prev if y == year - 1 else None
+        if target is None:
+            continue
+        key = "recettes" if it.get("type") == "recette" else "depenses"
+        target[mi][key] += float(it.get("amount_ttc") or 0)
+        target[mi][key + "_ht"] += float(it.get("amount_ht") or 0)
+
+    _finalize_months(months)
+    _finalize_months(prev)
+
+    def totals(ms):
+        return {
+            "recettes": round(sum(m["recettes"] for m in ms), 2),
+            "depenses": round(sum(m["depenses"] for m in ms), 2),
+            "resultat": round(sum(m["resultat"] for m in ms), 2),
+            "resultat_ht": round(sum(m["resultat_ht"] for m in ms), 2),
+        }
+
+    return {"year": year, "months": months, "totals": totals(months),
+            "prev_year": year - 1, "prev_months": prev, "prev_totals": totals(prev)}
+
+
+# ---------------------------------------------------------------------------
 # Compte de résultat (P&L) + TVA
 # ---------------------------------------------------------------------------
 @api_router.get("/accounting/summary")

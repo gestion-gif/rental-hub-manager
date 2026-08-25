@@ -24,13 +24,16 @@ import { api } from "@/src/api";
 import { PropertyPicker } from "@/src/components/PropertyPicker";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
-type Tab = "apercu" | "journal" | "recurrent";
+type Tab = "apercu" | "journal" | "recurrent" | "annuel";
 
 export default function Accounting() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
   const [month, setMonth] = useState(dayjs().format("YYYY-MM"));
+  const [year, setYear] = useState(dayjs().year());
+  const [annual, setAnnual] = useState<any>(null);
+  const [annualLoading, setAnnualLoading] = useState(false);
   const [tab, setTab] = useState<Tab>("apercu");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -61,6 +64,19 @@ export default function Accounting() {
   }, [month]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const loadAnnual = useCallback(async () => {
+    setAnnualLoading(true);
+    try {
+      const a = await api.get(`/accounting/annual?year=${year}`);
+      setAnnual(a);
+    } catch {}
+    setAnnualLoading(false);
+  }, [year]);
+
+  useFocusEffect(useCallback(() => {
+    if (tab === "annuel") loadAnnual();
+  }, [tab, loadAnnual]));
 
   function shiftMonth(delta: number) {
     setMonth((m) => dayjs(m + "-01").add(delta, "month").format("YYYY-MM"));
@@ -201,18 +217,18 @@ export default function Accounting() {
 
       {/* Sélecteur de période */}
       <View style={styles.monthRow}>
-        <Pressable testID="month-prev" onPress={() => shiftMonth(-1)} style={styles.monthArrow}>
+        <Pressable testID="month-prev" onPress={() => (tab === "annuel" ? setYear((y) => y - 1) : shiftMonth(-1))} style={styles.monthArrow}>
           <Ionicons name="chevron-back" size={18} color={colors.onSurfaceSecondary} />
         </Pressable>
-        <Text style={styles.monthLabel}>{monthLabel}</Text>
-        <Pressable testID="month-next" onPress={() => shiftMonth(1)} style={styles.monthArrow}>
+        <Text style={styles.monthLabel}>{tab === "annuel" ? String(year) : monthLabel}</Text>
+        <Pressable testID="month-next" onPress={() => (tab === "annuel" ? setYear((y) => y + 1) : shiftMonth(1))} style={styles.monthArrow}>
           <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceSecondary} />
         </Pressable>
       </View>
 
       {/* Onglets */}
       <View style={styles.tabs}>
-        {([["apercu", "Aperçu"], ["journal", "Journal"], ["recurrent", "Récurrent"]] as [Tab, string][]).map(([k, lbl]) => (
+        {([["apercu", "Aperçu"], ["annuel", "Annuel"], ["journal", "Journal"], ["recurrent", "Récurrent"]] as [Tab, string][]).map(([k, lbl]) => (
           <Pressable key={k} testID={`tab-${k}`} onPress={() => setTab(k)} style={[styles.tab, tab === k && styles.tabActive]}>
             <Text style={[styles.tabText, tab === k && styles.tabTextActive]}>{lbl}</Text>
           </Pressable>
@@ -230,6 +246,16 @@ export default function Accounting() {
           {tab === "apercu" && summary && (
             <ApercuTab summary={summary} onImport={importRevenues} importing={importing}
               onExportPdf={exportPdf} onExportCsv={exportCsv} exporting={exporting} />
+          )}
+
+          {tab === "annuel" && (
+            annualLoading && !annual ? (
+              <ActivityIndicator style={{ marginTop: 40 }} color={colors.brandPrimary} />
+            ) : annual ? (
+              <AnnualTab annual={annual} onOpenMonth={(m: string) => { setMonth(m); setTab("apercu"); }} />
+            ) : (
+              <EmptyRow text="Aucune donnée annuelle" />
+            )
           )}
 
           {tab === "journal" && (
@@ -301,7 +327,7 @@ export default function Accounting() {
         </ScrollView>
       )}
 
-      {tab !== "recurrent" && (
+      {(tab === "apercu" || tab === "journal") && (
         <Pressable testID="accounting-fab" onPress={() => router.push(`/accounting-form?month=${month}`)} style={[styles.fab, { bottom: insets.bottom + spacing.lg }]}>
           <Ionicons name="add" size={28} color={colors.onBrandPrimary} />
         </Pressable>
@@ -405,6 +431,93 @@ function ApercuTab({ summary, onImport, importing, onExportPdf, onExportCsv, exp
   );
 }
 
+function AnnualTab({ annual, onOpenMonth }: any) {
+  const months: any[] = annual.months || [];
+  const prevMonths: any[] = annual.prev_months || [];
+  const t = annual.totals || {};
+  const pt = annual.prev_totals || {};
+  const maxVal = Math.max(1, ...months.map((m) => Math.max(m.recettes, m.depenses)));
+  const hasPrev = (pt.recettes || 0) > 0 || (pt.depenses || 0) > 0;
+  const delta = hasPrev && pt.resultat !== 0 ? ((t.resultat - pt.resultat) / Math.abs(pt.resultat)) * 100 : null;
+  const bestIdx = months.reduce((bi, m, i) => (m.resultat > months[bi].resultat ? i : bi), 0);
+  const hasData = (t.recettes || 0) > 0 || (t.depenses || 0) > 0;
+
+  return (
+    <>
+      <View style={styles.summaryGrid}>
+        <SummaryCard label={`Recettes ${annual.year}`} value={t.recettes || 0} tint={colors.success} icon="trending-up" />
+        <SummaryCard label={`Dépenses ${annual.year}`} value={t.depenses || 0} tint={colors.error} icon="trending-down" />
+      </View>
+      <View style={[styles.resultCard, { borderColor: ((t.resultat || 0) >= 0 ? colors.success : colors.error) + "55" }]}>
+        <Text style={styles.resultLabel}>Résultat {annual.year}</Text>
+        <Text style={[styles.resultValue, { color: (t.resultat || 0) >= 0 ? colors.success : colors.error }]}>
+          {(t.resultat || 0) >= 0 ? "+" : ""}{(t.resultat || 0).toFixed(2)} €
+        </Text>
+        <Text style={styles.resultSub}>
+          HT : {(t.resultat_ht || 0).toFixed(2)} €
+          {delta !== null ? ` · ${delta >= 0 ? "+" : ""}${delta.toFixed(0)}% vs ${annual.prev_year}` : ""}
+        </Text>
+      </View>
+
+      <Text style={styles.sectionTitle}>Mois par mois</Text>
+      {!hasData ? (
+        <EmptyRow text={`Aucune écriture en ${annual.year}`} />
+      ) : (
+        <View style={styles.card}>
+          <View style={styles.annualHead}>
+            <Text style={[styles.annualHeadText, { width: 44 }]}>Mois</Text>
+            <Text style={[styles.annualHeadText, { flex: 1 }]}>Recettes / Dépenses</Text>
+            <Text style={[styles.annualHeadText, { width: 78, textAlign: "right" }]}>Résultat</Text>
+          </View>
+          {months.map((m, i) => {
+            const prev = prevMonths[i];
+            const isBest = i === bestIdx && m.resultat > 0;
+            const empty = m.recettes === 0 && m.depenses === 0;
+            return (
+              <Pressable key={m.month} testID={`annual-month-${m.month}`} onPress={() => onOpenMonth(m.month)}
+                style={[styles.annualRow, empty && { opacity: 0.45 }]}>
+                <View style={{ width: 44 }}>
+                  <Text style={[styles.annualMonth, isBest && { color: colors.success }]}>
+                    {dayjs(m.month + "-01").format("MMM")}
+                  </Text>
+                  {isBest && <Ionicons name="star" size={10} color={colors.success} />}
+                </View>
+                <View style={{ flex: 1, gap: 3, marginRight: spacing.md }}>
+                  <View style={styles.barBg}>
+                    <View style={[styles.barFill, { backgroundColor: colors.success, width: `${(m.recettes / maxVal) * 100}%` }]} />
+                  </View>
+                  <View style={styles.barBg}>
+                    <View style={[styles.barFill, { width: `${(m.depenses / maxVal) * 100}%` }]} />
+                  </View>
+                </View>
+                <View style={{ width: 78, alignItems: "flex-end" }}>
+                  <Text style={[styles.annualResult, { color: m.resultat > 0 ? colors.success : m.resultat < 0 ? colors.error : colors.onSurfaceTertiary }]}>
+                    {m.resultat > 0 ? "+" : ""}{m.resultat.toFixed(0)} €
+                  </Text>
+                  {hasPrev && prev && (prev.recettes > 0 || prev.depenses > 0) && (
+                    <Text style={styles.annualPrev}>N-1 : {prev.resultat.toFixed(0)} €</Text>
+                  )}
+                </View>
+              </Pressable>
+            );
+          })}
+          <View style={styles.tvaSep} />
+          <View style={styles.annualTotalRow}>
+            <Text style={styles.annualTotalLabel}>Total {annual.year}</Text>
+            <View style={{ alignItems: "flex-end" }}>
+              <Text style={[styles.annualResult, { color: (t.resultat || 0) >= 0 ? colors.success : colors.error }]}>
+                {(t.resultat || 0) >= 0 ? "+" : ""}{(t.resultat || 0).toFixed(2)} €
+              </Text>
+              {hasPrev && <Text style={styles.annualPrev}>{annual.prev_year} : {(pt.resultat || 0).toFixed(2)} €</Text>}
+            </View>
+          </View>
+        </View>
+      )}
+      <Text style={styles.annualHint}>Touchez un mois pour ouvrir son détail dans l’Aperçu.</Text>
+    </>
+  );
+}
+
 function SummaryCard({ label, value, tint, icon }: any) {
   return (
     <View style={styles.summaryCard}>
@@ -475,6 +588,15 @@ const styles = StyleSheet.create({
   barBg: { height: 6, borderRadius: 3, backgroundColor: colors.surfaceSecondary, overflow: "hidden" },
   barFill: { height: 6, borderRadius: 3, backgroundColor: colors.error },
   catAmount: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  annualHead: { flexDirection: "row", alignItems: "center", paddingBottom: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, marginBottom: 4 },
+  annualHeadText: { fontFamily: font.medium, fontSize: 11, color: colors.onSurfaceTertiary, textTransform: "uppercase" },
+  annualRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  annualMonth: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurface, textTransform: "capitalize" },
+  annualResult: { fontFamily: font.bold, fontSize: fontSize.sm },
+  annualPrev: { fontFamily: font.regular, fontSize: 10, color: colors.onSurfaceTertiary, marginTop: 1 },
+  annualTotalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 8 },
+  annualTotalLabel: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  annualHint: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, textAlign: "center", marginTop: spacing.md },
   ownerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   ownerName: { flex: 1, fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface, marginRight: spacing.md },
   ownerNums: { flexDirection: "row", alignItems: "center", gap: spacing.md },

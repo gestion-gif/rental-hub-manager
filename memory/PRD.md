@@ -553,3 +553,8 @@
 ## Session (2026-08 fork #2) — Vérification export comptable
 - Vérifié après fork: boutons "Exporter PDF" / "Exporter CSV" (onglet Aperçu de /accounting) fonctionnels — CSV téléchargé avec succès (journal-2026-08.csv), backend /accounting/summary + /transactions OK avec le compte QA.
 - En attente utilisateur: envoi de la vidéo de démo à evan@channex.io pour débloquer la clé Production Channex (bloque: passage prod, encaissement Stripe auto OTA, migration Lodgify).
+
+## Vue comptable annuelle (2026-08 fork #2)
+- Backend: GET /api/accounting/annual?year=YYYY (routers/accounting.py) → months[12] {month, recettes, depenses, recettes_ht, depenses_ht, resultat, resultat_ht}, totals, + prev_year/prev_months/prev_totals (N-1 pour comparaison, requête unique sur 2 ans).
+- Frontend (accounting.tsx): nouvel onglet "Annuel" (tab-annuel) entre Aperçu et Journal. Sélecteur de période bascule en année quand l'onglet est actif. Cartes Recettes/Dépenses/Résultat annuels (+ % vs N-1 si données), tableau 12 mois avec double barres (recettes vertes / dépenses rouges, échelle sur le max), résultat coloré + rappel N-1, meilleur mois marqué d'une étoile, ligne Total. Tap sur un mois (annual-month-YYYY-MM) → ouvre l'Aperçu sur ce mois. FAB masqué sur Annuel/Récurrent.
+- Testé: curl backend OK (totaux 2026 corrects), screenshot navigation onglet + tap mois → Aperçu septembre 2026 OK.
