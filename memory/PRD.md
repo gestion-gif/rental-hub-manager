@@ -603,3 +603,8 @@
 - Frontend (settings/channex.tsx): bouton "Exporter mes logements vers Channex" (channex-export, orange) avec confirmDialog + rapport (créés/erreurs).
 - Testé E2E sur staging: export "Loù Cabanoù" → vérifié via API Channex (room type 1 unité occ 4, rate plan 90.00 EUR) + liens locaux corrects. Puis NETTOYÉ (delete Channex + unset channex_id + suppression room/rate locaux) pour ne pas lier de vrais logements au staging avant la bascule production.
 - Reste manuel côté user: mapping Booking.com/Airbnb dans l'UI Channex après export en production.
+
+## Sélection des logements à exporter vers Channex (2026-08 fork #2)
+- Demande user: exporter seulement 2 logements. Réponse: Channex facture par logement actif → export sélectif recommandé.
+- settings/channex.tsx: le bouton channex-export ouvre désormais une modale bottom-sheet (export-modal) listant les logements NON liés (GET /properties filtré !channex_id) avec cases à cocher, "Tout sélectionner" (export-select-all), et bouton "Exporter N logement(s)" (export-confirm) → POST /channex/export-properties {property_ids}.
+- Vérifié par screenshot: modale, sélection, libellé dynamique. Note env: la base ne contient que 3 logements (1 exportable) — les "24 propriétés" des notes précédentes n'existent pas dans ce fork.

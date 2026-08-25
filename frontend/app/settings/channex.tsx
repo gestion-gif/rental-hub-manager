@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput, Alert, Platform, ScrollView } from "react-native";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput, Alert, Platform, Modal, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -72,31 +72,45 @@ export default function ChannexSettings() {
   }
 
   const [exporting, setExporting] = useState(false);
+  const [exportModal, setExportModal] = useState(false);
+  const [exportables, setExportables] = useState<any[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  async function openExportModal() {
+    try {
+      const all = await api.get("/properties");
+      const list = (all || []).filter((p: any) => !p.channex_id);
+      if (list.length === 0) {
+        notify("Rien à exporter", "Tous vos logements sont déjà liés à Channex.");
+        return;
+      }
+      setExportables(list);
+      setSelectedIds([]);
+      setExportModal(true);
+    } catch (e: any) {
+      notify("Erreur", e?.message || "Lecture des logements impossible.");
+    }
+  }
 
   async function exportProps() {
-    if (exporting) return;
-    confirmDialog(
-      "Exporter vers Channex",
-      "Créer dans Channex tous vos logements pas encore liés (fiche + type d'hébergement + plan tarifaire) ? Il ne restera que le mapping Booking.com / Airbnb à faire dans l'interface Channex.",
-      "Exporter",
-      async () => {
-        setExporting(true);
-        try {
-          const r = await api.post("/channex/export-properties", {});
-          const errs = (r.results || []).filter((x: any) => !x.ok);
-          notify(
-            "Export terminé",
-            `${r.created}/${r.total} logement(s) créé(s) dans Channex.` +
-            (errs.length ? `\n\nErreurs :\n${errs.map((e: any) => `• ${e.property} : ${e.error}`).join("\n").slice(0, 400)}` : ""),
-          );
-          await load();
-          await refreshProps();
-        } catch (e: any) {
-          notify("Erreur", e?.message || "Export impossible.");
-        }
-        setExporting(false);
-      },
-    );
+    if (exporting || selectedIds.length === 0) return;
+    setExporting(true);
+    try {
+      const r = await api.post("/channex/export-properties", { property_ids: selectedIds });
+      const errs = (r.results || []).filter((x: any) => !x.ok);
+      setExportModal(false);
+      notify(
+        "Export terminé",
+        `${r.created}/${r.total} logement(s) créé(s) dans Channex.` +
+        (errs.length ? `\n\nErreurs :\n${errs.map((e: any) => `• ${e.property} : ${e.error}`).join("\n").slice(0, 400)}` : "") +
+        "\n\nProchaine étape : mappez-les à Booking.com / Airbnb dans l'interface Channex.",
+      );
+      await load();
+      await refreshProps();
+    } catch (e: any) {
+      notify("Erreur", e?.message || "Export impossible.");
+    }
+    setExporting(false);
   }
 
   async function importChannex() {
@@ -224,7 +238,7 @@ export default function ChannexSettings() {
                     <><Ionicons name="download-outline" size={16} color="#fff" /><Text style={styles.importText}>Importer dans Casanéo (logements, chambres, tarifs)</Text></>
                   )}
                 </Pressable>
-                <Pressable testID="channex-export" onPress={exportProps} disabled={exporting} style={[styles.syncBtn, { backgroundColor: "#B4690E" }, exporting && { opacity: 0.6 }]}>
+                <Pressable testID="channex-export" onPress={openExportModal} disabled={exporting} style={[styles.syncBtn, { backgroundColor: "#B4690E" }, exporting && { opacity: 0.6 }]}>
                   {exporting ? <ActivityIndicator size="small" color="#fff" /> : (
                     <><Ionicons name="arrow-up-circle-outline" size={16} color="#fff" /><Text style={styles.importText}>Exporter mes logements vers Channex</Text></>
                   )}
@@ -320,6 +334,69 @@ export default function ChannexSettings() {
           )}
         </KeyboardAwareScrollView>
       )}
+
+      {/* Sélection des logements à exporter vers Channex */}
+      <Modal visible={exportModal} animationType="slide" transparent onRequestClose={() => setExportModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { paddingBottom: insets.bottom + spacing.lg }]}>
+            <View style={styles.modalHead}>
+              <Text style={styles.modalTitle}>Exporter vers Channex</Text>
+              <Pressable testID="export-modal-close" onPress={() => setExportModal(false)} style={styles.backBtn}>
+                <Ionicons name="close" size={20} color={colors.onSurface} />
+              </Pressable>
+            </View>
+            <Text style={styles.modalSub}>
+              Sélectionnez les logements à créer dans Channex. Channex facture par logement actif :
+              exportez uniquement ceux que vous allez mapper à Booking.com / Airbnb.
+            </Text>
+            <Pressable
+              testID="export-select-all"
+              onPress={() => setSelectedIds(selectedIds.length === exportables.length ? [] : exportables.map((p) => p.id))}
+              style={styles.selectAllRow}
+            >
+              <Ionicons
+                name={selectedIds.length === exportables.length ? "checkbox" : "square-outline"}
+                size={20}
+                color={colors.brandPrimary}
+              />
+              <Text style={styles.selectAllText}>Tout sélectionner ({exportables.length})</Text>
+            </Pressable>
+            <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+              {exportables.map((p) => {
+                const on = selectedIds.includes(p.id);
+                return (
+                  <Pressable
+                    key={p.id}
+                    testID={`export-prop-${p.id}`}
+                    onPress={() => setSelectedIds(on ? selectedIds.filter((x) => x !== p.id) : [...selectedIds, p.id])}
+                    style={styles.exportRow}
+                  >
+                    <Ionicons name={on ? "checkbox" : "square-outline"} size={20} color={on ? colors.brandPrimary : colors.onSurfaceTertiary} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.exportName} numberOfLines={1}>{p.name}</Text>
+                      <Text style={styles.exportMeta} numberOfLines={1}>
+                        {p.city || p.location || "—"}{p.base_price ? ` · ${p.base_price} €/nuit` : ""}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <Pressable
+              testID="export-confirm"
+              onPress={exportProps}
+              disabled={exporting || selectedIds.length === 0}
+              style={[styles.primaryBtnFull, (exporting || selectedIds.length === 0) && { opacity: 0.5 }]}
+            >
+              {exporting ? <ActivityIndicator color="#fff" /> : (
+                <Text style={styles.primaryBtnText}>
+                  Exporter {selectedIds.length} logement{selectedIds.length > 1 ? "s" : ""} vers Channex
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -342,6 +419,16 @@ const styles = StyleSheet.create({
   primaryBtnFull: { marginTop: spacing.lg, backgroundColor: colors.brandPrimary, borderRadius: radius.md, paddingVertical: 14, alignItems: "center" },
   primaryBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.brandPrimary, borderRadius: radius.md, paddingVertical: 12, paddingHorizontal: 16, flex: 1 },
   primaryBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onBrandPrimary },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
+  modalSheet: { backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: spacing.lg },
+  modalHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
+  modalTitle: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
+  modalSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, lineHeight: 18, marginBottom: spacing.md },
+  selectAllRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  selectAllText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.brandPrimary },
+  exportRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  exportName: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface },
+  exportMeta: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 1 },
   statusCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md },
   statusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   dotOn: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#17B0A6" },
