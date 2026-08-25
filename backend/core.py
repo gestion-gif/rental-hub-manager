@@ -1278,6 +1278,32 @@ async def _record_auto_charge_error(uid: str, r: dict, error: str):
         {"$set": {"auto_charge": {"status": "error", "error": error[:300],
                                   "attempts": attempts, "at": now_utc().isoformat()}}})
     await _sync_log(uid, "auto_charge", "error", f"{r.get('guest_name', '')}: {error[:200]}")
+    # Alerte email au gestionnaire (1re tentative et abandon après la 3e)
+    if attempts not in (1, 3):
+        return
+    try:
+        u = await db.users.find_one({"user_id": uid}, {"_id": 0, "email": 1})
+        to = (u or {}).get("email")
+        if not to:
+            return
+        due = float((r.get("finance") or {}).get("due") or 0)
+        final = attempts >= 3
+        subject = ("⚠️ Encaissement Booking.com abandonné — action requise"
+                   if final else "Échec d'encaissement automatique Booking.com")
+        html = (
+            f"<p>L'encaissement automatique de la carte Booking.com a échoué"
+            f"{' définitivement (3 tentatives)' if final else f' (tentative {attempts}/3)'}.</p>"
+            f"<p><b>Réservation :</b> {r.get('guest_name', '')} · {r.get('property_name', '')}<br>"
+            f"<b>Séjour :</b> {r.get('check_in', '')} → {r.get('check_out', '')}<br>"
+            f"<b>Montant dû :</b> {due:.2f} €</p>"
+            f"<p><b>Motif :</b> {error[:300]}</p>"
+            + ("<p>Aucune nouvelle tentative ne sera faite : encaissez manuellement depuis la fiche réservation "
+               "(bouton « Encaisser la carte Booking.com ») ou contactez le voyageur.</p>" if final
+               else "<p>Une nouvelle tentative aura lieu automatiquement.</p>")
+        )
+        await send_email(to=to, subject=subject, html=html)
+    except Exception:
+        logger.exception("auto charge alert email failed")
 
 
 async def auto_charge_reservation(uid: str, r: dict) -> dict:

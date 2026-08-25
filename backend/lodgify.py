@@ -90,6 +90,15 @@ class LodgifyAdapter:
                 return out
             page += 1
 
+    async def get_property(self, http, lodgify_id: str):
+        return await self._get(http, f"/properties/{lodgify_id}")
+
+    async def rates_calendar(self, http, house_id: str, room_type_id, start: str, end: str) -> list:
+        body = await self._get(http, "/rates/calendar", {
+            "HouseId": house_id, "RoomTypeId": room_type_id,
+            "StartDate": start, "EndDate": end})
+        return (body or {}).get("calendar_items") or []
+
     async def list_bookings(self, http, stay="All"):
         page, out = 1, []
         while True:

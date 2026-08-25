@@ -106,6 +106,77 @@ async def channel_import_properties(user=Depends(get_current_user)):
     return {"imported": imported, "total": len(lps)}
 
 
+@api_router.post("/channel/import-rates")
+async def channel_import_rates(user=Depends(get_current_user)):
+    """Importe les tarifs Lodgify (calendrier des prix) : prix par défaut → base_price,
+    prix datés différents → saisons (plages consécutives au même prix)."""
+    uid = user["user_id"]
+    adapter, _ = await get_channel_adapter(uid)
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channel manager non connecté")
+    props = await db.properties.find(
+        {"user_id": uid, "lodgify_id": {"$nin": [None, ""]}}, {"_id": 0, "id": 1, "name": 1, "lodgify_id": 1}).to_list(500)
+    start = date.today().isoformat()
+    end = (date.today() + timedelta(days=365)).isoformat()
+    updated = 0
+    results = []
+    async with httpx.AsyncClient(timeout=60) as http:
+        for p in props:
+            try:
+                detail = await adapter.get_property(http, p["lodgify_id"])
+                rooms = (detail or {}).get("rooms") or []
+                if not rooms:
+                    results.append({"property": p["name"], "ok": False, "error": "Aucun type d'hébergement Lodgify"})
+                    continue
+                items = await adapter.rates_calendar(http, p["lodgify_id"], rooms[0].get("id"), start, end)
+                base = 0.0
+                daily = {}
+                for it in items:
+                    prices = it.get("prices") or []
+                    if not prices:
+                        continue
+                    val = float(prices[0].get("price_per_day") or 0)
+                    if it.get("is_default"):
+                        base = val
+                    elif it.get("date") and val > 0:
+                        daily[it["date"]] = val
+                if base <= 0 and daily:
+                    base = min(daily.values())
+                if base <= 0:
+                    results.append({"property": p["name"], "ok": False, "error": "Aucun tarif trouvé"})
+                    continue
+                # Plages consécutives au même prix (différent du prix de base) → saisons
+                seasons = []
+                run_start = run_end = run_price = None
+                for d in sorted(daily):
+                    v = daily[d]
+                    if v == base:
+                        v = None  # même prix que la base → pas une saison
+                    if v is not None and run_price == v and run_end and \
+                       (date.fromisoformat(d) - date.fromisoformat(run_end)).days == 1:
+                        run_end = d
+                        continue
+                    if run_price is not None:
+                        seasons.append({"id": str(uuid.uuid4()), "name": f"Tarif Lodgify {run_price:.0f} €",
+                                        "start_date": run_start, "end_date": run_end, "price": run_price})
+                    run_start = run_end = d if v is not None else None
+                    run_price = v
+                if run_price is not None:
+                    seasons.append({"id": str(uuid.uuid4()), "name": f"Tarif Lodgify {run_price:.0f} €",
+                                    "start_date": run_start, "end_date": run_end, "price": run_price})
+                await db.properties.update_one(
+                    {"id": p["id"], "user_id": uid},
+                    {"$set": {"base_price": base, "seasons": seasons[:120]}})
+                updated += 1
+                results.append({"property": p["name"], "ok": True, "base_price": base, "seasons": len(seasons)})
+            except HTTPException as e:
+                results.append({"property": p["name"], "ok": False, "error": str(e.detail)})
+            except Exception as e:
+                results.append({"property": p["name"], "ok": False, "error": str(e)[:150]})
+            await asyncio.sleep(0.4)  # rate limit Lodgify
+    return {"ok": True, "updated": updated, "total": len(props), "results": results}
+
+
 @api_router.post("/channel/sync")
 async def channel_sync(user=Depends(get_current_user)):
     return await run_channel_sync(user["user_id"])

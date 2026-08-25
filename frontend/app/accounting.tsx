@@ -195,6 +195,94 @@ export default function Accounting() {
     setExporting("");
   }
 
+  function exportAnnualHtml() {
+    const a = annual;
+    const eur = (v: any) => `${(Number(v) || 0).toFixed(2)} €`;
+    const hasPrev = ((a?.prev_totals?.recettes || 0) > 0 || (a?.prev_totals?.depenses || 0) > 0);
+    const rows = (a?.months || []).map((m: any, i: number) => {
+      const prev = a?.prev_months?.[i];
+      return `<tr><td style="text-transform:capitalize">${dayjs(m.month + "-01").format("MMMM")}</td>` +
+        `<td style="text-align:right">${eur(m.recettes)}</td><td style="text-align:right">${eur(m.depenses)}</td>` +
+        `<td style="text-align:right"><b>${eur(m.resultat)}</b></td>` +
+        (hasPrev ? `<td style="text-align:right;color:#888">${eur(prev?.resultat)}</td>` : "") + `</tr>`;
+    }).join("");
+    return `<html><head><meta charset="utf-8"><style>
+      body{font-family:Arial,sans-serif;color:#111;padding:24px;font-size:13px}
+      h1{font-size:20px;margin:0 0 2px} .sub{color:#888;margin:0 0 16px}
+      table{width:100%;border-collapse:collapse;font-size:12px}
+      td,th{padding:6px 8px;border-bottom:1px solid #eee;text-align:left}
+      th{background:#f4f4f6;color:#666;font-size:11px;text-transform:uppercase}
+      tfoot td{font-weight:bold;border-top:2px solid #ccc}
+    </style></head><body>
+      <h1>Résultat annuel — ${a?.year}</h1>
+      <p class="sub">Comparaison mois par mois · Export généré via Casanéo</p>
+      <table>
+        <tr><th>Mois</th><th style="text-align:right">Recettes TTC</th><th style="text-align:right">Dépenses TTC</th>
+        <th style="text-align:right">Résultat</th>${hasPrev ? `<th style="text-align:right">Résultat ${a?.prev_year}</th>` : ""}</tr>
+        ${rows}
+        <tfoot><tr><td>Total ${a?.year}</td><td style="text-align:right">${eur(a?.totals?.recettes)}</td>
+        <td style="text-align:right">${eur(a?.totals?.depenses)}</td><td style="text-align:right">${eur(a?.totals?.resultat)}</td>
+        ${hasPrev ? `<td style="text-align:right">${eur(a?.prev_totals?.resultat)}</td>` : ""}</tr></tfoot>
+      </table>
+      <p class="sub" style="margin-top:12px">Résultat HT ${a?.year} : ${eur(a?.totals?.resultat_ht)}</p>
+    </body></html>`;
+  }
+
+  async function exportAnnualPdf() {
+    if (exporting || !annual) return;
+    setExporting("apdf");
+    try {
+      const html = exportAnnualHtml();
+      if (Platform.OS === "web") {
+        await Print.printAsync({ html });
+      } else {
+        const { uri } = await Print.printToFileAsync({ html });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Résultat annuel" });
+        }
+      }
+    } catch {
+      Alert.alert("Erreur", "Export PDF impossible.");
+    }
+    setExporting("");
+  }
+
+  async function exportAnnualCsv() {
+    if (exporting || !annual) return;
+    setExporting("acsv");
+    try {
+      const n2 = (v: any) => (Number(v) || 0).toFixed(2).replace(".", ",");
+      const hasPrev = ((annual.prev_totals?.recettes || 0) > 0 || (annual.prev_totals?.depenses || 0) > 0);
+      const head = "Mois;Recettes TTC;Dépenses TTC;Résultat TTC;Résultat HT" + (hasPrev ? `;Résultat ${annual.prev_year}` : "");
+      const lines = (annual.months || []).map((m: any, i: number) =>
+        [m.month, n2(m.recettes), n2(m.depenses), n2(m.resultat), n2(m.resultat_ht),
+         ...(hasPrev ? [n2(annual.prev_months?.[i]?.resultat)] : [])].join(";"));
+      lines.push(["TOTAL", n2(annual.totals?.recettes), n2(annual.totals?.depenses), n2(annual.totals?.resultat),
+                  n2(annual.totals?.resultat_ht), ...(hasPrev ? [n2(annual.prev_totals?.resultat)] : [])].join(";"));
+      const csv = "\ufeff" + [head, ...lines].join("\n");
+      const filename = `resultat-annuel-${year}.csv`;
+      if (Platform.OS === "web") {
+        const doc = (globalThis as any).document;
+        const blob = new (globalThis as any).Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url = (globalThis as any).URL.createObjectURL(blob);
+        const a = doc.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        (globalThis as any).URL.revokeObjectURL(url);
+      } else {
+        const uri = FileSystem.cacheDirectory + filename;
+        await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: "text/csv", dialogTitle: "Résultat annuel (CSV)" });
+        }
+      }
+    } catch {
+      Alert.alert("Erreur", "Export CSV impossible.");
+    }
+    setExporting("");
+  }
+
   const filteredTxs = txs.filter((t) => {
     if (typeFilter !== "all" && t.type !== typeFilter) return false;
     if (propFilter !== "all" && t.property_id !== propFilter) return false;
@@ -252,7 +340,8 @@ export default function Accounting() {
             annualLoading && !annual ? (
               <ActivityIndicator style={{ marginTop: 40 }} color={colors.brandPrimary} />
             ) : annual ? (
-              <AnnualTab annual={annual} onOpenMonth={(m: string) => { setMonth(m); setTab("apercu"); }} />
+              <AnnualTab annual={annual} onOpenMonth={(m: string) => { setMonth(m); setTab("apercu"); }}
+                onExportPdf={exportAnnualPdf} onExportCsv={exportAnnualCsv} exporting={exporting} />
             ) : (
               <EmptyRow text="Aucune donnée annuelle" />
             )
@@ -431,7 +520,7 @@ function ApercuTab({ summary, onImport, importing, onExportPdf, onExportCsv, exp
   );
 }
 
-function AnnualTab({ annual, onOpenMonth }: any) {
+function AnnualTab({ annual, onOpenMonth, onExportPdf, onExportCsv, exporting }: any) {
   const months: any[] = annual.months || [];
   const prevMonths: any[] = annual.prev_months || [];
   const t = annual.totals || {};
@@ -444,6 +533,16 @@ function AnnualTab({ annual, onOpenMonth }: any) {
 
   return (
     <>
+      <View style={[styles.exportRow, { marginTop: 0 }]}>
+        <Pressable testID="annual-export-pdf" onPress={onExportPdf} disabled={!!exporting} style={[styles.exportBtn, exporting === "apdf" && { opacity: 0.6 }]}>
+          {exporting === "apdf" ? <ActivityIndicator size="small" color={colors.onSurfaceSecondary} /> : <Ionicons name="document-outline" size={16} color={colors.onSurfaceSecondary} />}
+          <Text style={styles.exportText}>Exporter PDF</Text>
+        </Pressable>
+        <Pressable testID="annual-export-csv" onPress={onExportCsv} disabled={!!exporting} style={[styles.exportBtn, exporting === "acsv" && { opacity: 0.6 }]}>
+          {exporting === "acsv" ? <ActivityIndicator size="small" color={colors.onSurfaceSecondary} /> : <Ionicons name="grid-outline" size={16} color={colors.onSurfaceSecondary} />}
+          <Text style={styles.exportText}>Exporter CSV</Text>
+        </Pressable>
+      </View>
       <View style={styles.summaryGrid}>
         <SummaryCard label={`Recettes ${annual.year}`} value={t.recettes || 0} tint={colors.success} icon="trending-up" />
         <SummaryCard label={`Dépenses ${annual.year}`} value={t.depenses || 0} tint={colors.error} icon="trending-down" />
