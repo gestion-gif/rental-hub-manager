@@ -292,11 +292,17 @@ async def channex_import(user=Depends(get_current_user)):
                     imported_rooms += 1
             rates = await adapter.list_rate_plans(http, cid)
             today = now_utc().date()
-            try:
-                rate_map = await adapter.list_rates(
-                    http, cid, today.isoformat(), (today + timedelta(days=60)).isoformat())
-            except Exception:
-                rate_map = {}
+            # Ne lire les tarifs Channex qu'au premier import (seed du prix de base).
+            # Ensuite le PMS est maître des prix (push ARI uniquement, pas de pull).
+            has_rate_plans = await db.rate_plans.find_one(
+                {"user_id": uid, "property_id": pid, "channex_rate_plan_id": {"$nin": [None, ""]}}, {"_id": 1})
+            rate_map = {}
+            if not has_rate_plans:
+                try:
+                    rate_map = await adapter.list_rates(
+                        http, cid, today.isoformat(), (today + timedelta(days=60)).isoformat())
+                except Exception:
+                    rate_map = {}
             prop_price = 0.0
             for rpn in rates:
                 crp = map_channex_rate_plan(rpn)
