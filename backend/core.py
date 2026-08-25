@@ -919,6 +919,15 @@ def _build_company(doc: Optional[dict]) -> dict:
 DEFAULT_PAYMENT_REMINDERS = {"enabled": False, "mode": "all", "excluded_platforms": [], "days": [7, 3]}
 
 
+def _build_auto_charge(doc: Optional[dict]) -> dict:
+    c = (doc or {}).get("auto_charge") or {}
+    try:
+        days = int(c.get("days_before", 60))
+    except Exception:
+        days = 60
+    return {"enabled": bool(c.get("enabled", False)), "days_before": max(1, min(365, days))}
+
+
 def _build_payment_reminders(doc: Optional[dict]) -> dict:
     c = (doc or {}).get("payment_reminders") or {}
     mode = c.get("mode") if c.get("mode") in ("all", "direct") else "all"
@@ -1022,6 +1031,7 @@ class PreferencesIn(BaseModel):
     cleaning_offset_days: Optional[int] = None
     getyourguide_url: Optional[str] = None
     public_site: Optional[dict] = None
+    auto_charge: Optional[dict] = None
 async def _ai_auto_draft_enabled(uid: str) -> bool:
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     return bool((doc or {}).get("ai_auto_draft", True))
@@ -1255,6 +1265,127 @@ async def process_channex_bookings(uid: str) -> dict:
                             f"{ota} · {gname} · {ci}→{co} ({status})")
             processed += 1
     return {"processed": processed}
+
+
+# ---------------------------------------------------------------------------
+# Encaissement automatique des cartes OTA (Booking.com via Channex → Stripe)
+# ---------------------------------------------------------------------------
+async def _record_auto_charge_error(uid: str, r: dict, error: str):
+    prev = r.get("auto_charge") or {}
+    attempts = int(prev.get("attempts") or 0) + 1
+    await db.reservations.update_one(
+        {"id": r["id"], "user_id": uid},
+        {"$set": {"auto_charge": {"status": "error", "error": error[:300],
+                                  "attempts": attempts, "at": now_utc().isoformat()}}})
+    await _sync_log(uid, "auto_charge", "error", f"{r.get('guest_name', '')}: {error[:200]}")
+
+
+async def auto_charge_reservation(uid: str, r: dict) -> dict:
+    """Encaisse le dû d'une réservation Channex via la carte stockée chez Channex
+    (app Stripe Tokenization) + PaymentIntent Stripe off-session. Idempotent."""
+    if not STRIPE_API_KEY:
+        return {"ok": False, "error": "Stripe non configuré"}
+    bid = r.get("channex_booking_id")
+    if not bid:
+        return {"ok": False, "error": "Réservation sans identifiant Channex"}
+    fin = r.get("finance") or {}
+    due = round(float(fin.get("due") or 0), 2)
+    if due <= 0:
+        return {"ok": False, "error": "Aucun montant dû"}
+    if (r.get("auto_charge") or {}).get("status") == "done":
+        return {"ok": False, "error": "Déjà encaissé"}
+    currency = str(fin.get("currency") or "EUR").lower()
+    adapter, _ = await get_channex_adapter(uid)
+    if not adapter:
+        return {"ok": False, "error": "Channex non connecté"}
+    token = ""
+    token_err = ""
+    async with httpx.AsyncClient(timeout=60) as http:
+        try:
+            token = await adapter.stripe_payment_method(http, bid)
+        except HTTPException as e:
+            token_err = str(e.detail)
+        except Exception as e:
+            token_err = str(e)
+    if not token:
+        err = ("Carte indisponible via Channex — l'app « Stripe Tokenization » doit être installée "
+               "sur la propriété et un compte Stripe connecté à Channex (accès production requis). "
+               + (f"Détail : {token_err}" if token_err else ""))
+        await _record_auto_charge_error(uid, r, err)
+        return {"ok": False, "error": err}
+
+    import stripe as stripe_sdk
+
+    def _charge():
+        stripe_sdk.api_key = STRIPE_API_KEY
+        return stripe_sdk.PaymentIntent.create(
+            amount=int(round(due * 100)), currency=currency,
+            payment_method=token, payment_method_types=["card"],
+            confirm=True, off_session=True,
+            description=f"Réservation {r.get('platform', '')} · {r.get('guest_name', '')} · {r.get('check_in', '')}",
+            metadata={"reservation_id": r["id"], "channex_booking_id": str(bid)},
+            idempotency_key=f"autocharge-{r['id']}-{int(round(due * 100))}",
+        )
+    try:
+        intent = await asyncio.to_thread(_charge)
+    except Exception as e:
+        err = f"Stripe : {e}"
+        await _record_auto_charge_error(uid, r, err)
+        return {"ok": False, "error": err}
+    if intent.status not in ("succeeded", "processing"):
+        err = f"Statut Stripe : {intent.status}"
+        await _record_auto_charge_error(uid, r, err)
+        return {"ok": False, "error": err}
+    payments = r.get("payments") or []
+    payments.append({
+        "id": str(uuid.uuid4()), "amount": due, "date": date.today().isoformat(),
+        "note": "Encaissement automatique carte Booking.com (Stripe)",
+        "payment_intent": intent.id,
+    })
+    r["payments"] = payments
+    recompute_payment(r)
+    markers = set(r.get("markers") or [])
+    if float(r["finance"].get("due", 0)) <= 0.01:
+        markers.add("paid")
+    tmap = {t["marker_key"]: t for t in await get_templates(uid)}
+    await db.reservations.update_one(
+        {"id": r["id"], "user_id": uid},
+        {"$set": {"payments": payments, "finance": r["finance"], "markers": list(markers),
+                  "marker_color": marker_color_for(list(markers), tmap),
+                  "auto_charge": {"status": "done", "payment_intent_id": intent.id,
+                                  "amount": due, "at": now_utc().isoformat()}}})
+    await _sync_log(uid, "auto_charge", "success",
+                    f"{r.get('guest_name', '')} · {due:.2f} {currency.upper()} encaissés (PI {intent.id})")
+    return {"ok": True, "amount": due, "payment_intent_id": intent.id, "status": intent.status}
+
+
+async def run_auto_charge_for_user(uid: str) -> dict:
+    """Encaisse les résas Booking.com (source Channex) dont l'arrivée est à ≤ N jours."""
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0, "auto_charge": 1})
+    cfg = _build_auto_charge(prefs)
+    if not cfg["enabled"]:
+        return {"charged": 0, "errors": 0}
+    today = date.today().isoformat()
+    horizon = (date.today() + timedelta(days=cfg["days_before"])).isoformat()
+    candidates = await db.reservations.find(
+        {"user_id": uid, "source": "channex",
+         "platform": {"$regex": "booking", "$options": "i"},
+         "status": {"$nin": ["annulee", "demande"]},
+         "check_in": {"$gte": today, "$lte": horizon},
+         "finance.due": {"$gt": 0},
+         "auto_charge.status": {"$ne": "done"}},
+        {"_id": 0}).to_list(500)
+    charged = errors = 0
+    for r in candidates:
+        if int((r.get("auto_charge") or {}).get("attempts") or 0) >= 3:
+            continue  # abandon après 3 échecs (traiter manuellement)
+        res = await auto_charge_reservation(uid, r)
+        if res.get("ok"):
+            charged += 1
+        else:
+            errors += 1
+        await asyncio.sleep(1)
+    return {"charged": charged, "errors": errors}
 
 
 
@@ -2579,6 +2710,9 @@ __all__ = [
     'log_guest_message',
     '_build_payment_reminders',
     'run_payment_reminders_for_user',
+    '_build_auto_charge',
+    'auto_charge_reservation',
+    'run_auto_charge_for_user',
     'SupplementIn',
     'compute_supplement_amount',
     'compute_supplement_lines',

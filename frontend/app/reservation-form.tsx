@@ -111,6 +111,7 @@ export default function ReservationForm() {
   const [saving, setSaving] = useState(false);
   const [paying, setPaying] = useState(false);
   const [payMsg, setPayMsg] = useState<string | null>(null);
+  const [autoCharging, setAutoCharging] = useState(false);
   const [cautionValidated, setCautionValidated] = useState(false);
   const [cvBusy, setCvBusy] = useState(false);
   const [cvMsg, setCvMsg] = useState<string | null>(null);
@@ -324,6 +325,20 @@ export default function ReservationForm() {
       const updated = await api.patch(`/reservations/${id}/paid`, { paid: next });
       setDetail(updated);
     } catch {}
+  }
+
+  async function autoCharge() {
+    if (autoCharging) return;
+    setAutoCharging(true);
+    setPayMsg(null);
+    try {
+      const r = await api.post(`/reservations/${id}/auto-charge`);
+      if (r?.reservation) setDetail(r.reservation);
+      setPayMsg(`Carte encaissée : ${Number(r?.amount || 0).toFixed(2)} € (Stripe) ✓`);
+    } catch (e: any) {
+      setPayMsg(e?.message || "Encaissement impossible");
+    }
+    setAutoCharging(false);
   }
 
   async function addPayment(amount: number) {
@@ -608,7 +623,7 @@ export default function ReservationForm() {
           bottomOffset={20}
           showsVerticalScrollIndicator={false}
         >
-          {showPrices && detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} onAddPayment={addPayment} onDeletePayment={deletePayment} onSetCommission={saveCommission} onCheckout={startCheckout} paying={paying} payMsg={payMsg} />}
+          {showPrices && detail?.finance && <FinanceCard detail={detail} isPaid={(detail.markers || []).includes("paid")} onTogglePaid={togglePaid} onAddPayment={addPayment} onDeletePayment={deletePayment} onSetCommission={saveCommission} onCheckout={startCheckout} paying={paying} payMsg={payMsg} onAutoCharge={autoCharge} autoCharging={autoCharging} />}
           {editing && canModify(user) && (
             form.platform === "Airbnb" ? (
               <View style={styles.cvCard}>
@@ -972,7 +987,7 @@ export default function ReservationForm() {
   );
 }
 
-function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayment, onSetCommission, onCheckout, paying, payMsg }: any) {
+function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayment, onSetCommission, onCheckout, paying, payMsg, onAutoCharge, autoCharging }: any) {
   const f = detail.finance || {};
   const cur = f.currency || "EUR";
   const { commissionRates } = usePreferences();
@@ -987,6 +1002,7 @@ function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayme
   const commission = hasCommission ? f.commission : estimated;
   // Airbnb encaisse le voyageur et reverse à l'hôte le net, hors commission ET hors taxe de séjour
   const isAirbnb = String(detail.platform || "").toLowerCase().includes("airbnb");
+  const isBookingChannex = detail.source === "channex" && String(detail.platform || "").toLowerCase().includes("booking");
   const net = Math.max(0, (f.total || detail.total_price || 0) - commission - (isAirbnb ? (f.taxes || 0) : 0));
   // Airbnb : le "Dû" = net à recevoir d'Airbnb ; une fois l'encaissement validé → Dû 0, Payé = net
   const paidShown = isAirbnb ? (isPaid ? net : 0) : (f.paid || 0);
@@ -1015,6 +1031,25 @@ function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayme
           {isPaid ? "Encaissement validé — appuyez pour annuler" : "Marquer l'encaissement comme reçu"}
         </Text>
       </Pressable>
+
+      {/* Encaissement carte OTA (Booking.com via Channex → Stripe) */}
+      {isBookingChannex && dueShown > 0 && (
+        <Pressable
+          testID="auto-charge-btn"
+          disabled={autoCharging}
+          onPress={onAutoCharge}
+          style={[styles.stripeBtn, { backgroundColor: "#003580" }, autoCharging && { opacity: 0.6 }]}
+        >
+          {autoCharging ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="card" size={18} color="#fff" />
+              <Text style={styles.stripeBtnText}>Encaisser la carte Booking.com ({money(dueShown)})</Text>
+            </>
+          )}
+        </Pressable>
+      )}
 
       {/* Paiement en ligne par carte (Stripe) */}
       {f.due > 0 && (

@@ -21,6 +21,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "cleaning_offset_days": int((doc or {}).get("cleaning_offset_days", 0)),
         "getyourguide_url": (doc or {}).get("getyourguide_url", "") or "",
         "payment_reminders": _build_payment_reminders(doc),
+        "auto_charge": _build_auto_charge(doc),
         "public_site": _build_public_site(doc),
     }
 
@@ -92,6 +93,15 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
             "enabled": bool(c.get("enabled", False)), "mode": mode,
             "excluded_platforms": excl, "days": sorted(days or [7, 3], reverse=True),
         }
+
+    if payload.auto_charge is not None:
+        c = payload.auto_charge or {}
+        try:
+            days = int(c.get("days_before", 60))
+        except Exception:
+            days = 60
+        set_doc["auto_charge"] = {"enabled": bool(c.get("enabled", False)),
+                                  "days_before": max(1, min(365, days))}
 
     if payload.company is not None:
         set_doc["company"] = {k: str(payload.company.get(k) or "").strip() for k in _COMPANY_KEYS}

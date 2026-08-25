@@ -119,6 +119,27 @@ async def startup():
     asyncio.create_task(_channex_outbox_loop())
     asyncio.create_task(_channex_bookings_loop())
     asyncio.create_task(_payment_reminder_loop())
+    asyncio.create_task(_auto_charge_loop())
+
+
+async def _auto_charge_loop():
+    """Toutes les ~6 h : encaissement auto des cartes Booking.com (Channex → Stripe)
+    pour les comptes ayant activé l'option, selon leur délai avant arrivée."""
+    await asyncio.sleep(150)
+    while True:
+        try:
+            prefs = await db.preferences.find(
+                {"auto_charge.enabled": True}, {"_id": 0, "user_id": 1}).to_list(1000)
+            for p in prefs:
+                try:
+                    r = await run_auto_charge_for_user(p["user_id"])
+                    if r.get("charged") or r.get("errors"):
+                        logger.info("auto-charge %s: %s", p["user_id"], r)
+                except Exception:
+                    logger.exception("auto charge failed for %s", p["user_id"])
+        except Exception:
+            logger.exception("auto charge loop error")
+        await asyncio.sleep(6 * 3600)
 
 
 async def _payment_reminder_loop():

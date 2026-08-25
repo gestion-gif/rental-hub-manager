@@ -111,6 +111,12 @@ class ChannexAdapter:
         """Acquitte une révision : elle ne réapparaîtra plus dans le feed."""
         return await self._post(http, f"/booking_revisions/{revision_id}/ack", {})
 
+    async def stripe_payment_method(self, http, booking_id: str) -> str:
+        """App Stripe Tokenization Channex : crée un PaymentMethod Stripe depuis la carte
+        stockée chez Channex. Retourne le token (pm_...) ou '' si indisponible."""
+        body = await self._post(http, f"/bookings/{booking_id}/stripe_payment_method", {})
+        return str(((body or {}).get("data") or {}).get("token") or "")
+
     async def send_booking_message(self, http, booking_id: str, message: str):
         """Envoie un message dans le fil de la réservation (Booking.com / Airbnb via Channex)."""
         return await self._post(http, f"/bookings/{booking_id}/messages", {"message": {"message": message}})

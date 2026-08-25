@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView, Switch, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, Switch, ActivityIndicator, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -9,16 +9,21 @@ import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 type Methods = { stripe: boolean; paypal: boolean; manual: boolean };
 type Reminders = { enabled: boolean; mode: "all" | "direct"; excluded_platforms: string[]; days: number[] };
+type AutoCharge = { enabled: boolean; days_before: number };
 
 const OTHER_GATEWAYS = ["Adyen", "Braintree", "Mollie", "Square", "Authorize.net"];
 const EXCLUDABLE_PLATFORMS = ["Airbnb", "Booking.com", "Vrbo"];
 const DEFAULT_REMINDERS: Reminders = { enabled: false, mode: "all", excluded_platforms: [], days: [7, 3] };
+const DEFAULT_AUTO_CHARGE: AutoCharge = { enabled: false, days_before: 60 };
+const DELAY_PRESETS = [30, 45, 60, 90];
 
 export default function PaymentsSettings() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [methods, setMethods] = useState<Methods>({ stripe: true, paypal: false, manual: true });
   const [reminders, setReminders] = useState<Reminders>(DEFAULT_REMINDERS);
+  const [autoCharge, setAutoCharge] = useState<AutoCharge>(DEFAULT_AUTO_CHARGE);
+  const [customDays, setCustomDays] = useState("");
   const [loading, setLoading] = useState(true);
   const [showOthers, setShowOthers] = useState(false);
 
@@ -27,6 +32,9 @@ export default function PaymentsSettings() {
       const p = await api.get("/preferences");
       setMethods({ ...{ stripe: true, paypal: false, manual: true }, ...(p.payment_methods || {}) });
       setReminders({ ...DEFAULT_REMINDERS, ...(p.payment_reminders || {}) });
+      const ac = { ...DEFAULT_AUTO_CHARGE, ...(p.auto_charge || {}) };
+      setAutoCharge(ac);
+      setCustomDays(DELAY_PRESETS.includes(ac.days_before) ? "" : String(ac.days_before));
     } catch {}
     setLoading(false);
   }, []);
@@ -48,6 +56,15 @@ export default function PaymentsSettings() {
       await api.put("/preferences", { payment_reminders: next });
     } catch {
       setReminders(reminders); // revert on failure
+    }
+  }
+
+  async function saveAutoCharge(next: AutoCharge) {
+    setAutoCharge(next);
+    try {
+      await api.put("/preferences", { auto_charge: next });
+    } catch {
+      setAutoCharge(autoCharge); // revert on failure
     }
   }
 
@@ -132,6 +149,67 @@ export default function PaymentsSettings() {
             "Suivi manuel des paiements dans chaque réservation.",
           ]}
         />
+
+        <Text style={styles.group}>Encaissement automatique Booking.com</Text>
+        <View style={styles.card} testID="auto-charge-card">
+          <View style={styles.cardHead}>
+            <View style={[styles.brandIcon, { backgroundColor: "#003580" }]}>
+              <Ionicons name="card" size={20} color="#fff" />
+            </View>
+            <Text style={styles.cardTitle}>Encaissement auto</Text>
+            <View style={[styles.statusBadge, autoCharge.enabled ? styles.statusOn : styles.statusOff]}>
+              <Text style={[styles.statusText, autoCharge.enabled ? styles.statusTextOn : styles.statusTextOff]}>
+                {autoCharge.enabled ? "Activé" : "Désactivé"}
+              </Text>
+            </View>
+            <Switch
+              testID="auto-charge-switch"
+              value={autoCharge.enabled}
+              onValueChange={(v) => saveAutoCharge({ ...autoCharge, enabled: v })}
+              trackColor={{ false: colors.border, true: colors.brandPrimary }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Text style={styles.reminderInfo}>
+            Encaisse automatiquement par Stripe la carte bancaire des réservations Booking.com
+            reçues via Channex, {autoCharge.days_before} jours avant l'arrivée du voyageur.
+          </Text>
+          {autoCharge.enabled && (
+            <>
+              <Text style={styles.subLabel}>Délai d'encaissement (jours avant l'arrivée)</Text>
+              <View style={styles.chipRow}>
+                {DELAY_PRESETS.map((d) => (
+                  <ModeChip
+                    key={d}
+                    testID={`auto-charge-days-${d}`}
+                    label={`J-${d}`}
+                    active={autoCharge.days_before === d}
+                    onPress={() => { setCustomDays(""); saveAutoCharge({ ...autoCharge, days_before: d }); }}
+                  />
+                ))}
+                <TextInput
+                  testID="auto-charge-days-custom"
+                  value={customDays}
+                  onChangeText={setCustomDays}
+                  onEndEditing={() => {
+                    const v = parseInt(customDays, 10);
+                    if (v >= 1 && v <= 365) saveAutoCharge({ ...autoCharge, days_before: v });
+                    else setCustomDays(DELAY_PRESETS.includes(autoCharge.days_before) ? "" : String(autoCharge.days_before));
+                  }}
+                  placeholder="Autre…"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  keyboardType="number-pad"
+                  style={[styles.daysInput, !!customDays && !DELAY_PRESETS.includes(autoCharge.days_before) && styles.daysInputActive]}
+                />
+              </View>
+              <Text style={styles.reminderHint}>
+                Les réservations dont l'arrivée est déjà à moins de {autoCharge.days_before} jours sont encaissées
+                au prochain passage (toutes les 6 h). En cas d'échec (carte refusée), 3 tentatives puis traitement manuel
+                depuis la fiche réservation. Nécessite l'app « Stripe Tokenization » activée sur Channex (accès production).
+              </Text>
+            </>
+          )}
+        </View>
 
         <Text style={styles.group}>Relances de paiement automatiques</Text>
         <View style={styles.card} testID="payment-reminders-card">
@@ -294,4 +372,6 @@ const styles = StyleSheet.create({
   modeChipActive: { borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary + "12" },
   modeChipText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
   modeChipTextActive: { color: colors.brandPrimary },
+  daysInput: { width: 84, paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface, fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurface },
+  daysInputActive: { borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary + "12" },
 });

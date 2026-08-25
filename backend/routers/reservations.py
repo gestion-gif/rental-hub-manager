@@ -154,6 +154,21 @@ async def set_reservation_paid(reservation_id: str, body: dict, user=Depends(get
     return item
 
 
+@api_router.post("/reservations/{reservation_id}/auto-charge")
+async def manual_auto_charge(reservation_id: str, user=Depends(get_current_user)):
+    """Encaisse maintenant la carte OTA (Booking.com via Channex) pour cette réservation."""
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    result = await auto_charge_reservation(uid, r)
+    if not result.get("ok"):
+        raise HTTPException(status_code=402, detail=result.get("error", "Encaissement impossible"))
+    item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    compute_display(item, await status_color_map(uid))
+    return {**result, "reservation": item}
+
+
 @api_router.post("/reservations/{reservation_id}/payments")
 async def add_payment(reservation_id: str, body: dict, user=Depends(get_current_user)):
     uid = user["user_id"]
