@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput, Alert, ScrollView } from "react-native";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput, Alert, Platform, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -8,6 +8,23 @@ import dayjs from "dayjs";
 
 import { api } from "@/src/api";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
+
+// Alert.alert n'est pas supporté sur web (react-native-web) → fallback navigateur
+function notify(title: string, message?: string) {
+  if (Platform.OS === "web") (globalThis as any).alert(message ? `${title}\n\n${message}` : title);
+  else Alert.alert(title, message);
+}
+
+function confirmDialog(title: string, message: string, confirmText: string, onConfirm: () => void, destructive = false) {
+  if (Platform.OS === "web") {
+    if ((globalThis as any).confirm(`${title}\n\n${message}`)) onConfirm();
+  } else {
+    Alert.alert(title, message, [
+      { text: "Annuler", style: "cancel" },
+      { text: confirmText, style: destructive ? "destructive" : "default", onPress: onConfirm },
+    ]);
+  }
+}
 
 export default function ChannexSettings() {
   const insets = useSafeAreaInsets();
@@ -40,16 +57,16 @@ export default function ChannexSettings() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   async function connect() {
-    if (!apiKey.trim()) { Alert.alert("Clé requise", "Saisissez votre clé API Channex."); return; }
+    if (!apiKey.trim()) { notify("Clé requise", "Saisissez votre clé API Channex."); return; }
     setConnecting(true);
     try {
       const r = await api.post("/channex/connect", { api_key: apiKey.trim(), environment: env });
       setApiKey("");
-      Alert.alert("Connecté", `Channex connecté (${r.environment}). ${r.properties_count} logement(s) détecté(s).`);
+      notify("Connecté", `Channex connecté (${r.environment}). ${r.properties_count} logement(s) détecté(s).`);
       setReconfig(false);
       await load();
     } catch (e: any) {
-      Alert.alert("Échec de connexion", e?.message || "Clé ou environnement invalide.");
+      notify("Échec de connexion", e?.message || "Clé ou environnement invalide.");
     }
     setConnecting(false);
   }
@@ -59,10 +76,10 @@ export default function ChannexSettings() {
     setImporting(true);
     try {
       const r = await api.post("/channex/import", {});
-      Alert.alert("Import terminé", `${r.imported_properties} logement(s), ${r.imported_rooms} chambre(s), ${r.imported_rate_plans} tarif(s) importés dans Casanéo.`);
+      notify("Import terminé", `${r.imported_properties} logement(s), ${r.imported_rooms} chambre(s), ${r.imported_rate_plans} tarif(s) importés dans Casanéo.`);
       await load();
     } catch (e: any) {
-      Alert.alert("Erreur", e?.message || "Import impossible.");
+      notify("Erreur", e?.message || "Import impossible.");
     }
     setImporting(false);
   }
@@ -73,10 +90,10 @@ export default function ChannexSettings() {
     try {
       const callback = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/channex/webhook`;
       await api.post("/channex/webhook/register", { callback_url: callback });
-      Alert.alert("Réception activée", "Casanéo recevra désormais automatiquement les réservations Airbnb/Booking depuis Channex.");
+      notify("Réception activée", "Casanéo recevra désormais automatiquement les réservations Airbnb/Booking depuis Channex.");
       await load();
     } catch (e: any) {
-      Alert.alert("Erreur", e?.message || "Activation impossible.");
+      notify("Erreur", e?.message || "Activation impossible.");
     }
     setWebhookBusy(false);
   }
@@ -86,36 +103,32 @@ export default function ChannexSettings() {
     setBookingBusy(true);
     try {
       const r = await api.post("/channex/bookings/sync", {});
-      Alert.alert("Réservations récupérées", `${r.processed} réservation(s) traitée(s) depuis Channex.`);
+      notify("Réservations récupérées", `${r.processed} réservation(s) traitée(s) depuis Channex.`);
       await load();
     } catch (e: any) {
-      Alert.alert("Erreur", e?.message || "Récupération impossible.");
+      notify("Erreur", e?.message || "Récupération impossible.");
     }
     setBookingBusy(false);
   }
 
   async function fullSync() {
     if (syncing) return;
-    Alert.alert(
+    confirmDialog(
       "Synchronisation complète",
       "Envoyer vers Channex 500 jours de disponibilités et de tarifs pour tous vos logements liés ? (recommandé lors de la mise en ligne)",
-      [
-        { text: "Annuler", style: "cancel" },
-        {
-          text: "Envoyer", onPress: async () => {
-            setSyncing(true);
-            try {
-              const r = await api.post("/channex/full-sync", { days: 500 });
-              const tasks = (r.results || []).reduce((n: number, x: any) => n + (x.task_ids?.length || 0), 0);
-              Alert.alert("Synchronisation envoyée", `${r.properties} logement(s) synchronisé(s) sur ${r.days} jours. ${tasks} tâche(s) Channex générée(s).`);
-              await load();
-            } catch (e: any) {
-              Alert.alert("Erreur", e?.message || "Synchronisation impossible.");
-            }
-            setSyncing(false);
-          },
-        },
-      ]
+      "Envoyer",
+      async () => {
+        setSyncing(true);
+        try {
+          const r = await api.post("/channex/full-sync", { days: 500 });
+          const tasks = (r.results || []).reduce((n: number, x: any) => n + (x.task_ids?.length || 0), 0);
+          notify("Synchronisation envoyée", `${r.properties} logement(s) synchronisé(s) sur ${r.days} jours. ${tasks} tâche(s) Channex générée(s).`);
+          await load();
+        } catch (e: any) {
+          notify("Erreur", e?.message || "Synchronisation impossible.");
+        }
+        setSyncing(false);
+      },
     );
   }
 
@@ -126,21 +139,16 @@ export default function ChannexSettings() {
       setProps(r.properties || []);
       setStatus((s: any) => ({ ...s, properties_count: r.count }));
     } catch (e: any) {
-      Alert.alert("Erreur", e?.message || "Lecture impossible.");
+      notify("Erreur", e?.message || "Lecture impossible.");
     }
     setLoadingProps(false);
   }
 
   function disconnect() {
-    Alert.alert("Déconnecter Channex", "La clé API sera supprimée. Lodgify n'est pas affecté.", [
-      { text: "Annuler", style: "cancel" },
-      {
-        text: "Déconnecter", style: "destructive", onPress: async () => {
-          try { await api.post("/channex/disconnect", {}); } catch {}
-          setProps([]); setStatus({ connected: false }); load();
-        },
-      },
-    ]);
+    confirmDialog("Déconnecter Channex", "La clé API sera supprimée. Lodgify n'est pas affecté.", "Déconnecter", async () => {
+      try { await api.post("/channex/disconnect", {}); } catch {}
+      setProps([]); setStatus({ connected: false }); load();
+    }, true);
   }
 
   return (

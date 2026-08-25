@@ -573,3 +573,9 @@
 - Fix (routers/reservations.py update_reservation): capture old {check_in, check_out, property_id} avant update; si dates/logement changés → _set_property_rooms_availability(old, closed=False), re-fermeture des dates couvertes par d'autres résas actives, puis enqueue_channex_ari(old range).
 - Réparation données: fermeture périmée du 2026-09-02 rouverte + re-push.
 - Vérifié E2E via API (PUT réservation): 26/08→09/09 puis retour → Channex confirme à chaque fois ancienne date=1, nouvelle=0. État final: 26/08 = 0 (résa test utilisateur), tout le reste = 1.
+
+## Fix bouton Full Sync inerte sur web (2026-08 fork #2)
+- Cause: Alert.alert avec boutons = no-op sur react-native-web → la confirmation ne s'affichait jamais sur PC, le clic semblait mort.
+- Fix (settings/channex.tsx): helpers notify() (window.alert sur web / Alert.alert natif) + confirmDialog() (window.confirm sur web / Alert 2 boutons natif). Tous les Alert.alert de l'écran remplacés.
+- Vérifié: clic Full Sync sur web → confirm navigateur → "2 logement(s) synchronisé(s) sur 500 jours, 4 tâches", journal maj, nuit réservée 26/08 toujours à 0 après full sync.
+- NOTE: d'autres écrans utilisent encore Alert.alert avec boutons (non bloquant mobile, mais silencieux sur web) — à généraliser si l'utilisateur travaille surtout sur PC.
