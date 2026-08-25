@@ -988,7 +988,9 @@ function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayme
   // Airbnb encaisse le voyageur et reverse à l'hôte le net, hors commission ET hors taxe de séjour
   const isAirbnb = String(detail.platform || "").toLowerCase().includes("airbnb");
   const net = Math.max(0, (f.total || detail.total_price || 0) - commission - (isAirbnb ? (f.taxes || 0) : 0));
-  const dueToValidate = isAirbnb ? net : (f.due || 0);
+  // Airbnb : le "Dû" = net à recevoir d'Airbnb ; une fois l'encaissement validé → Dû 0, Payé = net
+  const paidShown = isAirbnb ? (isPaid ? net : 0) : (f.paid || 0);
+  const dueShown = isAirbnb ? (isPaid ? 0 : net) : (f.due || 0);
   const [comm, setComm] = useState(hasCommission ? String(f.commission) : (estimated ? String(estimated) : ""));
 
   const Line = ({ label, value, bold }: any) => (
@@ -1001,8 +1003,8 @@ function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayme
     <View style={styles.finWrap}>
       {/* Payé / Dû / Total */}
       <View style={styles.payRow}>
-        <View style={styles.payCell}><Text style={styles.payLabel}>Payé</Text><Text style={styles.payVal}>{money(isAirbnb ? dueToValidate : f.paid)}</Text></View>
-        <View style={styles.payCell}><Text style={styles.payLabel}>Dû</Text><Text style={styles.payVal}>{money(dueToValidate)}</Text></View>
+        <View style={styles.payCell}><Text style={styles.payLabel}>Payé</Text><Text style={styles.payVal}>{money(paidShown)}</Text></View>
+        <View style={styles.payCell}><Text style={styles.payLabel}>Dû</Text><Text style={styles.payVal}>{money(dueShown)}</Text></View>
         <View style={styles.payCell}><Text style={styles.payLabel}>Total</Text><Text style={[styles.payVal, styles.qBold]}>{money(f.total)}</Text></View>
       </View>
 

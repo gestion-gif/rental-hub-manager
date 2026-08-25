@@ -579,3 +579,9 @@
 - Fix (settings/channex.tsx): helpers notify() (window.alert sur web / Alert.alert natif) + confirmDialog() (window.confirm sur web / Alert 2 boutons natif). Tous les Alert.alert de l'écran remplacés.
 - Vérifié: clic Full Sync sur web → confirm navigateur → "2 logement(s) synchronisé(s) sur 500 jours, 4 tâches", journal maj, nuit réservée 26/08 toujours à 0 après full sync.
 - NOTE: d'autres écrans utilisent encore Alert.alert avec boutons (non bloquant mobile, mais silencieux sur web) — à généraliser si l'utilisateur travaille surtout sur PC.
+
+## Fix affichage Payé/Dû résas Airbnb (2026-08 fork #2)
+- Demande: pour Airbnb, le Dû (= net à recevoir d'Airbnb, hors commission et taxe de séjour) doit passer à 0 une fois l'encaissement validé.
+- Avant: FinanceCard (reservation-form.tsx) affichait Payé=net ET Dû=net en permanence pour Airbnb, même après "Marquer l'encaissement comme reçu".
+- Fix: paidShown = isPaid ? net : 0 ; dueShown = isPaid ? 0 : net (Airbnb). Non-Airbnb inchangé (f.paid / f.due).
+- Vérifié E2E (résa "Voyageur Airbnb" 355.55 €, commission 16%, taxe 15.55): avant → Payé 0 / Dû 284.89 ; après toggle → Payé 284.89 / Dû 0.00. État remis à non payé après test.
