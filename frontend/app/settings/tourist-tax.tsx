@@ -12,7 +12,7 @@ export default function TouristTaxSettings() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [properties, setProperties] = useState<any[]>([]);
-  const [edits, setEdits] = useState<Record<string, { tourist: string; regional: string }>>({});
+  const [edits, setEdits] = useState<Record<string, any>>({});
   const [savingId, setSavingId] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
@@ -20,11 +20,14 @@ export default function TouristTaxSettings() {
     try {
       const props = await api.get("/properties");
       setProperties(props);
-      const e: Record<string, { tourist: string; regional: string }> = {};
+      const e: Record<string, any> = {};
       props.forEach((p: any) => {
         e[p.id] = {
+          mode: p.tax_mode === "real" ? "real" : "percent",
           tourist: p.tourist_tax_pct ? String(p.tourist_tax_pct) : "",
           regional: p.regional_tax_pct ? String(p.regional_tax_pct) : "",
+          cap: p.tax_cap ? String(p.tax_cap) : "",
+          dept: p.tax_dept_pct ? String(p.tax_dept_pct) : "",
         };
       });
       setEdits(e);
@@ -33,18 +36,22 @@ export default function TouristTaxSettings() {
   }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  function setField(id: string, k: "tourist" | "regional", v: string) {
+  function setField(id: string, k: string, v: string) {
     setEdits((e) => ({ ...e, [id]: { ...e[id], [k]: v } }));
   }
 
   async function save(prop: any) {
     if (savingId) return;
     setSavingId(prop.id);
-    const ed = edits[prop.id] || { tourist: "", regional: "" };
+    const ed = edits[prop.id] || {};
+    const num = (s: string) => parseFloat((s || "0").replace(",", ".")) || 0;
     const body = {
       ...prop,
-      tourist_tax_pct: parseFloat((ed.tourist || "0").replace(",", ".")) || 0,
-      regional_tax_pct: parseFloat((ed.regional || "0").replace(",", ".")) || 0,
+      tax_mode: ed.mode === "real" ? "real" : "percent",
+      tourist_tax_pct: num(ed.tourist),
+      regional_tax_pct: num(ed.regional),
+      tax_cap: num(ed.cap),
+      tax_dept_pct: num(ed.dept),
     };
     try {
       const updated = await api.put(`/properties/${prop.id}`, body);
@@ -84,13 +91,28 @@ export default function TouristTaxSettings() {
             <Text style={styles.empty}>Aucun logement.</Text>
           ) : (
             properties.map((p) => {
-              const ed = edits[p.id] || { tourist: "", regional: "" };
+              const ed = edits[p.id] || { mode: "percent", tourist: "", regional: "", cap: "", dept: "" };
+              const isReal = ed.mode === "real";
               return (
                 <View key={p.id} style={styles.card} testID={`tax-card-${p.id}`}>
                   <Text style={styles.propName}>{p.name}</Text>
+                  <View style={styles.modeRow}>
+                    <Pressable testID={`tax-mode-percent-${p.id}`} onPress={() => setField(p.id, "mode", "percent")} style={[styles.modeChip, !isReal && styles.modeChipOn]}>
+                      <Text style={[styles.modeText, !isReal && styles.modeTextOn]}>% des nuitées</Text>
+                    </Pressable>
+                    <Pressable testID={`tax-mode-real-${p.id}`} onPress={() => setField(p.id, "mode", "real")} style={[styles.modeChip, isReal && styles.modeChipOn]}>
+                      <Text style={[styles.modeText, isReal && styles.modeTextOn]}>Barème réel (par pers.)</Text>
+                    </Pressable>
+                  </View>
+                  {isReal && (
+                    <Text style={styles.modeHint}>
+                      Taxe = taux % × (prix de la nuit ÷ occupants), plafonnée par pers./nuit, + taxes
+                      additionnelles (% de la taxe), × nuits × personnes assujetties.
+                    </Text>
+                  )}
                   <View style={styles.row}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.fieldLabel}>Taxe de séjour (%)</Text>
+                      <Text style={styles.fieldLabel}>{isReal ? "Taux (%)" : "Taxe de séjour (%)"}</Text>
                       <TextInput
                         testID={`tax-tourist-${p.id}`}
                         value={ed.tourist}
@@ -102,18 +124,46 @@ export default function TouristTaxSettings() {
                       />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.fieldLabel}>Taxe add. régionale (%)</Text>
+                      <Text style={styles.fieldLabel}>{isReal ? "Taxe régionale (% de la taxe)" : "Taxe add. régionale (%)"}</Text>
                       <TextInput
                         testID={`tax-regional-${p.id}`}
                         value={ed.regional}
                         onChangeText={(v) => setField(p.id, "regional", v)}
                         keyboardType="decimal-pad"
-                        placeholder="10"
+                        placeholder={isReal ? "34" : "10"}
                         placeholderTextColor={colors.onSurfaceTertiary}
                         style={styles.input}
                       />
                     </View>
                   </View>
+                  {isReal && (
+                    <View style={[styles.row, { marginTop: spacing.md }]}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.fieldLabel}>Plafond (€ / pers / nuit)</Text>
+                        <TextInput
+                          testID={`tax-cap-${p.id}`}
+                          value={ed.cap}
+                          onChangeText={(v) => setField(p.id, "cap", v)}
+                          keyboardType="decimal-pad"
+                          placeholder="4.00"
+                          placeholderTextColor={colors.onSurfaceTertiary}
+                          style={styles.input}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.fieldLabel}>Taxe départementale (% de la taxe)</Text>
+                        <TextInput
+                          testID={`tax-dept-${p.id}`}
+                          value={ed.dept}
+                          onChangeText={(v) => setField(p.id, "dept", v)}
+                          keyboardType="decimal-pad"
+                          placeholder="10"
+                          placeholderTextColor={colors.onSurfaceTertiary}
+                          style={styles.input}
+                        />
+                      </View>
+                    </View>
+                  )}
                   <Pressable
                     testID={`tax-save-${p.id}`}
                     onPress={() => save(p)}
@@ -143,6 +193,12 @@ const styles = StyleSheet.create({
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md },
   propName: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.md },
   row: { flexDirection: "row", gap: spacing.md },
+  modeRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.md },
+  modeChip: { flex: 1, alignItems: "center", paddingVertical: 9, borderRadius: 18, borderWidth: 1.5, borderColor: colors.border },
+  modeChipOn: { borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary + "12" },
+  modeText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  modeTextOn: { color: colors.brandPrimary },
+  modeHint: { fontFamily: font.regular, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, lineHeight: 16, marginBottom: spacing.md },
   fieldLabel: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary, marginBottom: 6 },
   input: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: 12, fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurface },
   saveBtn: { marginTop: spacing.md, backgroundColor: colors.brandPrimary, borderRadius: radius.md, paddingVertical: 12, alignItems: "center" },

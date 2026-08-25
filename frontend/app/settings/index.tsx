@@ -18,6 +18,7 @@ const SECTIONS = [
     { path: "/settings/booking-policies", icon: "document-lock-outline", title: "Politique de réservation", sub: "Paiement, annulation, caution, devis" },
     { path: "/settings/online-checkin", icon: "clipboard-outline", title: "Enregistrement en ligne", sub: "Formulaire d'arrivée & rappels automatiques" },
     { path: "/settings/promotions", icon: "pricetags-outline", title: "Promotions", sub: "Codes promo & réductions par hébergement" },
+    { path: "/settings/supplements", icon: "pricetag-outline", title: "Suppléments", sub: "Extras : photo, calcul, TVA & hébergements" },
     { path: "/settings/commissions", icon: "cash-outline", title: "Commissions plateformes", sub: "Taux par plateforme & revenu net" },
     { path: "/settings/tourist-tax", icon: "receipt-outline", title: "Taxe de séjour", sub: "Taux taxe de séjour & additionnelle par logement" },
     { path: "/settings/payments", icon: "card-outline", title: "Paiement", sub: "Passerelles & méthodes de paiement" },

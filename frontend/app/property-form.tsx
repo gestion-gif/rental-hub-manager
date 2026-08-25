@@ -42,6 +42,7 @@ export default function PropertyForm() {
     description: "",
     welcome_book_url: "",
     deposit_link: "",
+    getyourguide_url: "",
     management_fee_pct: "",
     default_cleaning_fee: "",
     tourist_tax_pct: "",
@@ -84,6 +85,7 @@ export default function PropertyForm() {
           description: p.description || "",
           welcome_book_url: p.welcome_book_url || "",
           deposit_link: p.deposit_link || "",
+          getyourguide_url: p.getyourguide_url || "",
           management_fee_pct: p.management_fee_pct ? String(p.management_fee_pct) : "",
           default_cleaning_fee: p.default_cleaning_fee ? String(p.default_cleaning_fee) : "",
           tourist_tax_pct: p.tourist_tax_pct ? String(p.tourist_tax_pct) : "",
@@ -170,6 +172,7 @@ export default function PropertyForm() {
       description: form.description.trim(),
       welcome_book_url: form.welcome_book_url.trim(),
       deposit_link: form.deposit_link.trim(),
+      getyourguide_url: form.getyourguide_url.trim(),
       management_fee_pct: parseFloat(form.management_fee_pct) || 0,
       default_cleaning_fee: parseFloat(form.default_cleaning_fee) || 0,
       tourist_tax_pct: parseFloat(form.tourist_tax_pct) || 0,
@@ -331,6 +334,17 @@ export default function PropertyForm() {
           value={form.welcome_book_url}
           onChangeText={(v) => set("welcome_book_url", v)}
           placeholder="https://..."
+          autoCapitalize="none"
+          keyboardType="url"
+        />
+
+        <SectionLabel text="Activités (GetYourGuide)" />
+        <Field
+          label="Lien GetYourGuide propre à ce logement — remplace le lien global ({activites})"
+          testID="prop-gyg"
+          value={form.getyourguide_url}
+          onChangeText={(v) => set("getyourguide_url", v)}
+          placeholder="https://www.getyourguide.com/..."
           autoCapitalize="none"
           keyboardType="url"
         />

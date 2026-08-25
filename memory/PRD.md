@@ -516,3 +516,40 @@
   - `POST /api/reservations/{id}/invoice/email` → génère + envoie le PDF au guest_email. Numérotation séquentielle annuelle atomique (`invoice_counters` {user_id, year, seq} → n° "2026-0001") ; le numéro est réutilisé en cas de renvoi. Collections : `invoices`, `invoice_counters`.
 - Frontend (`app/reservation-form.tsx`) : bouton "Envoyer la facture au voyageur" (testID send-invoice-btn, visible en édition si rôle voit les prix), statut inline "Facture N envoyée le … à …".
 - Tests : E2E curl (envoi réel à delivered@resend.dev, numéro 2026-0001, renvoi = même numéro, toggle TVA persisté, summary expose vat_subjected) + rendu PDF vérifié (2 modes TVA) + screenshots UI. Données de test nettoyées (compteur remis à zéro).
+
+## Session (2026-08 fork) — Historique messages + Export comptable + Relances paiement + GYG par logement + fix taxe de séjour
+### 1. Historique des messages (fiche réservation)
+- `core.log_guest_message(uid, reservation_id, channel, kind, body, to, subject)` → collection `message_logs`. Canaux: email|whatsapp|platform. Kinds: manuel|auto|cles|caution|facture|relance|confirmation|avis.
+- Points de log: messaging/send (email+platform), inbox reply, send-deposit-link, facture client, envoi clés (_send_key_instructions), automations Lodgify (modèles, clés auto, rappel caution, demande d'avis), confirmations publiques (_send_booking_confirmation, _send_request_ack), relances paiement, WhatsApp (POST /api/messaging/log-whatsapp appelé par ContactGuestModal après ouverture).
+- `GET /api/reservations/{id}/messages` → historique. UI: section repliable "Historique des messages (N)" (testID msg-history-toggle) dans reservation-form.tsx, rafraîchie à la fermeture du modal Contact et après envoi de facture.
+### 2. Export comptable (app/accounting.tsx, onglet Aperçu)
+- Boutons "Exporter PDF" (expo-print: printToFileAsync+Sharing sur natif, printAsync sur web) et "Exporter CSV" (expo-file-system/legacy + Sharing sur natif, blob download sur web). CSV: séparateur ';', décimales à virgule, BOM UTF-8. PDF: compte de résultat + TVA (si assujetti) + dépenses par catégorie + journal. expo-file-system ajouté au package.json.
+### 3. Relances de paiement automatiques
+- `preferences.payment_reminders`: {enabled, mode: all|direct, excluded_platforms: [], days: [7,3]}. Builder `_build_payment_reminders` (core).
+- `core.run_payment_reminders_for_user(uid)`: à J-7 et J-3 avant check_in, si solde dû (recompute_payment) > 0, email au voyageur (bouton "Régler mon solde" si site public actif → /book/{slug}/pay/{rid}). Dédup via collection `payment_reminders_sent` {reservation_id, days_before}. Boucle `_payment_reminder_loop` (server.py, toutes les 4h).
+- UI: Paramètres > Paiement, carte "Rappels de solde" (switch + chips mode + plateformes exclues). Config utilisateur EN PLACE: enabled, mode all, Airbnb exclu.
+### 4. GetYourGuide par logement
+- `PropertyIn.getyourguide_url` (fallback sur le lien global des préférences). Utilisé dans {activites} (_render_message_vars + automations Lodgify). UI: champ "Activités (GetYourGuide)" (testID prop-gyg) dans property-form.tsx.
+### 5. Fix taxe de séjour (demande utilisateur)
+- reservation-form.tsx: `setNightsTotal` recalcule la taxe de séjour automatiquement à la saisie manuelle du prix des nuitées (tourist_tax_pct + regional_tax_pct du logement). Vérifié: 100 € à 6.1% → 6.1 €.
+### Tests
+- Backend: curl/python E2E (relance réelle envoyée par la boucle, dédup, exclusion Airbnb, historique, log WhatsApp, GYG). Frontend: testing agent 6/6 PASS (/app/test_reports/iteration_28.json). Données de test nettoyées.
+
+## Session (2026-08 fork, suite) — Suppléments + Barème réel taxe de séjour + Sidebar repliable
+### Suppléments (extras) — testé 7/7 PASS (iteration_29.json)
+- Backend: `SupplementIn` (core), collection `supplements`, CRUD /api/supplements (routers/supplements.py). Champs: name, description, photo_path, calc_model fixed|percent, amount, percent_base nights|total, charge_basis unique|per_quantity|per_guest|per_room, period per_stay|per_night, vat_rate, price_includes_vat, property_ids ([]=tous), active.
+- `compute_supplement_amount` + `compute_supplement_lines` (core). Réservation: POST/DELETE /api/reservations/{id}/supplements/{item} → maj total_price + finance + recompute_payment. Facture: lignes suppléments avec leur taux TVA (si société assujettie).
+- Site public: GET /public/site/{slug}/supplements, /public/sup-photo/{path} (photo publique), PublicQuoteIn/BookingIn.supplements [{id,quantity}] → _public_quote calcule sup_lines/sup_total, réservation publique stocke supplements.
+- Frontend: /settings/supplements (liste + FAB, entrée Paramètres > Réservations & tarifs), /supplement-form (photo, chips modèle/facturation/fréquence/TVA incl-excl, modal hébergements à cocher, actif, suppression), reservation-form (bouton add-supplement-btn + picker modal + 'Total avec suppléments'), book/[slug]/[id].tsx (cartes suppléments avec toggle + stepper quantité, lignes dans le devis).
+### Barème réel taxe de séjour (demande utilisateur, validé sur l'exemple légal 5,76 €)
+- PropertyIn: tax_mode percent|real, tax_cap (€ plafond/pers/nuit), tax_dept_pct (% de la taxe). tourist_tax_pct = taux, regional_tax_pct = taxe régionale (% de la taxe en mode réel).
+- `real_tourist_tax(prop, night_prices, occupants, taxable)` (core): min(taux%×(prix nuit/occupants), plafond)×(1+dept%+rég%)×assujettis, sommé par nuit. Utilisé dans _public_quote (mode real).
+- ReservationIn.taxable_guests (0 = tous). Frontend: /settings/tourist-tax (chips '% des nuitées'/'Barème réel' + plafond + taxe départementale par logement), reservation-form: computeTouristTax(mode réel), champ 'Personnes assujetties' (testID taxable-guests) visible si logement en mode réel, recalcul auto sur prix/voyageurs/assujettis/dates.
+### Sidebar
+- Sections 'Revenus' et 'Outils' repliables (repliées par défaut), testID drawer-section-Revenus / drawer-section-Outils. Vérifié par screenshot.
+### Channex
+- CERTIFICATION RÉUSSIE (tous les tests passés, email Channex reçu). Prochaine étape: vidéo de test live (créer résa 1 nuit → dispo dates concernées; déplacer d'une semaine → maj anciennes+nouvelles dates; full sync = 2 appels API) à envoyer à evan@channex.io avec l'ID de propriété staging. Ensuite: clé production, bascule frontend en 'production', import des vrais logements.
+
+## Session (2026-08 fork #2) — Vérification export comptable
+- Vérifié après fork: boutons "Exporter PDF" / "Exporter CSV" (onglet Aperçu de /accounting) fonctionnels — CSV téléchargé avec succès (journal-2026-08.csv), backend /accounting/summary + /transactions OK avec le compte QA.
+- En attente utilisateur: envoi de la vidéo de démo à evan@channex.io pour débloquer la clé Production Channex (bloque: passage prod, encaissement Stripe auto OTA, migration Lodgify).

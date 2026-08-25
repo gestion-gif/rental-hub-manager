@@ -8,10 +8,14 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import * as FileSystem from "expo-file-system/legacy";
 import dayjs from "dayjs";
 import "dayjs/locale/fr";
 dayjs.locale("fr");
@@ -37,6 +41,7 @@ export default function Accounting() {
   const [typeFilter, setTypeFilter] = useState<"all" | "recette" | "depense">("all");
   const [propFilter, setPropFilter] = useState("all");
   const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -75,6 +80,103 @@ export default function Accounting() {
       Alert.alert("Erreur", "Import impossible.");
     }
     setImporting(false);
+  }
+
+  function exportHtml() {
+    const s = summary;
+    const esc = (v: any) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const eur = (v: any) => `${(Number(v) || 0).toFixed(2)} €`;
+    const label = dayjs(month + "-01").format("MMMM YYYY");
+    const depCats = Object.entries(s?.by_category?.depense || {}).sort((a: any, b: any) => b[1] - a[1]);
+    const catRows = depCats.map(([c, v]: any) =>
+      `<tr><td>${esc(c)}</td><td style="text-align:right">${eur(v)}</td></tr>`).join("");
+    const txRows = txs.map((t: any) =>
+      `<tr><td>${esc(dayjs(t.date).format("DD/MM/YYYY"))}</td><td>${t.type === "recette" ? "Recette" : "Dépense"}</td>` +
+      `<td>${esc(t.category || "")}</td><td>${esc(t.supplier || t.description || "")}</td>` +
+      `<td>${esc(t.property_name || "")}</td><td style="text-align:right">${eur(t.amount_ttc)}</td></tr>`).join("");
+    const tvaBlock = s?.vat_subjected !== false ? `
+      <h3>TVA</h3>
+      <table><tr><td>Collectée (sur recettes)</td><td style="text-align:right">${eur(s?.tva?.collectee)}</td></tr>
+      <tr><td>Déductible (sur dépenses)</td><td style="text-align:right">${eur(s?.tva?.deductible)}</td></tr>
+      <tr><td><b>TVA nette ${(s?.tva?.nette ?? 0) >= 0 ? "à reverser" : "(crédit)"}</b></td>
+      <td style="text-align:right"><b>${eur(Math.abs(s?.tva?.nette ?? 0))}</b></td></tr></table>` : "";
+    return `<html><head><meta charset="utf-8"><style>
+      body{font-family:Arial,sans-serif;color:#111;padding:24px;font-size:13px}
+      h1{font-size:20px;margin:0 0 2px} h3{font-size:14px;margin:20px 0 6px}
+      .sub{color:#888;margin:0 0 16px}
+      table{width:100%;border-collapse:collapse;font-size:12px}
+      td,th{padding:6px 8px;border-bottom:1px solid #eee;text-align:left}
+      th{background:#f4f4f6;color:#666;font-size:11px;text-transform:uppercase}
+    </style></head><body>
+      <h1>Compte de résultat — ${esc(label)}</h1>
+      <p class="sub">Export comptable généré via Casanéo</p>
+      <table>
+        <tr><td>Recettes (TTC)</td><td style="text-align:right">${eur(s?.recettes?.ttc)}</td></tr>
+        <tr><td>Dépenses (TTC)</td><td style="text-align:right">${eur(s?.depenses?.ttc)}</td></tr>
+        <tr><td><b>Résultat (TTC)</b></td><td style="text-align:right"><b>${eur(s?.resultat?.ttc)}</b></td></tr>
+        <tr><td>Résultat (HT)</td><td style="text-align:right">${eur(s?.resultat?.ht)}</td></tr>
+      </table>
+      ${tvaBlock}
+      ${catRows ? `<h3>Dépenses par catégorie</h3><table>${catRows}</table>` : ""}
+      <h3>Journal des écritures (${txs.length})</h3>
+      <table><tr><th>Date</th><th>Type</th><th>Catégorie</th><th>Détail</th><th>Logement</th><th>TTC</th></tr>${txRows}</table>
+    </body></html>`;
+  }
+
+  async function exportPdf() {
+    if (exporting) return;
+    setExporting("pdf");
+    try {
+      const html = exportHtml();
+      if (Platform.OS === "web") {
+        await Print.printAsync({ html });
+      } else {
+        const { uri } = await Print.printToFileAsync({ html });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Export comptable" });
+        }
+      }
+    } catch {
+      Alert.alert("Erreur", "Export PDF impossible.");
+    }
+    setExporting("");
+  }
+
+  async function exportCsv() {
+    if (exporting) return;
+    setExporting("csv");
+    try {
+      const n2 = (v: any) => (Number(v) || 0).toFixed(2).replace(".", ",");
+      const head = "Date;Type;Catégorie;Description;Fournisseur;Logement;Propriétaire;Canal;Montant TTC;Montant HT;Taux TVA %;Montant TVA";
+      const lines = txs.map((t: any) => [
+        t.date, t.type === "recette" ? "Recette" : "Dépense", t.category || "",
+        String(t.description || "").replace(/[;\n\r]/g, " "),
+        String(t.supplier || "").replace(/[;\n\r]/g, " "),
+        t.property_name || "", t.owner_name || "", t.channel || "",
+        n2(t.amount_ttc), n2(t.amount_ht), n2(t.vat_rate), n2(t.vat_amount),
+      ].join(";"));
+      const csv = "\ufeff" + [head, ...lines].join("\n");
+      const filename = `journal-${month}.csv`;
+      if (Platform.OS === "web") {
+        const doc = (globalThis as any).document;
+        const blob = new (globalThis as any).Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url = (globalThis as any).URL.createObjectURL(blob);
+        const a = doc.createElement("a");
+        a.href = url;
+        a.download = filename;
+        a.click();
+        (globalThis as any).URL.revokeObjectURL(url);
+      } else {
+        const uri = FileSystem.cacheDirectory + filename;
+        await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: "text/csv", dialogTitle: "Journal comptable (CSV)" });
+        }
+      }
+    } catch {
+      Alert.alert("Erreur", "Export CSV impossible.");
+    }
+    setExporting("");
   }
 
   const filteredTxs = txs.filter((t) => {
@@ -126,7 +228,8 @@ export default function Accounting() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
         >
           {tab === "apercu" && summary && (
-            <ApercuTab summary={summary} onImport={importRevenues} importing={importing} />
+            <ApercuTab summary={summary} onImport={importRevenues} importing={importing}
+              onExportPdf={exportPdf} onExportCsv={exportCsv} exporting={exporting} />
           )}
 
           {tab === "journal" && (
@@ -209,7 +312,7 @@ export default function Accounting() {
 
 const FREQ_LABEL: Record<string, string> = { monthly: "Mensuel", quarterly: "Trimestriel", yearly: "Annuel" };
 
-function ApercuTab({ summary, onImport, importing }: any) {
+function ApercuTab({ summary, onImport, importing, onExportPdf, onExportCsv, exporting }: any) {
   const s = summary;
   const depCats = Object.entries(s.by_category?.depense || {}).sort((a: any, b: any) => b[1] - a[1]);
   const maxDep = depCats.length ? Math.max(...depCats.map((c: any) => c[1])) : 0;
@@ -219,6 +322,17 @@ function ApercuTab({ summary, onImport, importing }: any) {
         {importing ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : <Ionicons name="download-outline" size={18} color={colors.brandPrimary} />}
         <Text style={styles.importText}>Importer les revenus de la période</Text>
       </Pressable>
+
+      <View style={styles.exportRow}>
+        <Pressable testID="export-pdf" onPress={onExportPdf} disabled={!!exporting} style={[styles.exportBtn, exporting === "pdf" && { opacity: 0.6 }]}>
+          {exporting === "pdf" ? <ActivityIndicator size="small" color={colors.onSurfaceSecondary} /> : <Ionicons name="document-outline" size={16} color={colors.onSurfaceSecondary} />}
+          <Text style={styles.exportText}>Exporter PDF</Text>
+        </Pressable>
+        <Pressable testID="export-csv" onPress={onExportCsv} disabled={!!exporting} style={[styles.exportBtn, exporting === "csv" && { opacity: 0.6 }]}>
+          {exporting === "csv" ? <ActivityIndicator size="small" color={colors.onSurfaceSecondary} /> : <Ionicons name="grid-outline" size={16} color={colors.onSurfaceSecondary} />}
+          <Text style={styles.exportText}>Exporter CSV</Text>
+        </Pressable>
+      </View>
 
       <View style={styles.summaryGrid}>
         <SummaryCard label="Recettes" value={s.recettes.ttc} tint={colors.success} icon="trending-up" />
@@ -335,6 +449,9 @@ const styles = StyleSheet.create({
   tabTextActive: { fontFamily: font.semibold, color: colors.onSurface },
   importBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, backgroundColor: colors.brandPrimary + "12", borderWidth: 1, borderColor: colors.brandPrimary + "40", borderRadius: radius.md, paddingVertical: 12, marginBottom: spacing.lg },
   importText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.brandPrimary },
+  exportRow: { flexDirection: "row", gap: spacing.sm, marginTop: -spacing.sm, marginBottom: spacing.lg },
+  exportBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, paddingVertical: 10 },
+  exportText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
   summaryGrid: { flexDirection: "row", gap: spacing.md },
   summaryCard: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg },
   summaryIcon: { width: 32, height: 32, borderRadius: 9, alignItems: "center", justifyContent: "center", marginBottom: spacing.sm },

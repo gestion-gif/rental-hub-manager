@@ -8,13 +8,17 @@ import { api } from "@/src/api";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 type Methods = { stripe: boolean; paypal: boolean; manual: boolean };
+type Reminders = { enabled: boolean; mode: "all" | "direct"; excluded_platforms: string[]; days: number[] };
 
 const OTHER_GATEWAYS = ["Adyen", "Braintree", "Mollie", "Square", "Authorize.net"];
+const EXCLUDABLE_PLATFORMS = ["Airbnb", "Booking.com", "Vrbo"];
+const DEFAULT_REMINDERS: Reminders = { enabled: false, mode: "all", excluded_platforms: [], days: [7, 3] };
 
 export default function PaymentsSettings() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [methods, setMethods] = useState<Methods>({ stripe: true, paypal: false, manual: true });
+  const [reminders, setReminders] = useState<Reminders>(DEFAULT_REMINDERS);
   const [loading, setLoading] = useState(true);
   const [showOthers, setShowOthers] = useState(false);
 
@@ -22,6 +26,7 @@ export default function PaymentsSettings() {
     try {
       const p = await api.get("/preferences");
       setMethods({ ...{ stripe: true, paypal: false, manual: true }, ...(p.payment_methods || {}) });
+      setReminders({ ...DEFAULT_REMINDERS, ...(p.payment_reminders || {}) });
     } catch {}
     setLoading(false);
   }, []);
@@ -34,6 +39,15 @@ export default function PaymentsSettings() {
       await api.put("/preferences", { payment_methods: next });
     } catch {
       setMethods(methods); // revert on failure
+    }
+  }
+
+  async function saveReminders(next: Reminders) {
+    setReminders(next);
+    try {
+      await api.put("/preferences", { payment_reminders: next });
+    } catch {
+      setReminders(reminders); // revert on failure
     }
   }
 
@@ -118,8 +132,80 @@ export default function PaymentsSettings() {
             "Suivi manuel des paiements dans chaque réservation.",
           ]}
         />
+
+        <Text style={styles.group}>Relances de paiement automatiques</Text>
+        <View style={styles.card} testID="payment-reminders-card">
+          <View style={styles.cardHead}>
+            <View style={[styles.brandIcon, { backgroundColor: "#FF9500" }]}>
+              <Ionicons name="alarm-outline" size={20} color="#fff" />
+            </View>
+            <Text style={styles.cardTitle}>Rappels de solde</Text>
+            <View style={[styles.statusBadge, reminders.enabled ? styles.statusOn : styles.statusOff]}>
+              <Text style={[styles.statusText, reminders.enabled ? styles.statusTextOn : styles.statusTextOff]}>
+                {reminders.enabled ? "Activé" : "Désactivé"}
+              </Text>
+            </View>
+            <Switch
+              testID="reminders-switch"
+              value={reminders.enabled}
+              onValueChange={(v) => saveReminders({ ...reminders, enabled: v })}
+              trackColor={{ false: colors.border, true: colors.brandPrimary }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Text style={styles.reminderInfo}>
+            Email automatique au voyageur à J-7 puis J-3 avant l'arrivée si un solde reste dû.
+          </Text>
+          {reminders.enabled && (
+            <>
+              <Text style={styles.subLabel}>Réservations concernées</Text>
+              <View style={styles.chipRow}>
+                <ModeChip testID="reminders-mode-all" label="Toutes" active={reminders.mode === "all"}
+                  onPress={() => saveReminders({ ...reminders, mode: "all" })} />
+                <ModeChip testID="reminders-mode-direct" label="Directes uniquement" active={reminders.mode === "direct"}
+                  onPress={() => saveReminders({ ...reminders, mode: "direct" })} />
+              </View>
+              {reminders.mode === "all" && (
+                <>
+                  <Text style={styles.subLabel}>Plateformes exclues</Text>
+                  <View style={styles.chipRow}>
+                    {EXCLUDABLE_PLATFORMS.map((p) => {
+                      const on = reminders.excluded_platforms.includes(p);
+                      return (
+                        <ModeChip
+                          key={p}
+                          testID={`reminders-excl-${p}`}
+                          label={p}
+                          active={on}
+                          onPress={() => saveReminders({
+                            ...reminders,
+                            excluded_platforms: on
+                              ? reminders.excluded_platforms.filter((x) => x !== p)
+                              : [...reminders.excluded_platforms, p],
+                          })}
+                        />
+                      );
+                    })}
+                  </View>
+                  <Text style={styles.reminderHint}>
+                    Les voyageurs des plateformes sélectionnées ne recevront pas de relance
+                    (ex. Airbnb encaisse directement le séjour).
+                  </Text>
+                </>
+              )}
+            </>
+          )}
+        </View>
       </ScrollView>
     </View>
+  );
+}
+
+function ModeChip({ testID, label, active, onPress }: any) {
+  return (
+    <Pressable testID={testID} onPress={onPress} style={[styles.modeChip, active && styles.modeChipActive]}>
+      <Text style={[styles.modeChipText, active && styles.modeChipTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -200,4 +286,12 @@ const styles = StyleSheet.create({
   otherName: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface },
   soonBadge: { backgroundColor: colors.surface, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 3 },
   soonText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
+  reminderInfo: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceSecondary, lineHeight: 20, marginTop: spacing.md },
+  reminderHint: { fontFamily: font.regular, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, lineHeight: 16, marginTop: spacing.sm },
+  subLabel: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, textTransform: "uppercase", letterSpacing: 0.4, marginTop: spacing.md, marginBottom: spacing.sm },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  modeChip: { paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface },
+  modeChipActive: { borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary + "12" },
+  modeChipText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  modeChipTextActive: { color: colors.brandPrimary },
 });

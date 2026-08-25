@@ -82,6 +82,7 @@ export function ContactGuestModal({
       const ok = await Linking.canOpenURL(url).catch(() => false);
       if (ok) {
         await Linking.openURL(url);
+        api.post("/messaging/log-whatsapp", { reservation_id: reservationId, body: body.trim() }).catch(() => {});
         onClose();
       } else {
         Alert.alert("WhatsApp indisponible", "Impossible d'ouvrir WhatsApp sur cet appareil.");

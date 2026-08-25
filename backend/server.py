@@ -9,7 +9,7 @@ from routers import (  # noqa: F401
     auth, properties, reservations, public_site, interventions, ical, dashboard,
     analytics, ai, preferences, channex, policies, push, sync, inbox, team, owners,
     statements, reviews, promotions, templates, automations, files, messaging,
-    accounting,
+    accounting, supplements,
 )
 
 # Route handlers referenced by the background loops below
@@ -118,6 +118,27 @@ async def startup():
     asyncio.create_task(_public_site_loop())
     asyncio.create_task(_channex_outbox_loop())
     asyncio.create_task(_channex_bookings_loop())
+    asyncio.create_task(_payment_reminder_loop())
+
+
+async def _payment_reminder_loop():
+    """Toutes les ~4 h : relances de paiement (J-7/J-3) pour les comptes ayant activé l'option."""
+    await asyncio.sleep(90)
+    while True:
+        try:
+            docs = await db.preferences.find(
+                {"payment_reminders.enabled": True}, {"_id": 0, "user_id": 1}).to_list(1000)
+            for doc in docs:
+                uid = doc.get("user_id")
+                if not uid:
+                    continue
+                try:
+                    await run_payment_reminders_for_user(uid)
+                except Exception:
+                    logger.exception("relance paiement error %s", uid)
+        except Exception:
+            logger.exception("payment reminder loop error")
+        await asyncio.sleep(4 * 3600)
 
 
 async def _channex_bookings_loop():

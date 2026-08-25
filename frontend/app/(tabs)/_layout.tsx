@@ -42,6 +42,8 @@ const SECTIONS: { title: string | null; items: NavItem[] }[] = [
   ] },
 ];
 
+const COLLAPSIBLE = ["Revenus", "Outils"];
+
 function CustomDrawer(props: any) {
   const { state, navigation } = props;
   const router = useRouter();
@@ -49,6 +51,7 @@ function CustomDrawer(props: any) {
   const { user, signOut } = useAuth();
   const current = state.routeNames[state.index];
   const [unread, setUnread] = useState(0);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ Revenus: true, Outils: true });
 
   useEffect(() => {
     api.get("/inbox-unread-count").then((r: any) => setUnread(r?.count || 0)).catch(() => {});
@@ -89,11 +92,24 @@ function CustomDrawer(props: any) {
             return true;
           });
           if (!visible.length) return null;
+          const collapsible = !!section.title && COLLAPSIBLE.includes(section.title);
+          const isCollapsed = collapsible && !!collapsed[section.title!];
           return (
             <View key={si}>
               {si > 0 && <View style={styles.sep} />}
-              {section.title && <Text style={styles.sectionTitle}>{section.title}</Text>}
-              {visible.map((it) => {
+              {section.title && (collapsible ? (
+                <Pressable
+                  testID={`drawer-section-${section.title}`}
+                  onPress={() => setCollapsed((c) => ({ ...c, [section.title!]: !c[section.title!] }))}
+                  style={styles.sectionHead}
+                >
+                  <Text style={styles.sectionTitle}>{section.title}</Text>
+                  <Ionicons name={isCollapsed ? "chevron-down" : "chevron-up"} size={14} color={colors.onSurfaceTertiary} />
+                </Pressable>
+              ) : (
+                <Text style={styles.sectionTitle}>{section.title}</Text>
+              ))}
+              {!isCollapsed && visible.map((it) => {
                 const active = it.kind === "tab" && current === it.key;
                 return (
                   <Pressable
@@ -159,6 +175,7 @@ const styles = StyleSheet.create({
   userEmail: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
   sep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginVertical: spacing.md, marginHorizontal: spacing.lg },
   sectionTitle: { fontFamily: font.bold, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, textTransform: "uppercase", letterSpacing: 0.6, marginTop: spacing.sm, marginBottom: 4, paddingHorizontal: spacing.lg },
+  sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingRight: spacing.lg },
   item: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: 13, paddingHorizontal: spacing.lg, borderRadius: radius.md, marginHorizontal: spacing.sm },
   itemActive: { backgroundColor: colors.surfaceSecondary },
   itemText: { fontFamily: font.medium, fontSize: fontSize.lg, color: colors.onSurfaceSecondary },

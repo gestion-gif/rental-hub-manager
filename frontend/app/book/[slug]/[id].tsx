@@ -10,6 +10,15 @@ import dayjs from "dayjs";
 import { api, fileUrl } from "@/src/api";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
+const API_BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
+
+function supPriceLabel(s: any): string {
+  if (s.calc_model === "percent") return `${s.amount}% ${s.percent_base === "total" ? "du séjour" : "des nuitées"}`;
+  const per = s.period === "per_night" ? " / nuit" : " / séjour";
+  const basis = s.charge_basis === "per_guest" ? " par invité" : s.charge_basis === "per_room" ? " par chambre" : s.charge_basis === "per_quantity" ? " par unité" : "";
+  return `${(Number(s.amount) || 0).toFixed(2)}€${basis}${per}`;
+}
+
 export default function PublicPropertyDetail() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -27,9 +36,12 @@ export default function PublicPropertyDetail() {
   const [gName, setGName] = useState("");
   const [gEmail, setGEmail] = useState("");
   const [gPhone, setGPhone] = useState("");
+  const [sups, setSups] = useState<any[]>([]);
+  const [selSups, setSelSups] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     try { setProp(await api.get(`/public/site/${slug}/property/${id}`)); } catch {}
+    try { setSups(await api.get(`/public/site/${slug}/supplements?property_id=${id}`)); } catch {}
     setLoading(false);
   }, [slug, id]);
   useEffect(() => { load(); }, [load]);
@@ -69,19 +81,35 @@ export default function PublicPropertyDetail() {
     } else { setCi(d); setCo(""); }
   }
 
+  const supsPayload = useMemo(
+    () => Object.entries(selSups).map(([sid, q]) => ({ id: sid, quantity: q })),
+    [selSups]);
+
   const fetchQuote = useCallback(async () => {
     if (!ci || !co) { setQuote(null); return; }
     setQuoting(true); setQuoteErr("");
     try {
-      const q = await api.post(`/public/site/${slug}/quote`, { property_id: id, check_in: ci, check_out: co, guests, promo_code: promo });
+      const q = await api.post(`/public/site/${slug}/quote`, { property_id: id, check_in: ci, check_out: co, guests, promo_code: promo, supplements: supsPayload });
       setQuote(q);
     } catch (e: any) {
       setQuote(null);
       setQuoteErr(e?.message?.includes("indispo") ? "Dates indisponibles." : (e?.detail || e?.message || "Ces dates ne sont pas réservables."));
     }
     setQuoting(false);
-  }, [ci, co, guests, promo, slug, id]);
-  useEffect(() => { fetchQuote(); }, [ci, co, guests]);
+  }, [ci, co, guests, promo, slug, id, supsPayload]);
+  useEffect(() => { fetchQuote(); }, [ci, co, guests, selSups]);
+
+  function toggleSup(s: any) {
+    setSelSups((cur) => {
+      const next = { ...cur };
+      if (next[s.id]) delete next[s.id];
+      else next[s.id] = 1;
+      return next;
+    });
+  }
+  function stepSup(sid: string, delta: number) {
+    setSelSups((cur) => ({ ...cur, [sid]: Math.max(1, Math.min(50, (cur[sid] || 1) + delta)) }));
+  }
 
   function validGuest() {
     if (!gName.trim()) { Alert.alert("Nom requis", "Indiquez votre nom."); return false; }
@@ -96,6 +124,7 @@ export default function PublicPropertyDetail() {
     try {
       const res = await api.post(`/public/site/${slug}/checkout`, {
         property_id: id, check_in: ci, check_out: co, guests, promo_code: promo,
+        supplements: supsPayload,
         guest_name: gName, guest_email: gEmail, guest_phone: gPhone, origin_url: origin,
       });
       if (res.url) {
@@ -112,6 +141,7 @@ export default function PublicPropertyDetail() {
     try {
       await api.post(`/public/site/${slug}/request`, {
         property_id: id, check_in: ci, check_out: co, guests, promo_code: promo,
+        supplements: supsPayload,
         guest_name: gName, guest_email: gEmail, guest_phone: gPhone,
       });
       Alert.alert("Demande envoyée", "Votre demande de réservation a bien été transmise. Vous serez recontacté rapidement.", [
@@ -186,6 +216,38 @@ export default function PublicPropertyDetail() {
             </View>
           </View>
 
+          {sups.length > 0 && (
+            <>
+              <Text style={styles.blockTitle}>Suppléments</Text>
+              {sups.map((s) => {
+                const q = selSups[s.id] || 0;
+                const on = q > 0;
+                return (
+                  <View key={s.id} style={[styles.supCard, on && styles.supCardOn]}>
+                    {s.photo_path ? (
+                      <Image source={{ uri: `${API_BASE}/public/sup-photo/${s.photo_path}` }} style={styles.supImg} contentFit="cover" />
+                    ) : null}
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.supName}>{s.name}</Text>
+                      {!!s.description && <Text style={styles.supDesc} numberOfLines={2}>{s.description}</Text>}
+                      <Text style={styles.supPrice}>{supPriceLabel(s)}</Text>
+                      {on && s.charge_basis === "per_quantity" && (
+                        <View style={styles.supStepper}>
+                          <Pressable testID={`sup-minus-${s.id}`} onPress={() => stepSup(s.id, -1)} style={styles.supStepBtn}><Ionicons name="remove" size={14} color={colors.onSurface} /></Pressable>
+                          <Text style={styles.supStepVal}>{q}</Text>
+                          <Pressable testID={`sup-plus-${s.id}`} onPress={() => stepSup(s.id, 1)} style={styles.supStepBtn}><Ionicons name="add" size={14} color={colors.onSurface} /></Pressable>
+                        </View>
+                      )}
+                    </View>
+                    <Pressable testID={`sup-toggle-${s.id}`} onPress={() => toggleSup(s)} style={[styles.supToggle, on && styles.supToggleOn]}>
+                      <Ionicons name={on ? "checkmark" : "add"} size={18} color={on ? "#fff" : colors.brandPrimary} />
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </>
+          )}
+
           <View style={styles.promoRow}>
             <TextInput testID="site-promo" value={promo} onChangeText={(t) => setPromo(t.toUpperCase())} placeholder="Code promo" placeholderTextColor={colors.onSurfaceTertiary} autoCapitalize="characters" style={styles.promoInput} />
             <Pressable testID="site-promo-apply" onPress={fetchQuote} style={styles.promoBtn}><Text style={styles.promoBtnText}>Appliquer</Text></Pressable>
@@ -199,6 +261,9 @@ export default function PublicPropertyDetail() {
               {quote.cleaning_fee > 0 && <Row label="Frais de ménage" value={`${quote.cleaning_fee}€`} />}
               {quote.tourist_tax > 0 && <Row label="Taxe de séjour" value={`${quote.tourist_tax}€`} />}
               {quote.discount > 0 && <Row label={`Remise ${quote.promo_label}`} value={`-${quote.discount}€`} highlight />}
+              {(quote.supplements || []).map((s: any) => (
+                <Row key={s.id} label={`${s.name}${s.quantity > 1 ? ` × ${s.quantity}` : ""}`} value={`${s.amount_ttc}€`} />
+              ))}
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>Total</Text>
                 <Text style={styles.totalValue}>{quote.total}€</Text>
@@ -295,4 +360,15 @@ const styles = StyleSheet.create({
   reqBtn: { alignItems: "center", paddingVertical: 14, marginTop: spacing.sm },
   reqText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.brandPrimary },
   secure: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, textAlign: "center", marginTop: 4 },
+  supCard: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.sm },
+  supCardOn: { borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary + "08" },
+  supImg: { width: 56, height: 56, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary },
+  supName: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  supDesc: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2, lineHeight: 18 },
+  supPrice: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary, marginTop: 4 },
+  supStepper: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
+  supStepBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
+  supStepVal: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurface, minWidth: 18, textAlign: "center" },
+  supToggle: { width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  supToggleOn: { backgroundColor: colors.brandPrimary },
 });

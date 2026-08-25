@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   TextInput,
   Platform,
+  Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -32,6 +33,22 @@ import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const PLATFORMS = ["Direct", "Airbnb", "Booking.com", "Vrbo"];
 
+const MSG_KIND_LABEL: Record<string, string> = {
+  manuel: "Manuel",
+  auto: "Automatique",
+  cles: "Clés",
+  caution: "Caution",
+  facture: "Facture",
+  relance: "Relance paiement",
+  confirmation: "Confirmation",
+  avis: "Demande d'avis",
+};
+const MSG_CHANNEL_META: Record<string, { icon: any; color: string }> = {
+  whatsapp: { icon: "logo-whatsapp", color: "#25D366" },
+  email: { icon: "mail", color: "#2A6F9E" },
+  platform: { icon: "chatbubbles", color: "#FF5A5F" },
+};
+
 function priceForDay(prop: any, dayStr: string): number | null {
   if (!prop) return null;
   for (const s of (prop.seasons || [])) {
@@ -53,8 +70,25 @@ function computeNightsTotal(prop: any, ci: string, co: string): number {
   return Math.round(total * 100) / 100;
 }
 
-function computeTouristTax(prop: any, nightsTotal: number): number {
+function nightsBetween(ci: string, co: string): number {
+  if (!ci || !co) return 0;
+  return Math.max(0, Math.round((new Date(co + "T00:00:00").getTime() - new Date(ci + "T00:00:00").getTime()) / 86400000));
+}
+
+function computeTouristTax(prop: any, nightsTotal: number, nights = 0, guests = 1, taxable = -1): number {
   if (!prop) return 0;
+  if (prop.tax_mode === "real") {
+    const rate = (parseFloat(prop.tourist_tax_pct) || 0) / 100;
+    const cap = parseFloat(prop.tax_cap) || 0;
+    const dept = (parseFloat(prop.tax_dept_pct) || 0) / 100;
+    const reg = (parseFloat(prop.regional_tax_pct) || 0) / 100;
+    const occ = Math.max(1, guests || 1);
+    const tx = taxable > 0 ? taxable : occ;
+    const n = Math.max(1, nights || 1);
+    let base = ((nightsTotal / n) / occ) * rate;
+    if (cap > 0) base = Math.min(base, cap);
+    return Math.round(base * (1 + dept + reg) * tx * n * 100) / 100;
+  }
   const pct = (parseFloat(prop.tourist_tax_pct) || 0) + (parseFloat(prop.regional_tax_pct) || 0);
   if (!pct) return 0;
   return Math.round(nightsTotal * pct) / 100;
@@ -85,6 +119,11 @@ export default function ReservationForm() {
   const [invoice, setInvoice] = useState<any>(null);
   const [invBusy, setInvBusy] = useState(false);
   const [invMsg, setInvMsg] = useState<string | null>(null);
+  const [history, setHistory] = useState<any[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [supModalOpen, setSupModalOpen] = useState(false);
+  const [availableSups, setAvailableSups] = useState<any[]>([]);
+  const [supQty, setSupQty] = useState<Record<string, number>>({});
 
   const [form, setForm] = useState({
     property_id: "",
@@ -96,6 +135,7 @@ export default function ReservationForm() {
     check_in: "",
     check_out: "",
     guests: "2",
+    taxable_guests: "",
     nights_total: "",
     cleaning_fee: "",
     tourist_tax: "",
@@ -128,6 +168,7 @@ export default function ReservationForm() {
               check_in: r.check_in,
               check_out: r.check_out,
               guests: String(r.guests),
+              taxable_guests: r.taxable_guests ? String(r.taxable_guests) : "",
               nights_total: String(r.nights_total || fin.stay || r.total_price || ""),
               cleaning_fee: String(r.cleaning_fee || fin.fees || ""),
               tourist_tax: String(r.tourist_tax || fin.taxes || ""),
@@ -138,6 +179,7 @@ export default function ReservationForm() {
               const inv = await api.get(`/reservations/${id}/invoice`);
               if (inv?.exists) setInvoice(inv);
             } catch {}
+            loadHistory();
           }
         } else if (pr.length) {
           const pid = params.property && pr.some((p: any) => p.id === params.property) ? params.property : pr[0].id;
@@ -145,7 +187,7 @@ export default function ReservationForm() {
           const co = params.check_out || "";
           const selProp = pr.find((p: any) => p.id === pid);
           const preNights = ci && co ? computeNightsTotal(selProp, ci, co) : 0;
-          const preTax = computeTouristTax(selProp, preNights);
+          const preTax = computeTouristTax(selProp, preNights, nightsBetween(ci, co), 2);
           setForm((f) => ({
             ...f,
             property_id: pid,
@@ -171,7 +213,8 @@ export default function ReservationForm() {
     if (p && next.check_in && next.check_out) {
       const v = computeNightsTotal(p, next.check_in, next.check_out);
       if (v) {
-        const tax = computeTouristTax(p, v);
+        const tax = computeTouristTax(p, v, nightsBetween(next.check_in, next.check_out),
+          parseInt(next.guests) || 1, next.taxable_guests === "" ? -1 : parseInt(next.taxable_guests) || 0);
         setForm((f) => ({ ...f, nights_total: String(v), ...(tax ? { tourist_tax: String(tax) } : {}) }));
       }
     }
@@ -180,6 +223,35 @@ export default function ReservationForm() {
     setForm((f) => {
       const nf = { ...f, [k]: v };
       recalcNights(nf);
+      return nf;
+    });
+  };
+  // Saisie manuelle du prix des nuitées → recalcul auto de la taxe de séjour
+  // d'après le paramétrage (% taxe de séjour + % taxe régionale du logement)
+  const setNightsTotal = (v: string) => {
+    setForm((f) => {
+      const p = props.find((x) => x.id === f.property_id);
+      const nf = { ...f, nights_total: v };
+      if (p && (p.tax_mode === "real" || (parseFloat(p.tourist_tax_pct) || 0) + (parseFloat(p.regional_tax_pct) || 0) > 0)) {
+        const nights = parseFloat((v || "0").replace(",", ".")) || 0;
+        const tax = computeTouristTax(p, nights, nightsBetween(nf.check_in, nf.check_out),
+          parseInt(nf.guests) || 1, nf.taxable_guests === "" ? -1 : parseInt(nf.taxable_guests) || 0);
+        nf.tourist_tax = tax ? String(tax) : "";
+      }
+      return nf;
+    });
+  };
+  // Voyageurs / assujettis modifiés → recalcul de la taxe (barème réel)
+  const setWithTax = (k: string, v: string) => {
+    setForm((f) => {
+      const nf = { ...f, [k]: v };
+      const p = props.find((x) => x.id === nf.property_id);
+      if (p?.tax_mode === "real") {
+        const nt = parseFloat((nf.nights_total || "0").replace(",", ".")) || 0;
+        const tax = computeTouristTax(p, nt, nightsBetween(nf.check_in, nf.check_out),
+          parseInt(nf.guests) || 1, nf.taxable_guests === "" ? -1 : parseInt(nf.taxable_guests) || 0);
+        nf.tourist_tax = tax ? String(tax) : "";
+      }
       return nf;
     });
   };
@@ -224,6 +296,7 @@ export default function ReservationForm() {
       check_in: form.check_in,
       check_out: form.check_out,
       guests: parseInt(form.guests) || 1,
+      taxable_guests: parseInt(form.taxable_guests) || 0,
       nights_total: num(form.nights_total),
       cleaning_fee: num(form.cleaning_fee),
       tourist_tax: num(form.tourist_tax),
@@ -417,6 +490,40 @@ export default function ReservationForm() {
 
 
 
+  async function loadHistory() {
+    try {
+      const h = await api.get(`/reservations/${id}/messages`);
+      setHistory(Array.isArray(h) ? h : []);
+    } catch {}
+  }
+
+  async function openSupplements() {
+    try {
+      const all = await api.get("/supplements");
+      setAvailableSups(all.filter((s: any) =>
+        s.active !== false && (!(s.property_ids || []).length || s.property_ids.includes(form.property_id))));
+    } catch {
+      setAvailableSups([]);
+    }
+    setSupQty({});
+    setSupModalOpen(true);
+  }
+
+  async function addSupplement(supId: string, qty: number) {
+    try {
+      const updated = await api.post(`/reservations/${id}/supplements`, { supplement_id: supId, quantity: qty });
+      setDetail(updated);
+    } catch {}
+    setSupModalOpen(false);
+  }
+
+  async function removeSupplement(itemId: string) {
+    try {
+      const updated = await api.del(`/reservations/${id}/supplements/${itemId}`);
+      setDetail(updated);
+    } catch {}
+  }
+
   async function sendInvoice() {
     if (invBusy) return;
     if (!form.guest_email.trim()) {
@@ -430,6 +537,7 @@ export default function ReservationForm() {
       if (res.sent) {
         setInvoice({ exists: true, number: res.number, sent_at: res.sent_at, sent_to: res.to });
         setInvMsg(`Facture ${res.number} envoyée à ${res.to} ✓`);
+        loadHistory();
       } else if (res.reason === "no_guest_email") {
         setInvMsg("Renseignez l'email du voyageur pour envoyer la facture.");
       } else {
@@ -658,7 +766,39 @@ export default function ReservationForm() {
             </>
           )}
           {editing && (
-            <ContactGuestModal visible={contactOpen} reservationId={String(id)} onClose={() => setContactOpen(false)} />
+            <ContactGuestModal visible={contactOpen} reservationId={String(id)} onClose={() => { setContactOpen(false); loadHistory(); }} />
+          )}
+
+          {editing && (
+            <>
+              <Pressable testID="msg-history-toggle" onPress={() => setHistoryOpen((o) => !o)} style={styles.historyHeader}>
+                <Ionicons name="time-outline" size={16} color={colors.onSurfaceSecondary} />
+                <Text style={styles.historyTitle}>Historique des messages ({history.length})</Text>
+                <Ionicons name={historyOpen ? "chevron-up" : "chevron-down"} size={16} color={colors.onSurfaceTertiary} />
+              </Pressable>
+              {historyOpen && (history.length === 0 ? (
+                <Text style={styles.historyEmpty}>Aucun message envoyé pour cette réservation.</Text>
+              ) : (
+                <View style={styles.historyList}>
+                  {history.map((h: any) => {
+                    const meta = MSG_CHANNEL_META[h.channel] || MSG_CHANNEL_META.platform;
+                    return (
+                      <View key={h.id} style={styles.historyRow}>
+                        <Ionicons name={meta.icon} size={16} color={meta.color} style={{ marginTop: 2 }} />
+                        <View style={{ flex: 1 }}>
+                          <View style={styles.historyMeta}>
+                            <Text style={styles.historyKind}>{MSG_KIND_LABEL[h.kind] || h.kind}</Text>
+                            <Text style={styles.historyDate}>{dayjs(h.sent_at).format("DD/MM/YYYY HH:mm")}</Text>
+                          </View>
+                          {!!h.subject && <Text style={styles.historySubject} numberOfLines={1}>{h.subject}</Text>}
+                          {!!h.body && <Text style={styles.historyBody} numberOfLines={3}>{h.body}</Text>}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              ))}
+            </>
           )}
 
           <Text style={styles.label}>Plateforme</Text>
@@ -678,14 +818,28 @@ export default function ReservationForm() {
               <DateField label="Départ" testID="check-out" value={form.check_out} onChange={(v) => setDate("check_out", v)} minDate={form.check_in || undefined} />
             </View>
           </View>
-          <Field label="Nombre de voyageurs" testID="guests" value={form.guests} onChangeText={(v) => set("guests", v)} keyboardType="number-pad" />
+          <Field label="Nombre de voyageurs" testID="guests" value={form.guests} onChangeText={(v) => setWithTax("guests", v)} keyboardType="number-pad" />
+          {(() => {
+            const sp = props.find((p) => p.id === form.property_id);
+            if (sp?.tax_mode !== "real") return null;
+            return (
+              <Field
+                label="Personnes assujetties à la taxe (non exonérées : hors mineurs…)"
+                testID="taxable-guests"
+                value={form.taxable_guests}
+                onChangeText={(v) => setWithTax("taxable_guests", v)}
+                keyboardType="number-pad"
+                placeholder={form.guests}
+              />
+            );
+          })()}
 
           {showPrices && (
             <>
               <Text style={styles.sectionTitle}>Tarifs</Text>
               <View style={styles.row}>
                 <View style={{ flex: 1 }}>
-                  <Field label="Prix des nuitées (€)" testID="nights-total" value={form.nights_total} onChangeText={(v) => set("nights_total", v)} keyboardType="decimal-pad" placeholder="0" />
+                  <Field label="Prix des nuitées (€)" testID="nights-total" value={form.nights_total} onChangeText={setNightsTotal} keyboardType="decimal-pad" placeholder="0" />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Field label="Frais de ménage (€)" testID="cleaning-fee" value={form.cleaning_fee} onChangeText={(v) => set("cleaning_fee", v)} keyboardType="decimal-pad" placeholder="0" />
@@ -707,11 +861,92 @@ export default function ReservationForm() {
                 <Text style={styles.totalLabel}>Total</Text>
                 <Text style={styles.totalValue}>{totalPrice.toFixed(2)} €</Text>
               </View>
+
+              {editing && (
+                <>
+                  {(detail?.supplements || []).length > 0 && <Text style={styles.sectionTitle}>Suppléments</Text>}
+                  {(detail?.supplements || []).map((s: any) => (
+                    <View key={s.id} style={styles.supRow}>
+                      <Text style={styles.supName} numberOfLines={1}>
+                        {s.name}{(s.quantity || 1) > 1 ? ` × ${s.quantity}` : ""}
+                      </Text>
+                      <Text style={styles.supAmount}>{(Number(s.amount_ttc) || 0).toFixed(2)} €</Text>
+                      <Pressable testID={`sup-remove-${s.id}`} onPress={() => removeSupplement(s.id)} hitSlop={8}>
+                        <Ionicons name="trash-outline" size={16} color="#E5484D" />
+                      </Pressable>
+                    </View>
+                  ))}
+                  <Pressable testID="add-supplement-btn" onPress={openSupplements} style={styles.supAddBtn}>
+                    <Ionicons name="add-circle-outline" size={16} color={colors.brandPrimary} />
+                    <Text style={styles.supAddText}>Ajouter un supplément</Text>
+                  </Pressable>
+                  {(detail?.supplements || []).length > 0 && (
+                    <View style={styles.totalRow}>
+                      <Text style={styles.totalLabel}>Total avec suppléments</Text>
+                      <Text style={styles.totalValue}>
+                        {(totalPrice + (detail?.supplements || []).reduce((acc: number, s: any) => acc + (Number(s.amount_ttc) || 0), 0)).toFixed(2)} €
+                      </Text>
+                    </View>
+                  )}
+                </>
+              )}
             </>
           )}
 
           <View style={{ height: spacing.md }} />
           <Field label="Notes" testID="notes" value={form.notes} onChangeText={(v) => set("notes", v)} placeholder="Informations complémentaires" multiline />
+
+          {editing && (
+            <Modal visible={supModalOpen} animationType="slide" transparent onRequestClose={() => setSupModalOpen(false)}>
+              <View style={styles.supBackdrop}>
+                <View style={[styles.supSheet, { paddingBottom: insets.bottom + spacing.lg }]}>
+                  <View style={styles.supHead}>
+                    <Text style={styles.supTitle}>Ajouter un supplément</Text>
+                    <Pressable testID="sup-modal-close" onPress={() => setSupModalOpen(false)} hitSlop={10}>
+                      <Ionicons name="close" size={24} color={colors.onSurface} />
+                    </Pressable>
+                  </View>
+                  <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+                    {availableSups.length === 0 ? (
+                      <Text style={styles.supEmpty}>
+                        Aucun supplément disponible pour ce logement. Créez-en dans Paramètres → Suppléments.
+                      </Text>
+                    ) : (
+                      availableSups.map((s: any) => {
+                        const qty = supQty[s.id] || 1;
+                        return (
+                          <View key={s.id} style={styles.supPickRow}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.supName} numberOfLines={1}>{s.name}</Text>
+                              <Text style={styles.supPickInfo} numberOfLines={1}>
+                                {s.calc_model === "percent"
+                                  ? `${s.amount} % ${s.percent_base === "total" ? "du séjour" : "des nuitées"}`
+                                  : `${(Number(s.amount) || 0).toFixed(2)} € ${s.period === "per_night" ? "/nuit" : "/séjour"}`}
+                              </Text>
+                            </View>
+                            {s.charge_basis === "per_quantity" && (
+                              <View style={styles.supStepper}>
+                                <Pressable onPress={() => setSupQty((q) => ({ ...q, [s.id]: Math.max(1, qty - 1) }))} style={styles.supStepBtn}>
+                                  <Ionicons name="remove" size={14} color={colors.onSurface} />
+                                </Pressable>
+                                <Text style={styles.supStepVal}>{qty}</Text>
+                                <Pressable onPress={() => setSupQty((q) => ({ ...q, [s.id]: Math.min(50, qty + 1) }))} style={styles.supStepBtn}>
+                                  <Ionicons name="add" size={14} color={colors.onSurface} />
+                                </Pressable>
+                              </View>
+                            )}
+                            <Pressable testID={`sup-pick-${s.id}`} onPress={() => addSupplement(s.id, qty)} style={styles.supPickBtn}>
+                              <Text style={styles.supPickBtnText}>Ajouter</Text>
+                            </Pressable>
+                          </View>
+                        );
+                      })
+                    )}
+                  </ScrollView>
+                </View>
+              </View>
+            </Modal>
+          )}
 
           {canModify(user) && (
             <PrimaryButton
@@ -982,6 +1217,33 @@ const styles = StyleSheet.create({
   contactBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: spacing.sm, paddingVertical: 12, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary + "10" },
   contactBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.brandPrimary },
   invoiceStatus: { fontFamily: font.medium, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, textAlign: "center", marginTop: 6 },
+  historyHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.md, paddingVertical: 10, paddingHorizontal: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary },
+  historyTitle: { flex: 1, fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  historyEmpty: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, textAlign: "center", paddingVertical: spacing.md },
+  historyList: { marginTop: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md },
+  historyRow: { flexDirection: "row", gap: spacing.sm, padding: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  historyMeta: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  historyKind: { fontFamily: font.semibold, fontSize: fontSize.xs, color: colors.onSurface },
+  historyDate: { fontFamily: font.regular, fontSize: fontSize.xs, color: colors.onSurfaceTertiary },
+  historySubject: { fontFamily: font.medium, fontSize: fontSize.xs, color: colors.onSurfaceSecondary, marginTop: 2 },
+  historyBody: { fontFamily: font.regular, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, marginTop: 2, lineHeight: 16 },
+  supRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 8 },
+  supName: { flex: 1, fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface },
+  supAmount: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface },
+  supAddBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, marginTop: 4, borderRadius: radius.md, borderWidth: 1, borderStyle: "dashed", borderColor: colors.brandPrimary + "70" },
+  supAddText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
+  supBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+  supSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: spacing.lg },
+  supHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
+  supTitle: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
+  supEmpty: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, textAlign: "center", paddingVertical: 30, lineHeight: 21 },
+  supPickRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  supPickInfo: { fontFamily: font.regular, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, marginTop: 2 },
+  supStepper: { flexDirection: "row", alignItems: "center", gap: 6 },
+  supStepBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
+  supStepVal: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurface, minWidth: 18, textAlign: "center" },
+  supPickBtn: { backgroundColor: colors.brandPrimary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 8 },
+  supPickBtnText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onBrandPrimary },
 
   cvCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
   clCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },

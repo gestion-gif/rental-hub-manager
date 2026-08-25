@@ -20,6 +20,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "review_request_days": int((doc or {}).get("review_request_days", 1)),
         "cleaning_offset_days": int((doc or {}).get("cleaning_offset_days", 0)),
         "getyourguide_url": (doc or {}).get("getyourguide_url", "") or "",
+        "payment_reminders": _build_payment_reminders(doc),
         "public_site": _build_public_site(doc),
     }
 
@@ -74,6 +75,23 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
 
     if payload.vat_subjected is not None:
         set_doc["vat_subjected"] = bool(payload.vat_subjected)
+
+    if payload.payment_reminders is not None:
+        c = payload.payment_reminders or {}
+        mode = c.get("mode") if c.get("mode") in ("all", "direct") else "all"
+        excl = [str(p).strip() for p in (c.get("excluded_platforms") or []) if str(p).strip()][:10]
+        days = []
+        for d in (c.get("days") or [7, 3]):
+            try:
+                v = int(d)
+                if 1 <= v <= 30 and v not in days:
+                    days.append(v)
+            except Exception:
+                continue
+        set_doc["payment_reminders"] = {
+            "enabled": bool(c.get("enabled", False)), "mode": mode,
+            "excluded_platforms": excl, "days": sorted(days or [7, 3], reverse=True),
+        }
 
     if payload.company is not None:
         set_doc["company"] = {k: str(payload.company.get(k) or "").strip() for k in _COMPANY_KEYS}
@@ -165,6 +183,7 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "review_request_days": int((doc or {}).get("review_request_days", 1)),
         "cleaning_offset_days": int((doc or {}).get("cleaning_offset_days", 0)),
         "getyourguide_url": (doc or {}).get("getyourguide_url", "") or "",
+        "payment_reminders": _build_payment_reminders(doc),
         "public_site": _build_public_site(doc),
     }
 

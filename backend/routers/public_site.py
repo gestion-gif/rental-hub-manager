@@ -41,7 +41,8 @@ async def public_property(slug: str, property_id: str):
 async def public_quote(slug: str, payload: PublicQuoteIn):
     uid, _ = await _resolve_public_site(slug)
     return await _public_quote(uid, payload.property_id, payload.check_in,
-                               payload.check_out, payload.guests, payload.promo_code)
+                               payload.check_out, payload.guests, payload.promo_code,
+                               payload.supplements)
 
 
 @api_router.post("/public/site/{slug}/request")
@@ -49,7 +50,7 @@ async def public_booking_request(slug: str, payload: PublicBookingIn):
     """Demande de réservation sans paiement (le gestionnaire valide dans l'app)."""
     uid, _ = await _resolve_public_site(slug)
     q = await _public_quote(uid, payload.property_id, payload.check_in, payload.check_out,
-                            payload.guests, payload.promo_code)
+                            payload.guests, payload.promo_code, payload.supplements)
     rid = await _create_public_reservation(uid, q, payload, "demande", slug)
     r = await db.reservations.find_one({"id": rid, "user_id": uid}, {"_id": 0})
     asyncio.create_task(_send_request_ack(uid, r, slug, (payload.origin_url or "").rstrip("/")))
@@ -61,7 +62,7 @@ async def public_checkout(slug: str, payload: PublicBookingIn):
     """Réservation + paiement en ligne (Stripe Checkout hébergé)."""
     uid, _ = await _resolve_public_site(slug)
     q = await _public_quote(uid, payload.property_id, payload.check_in, payload.check_out,
-                            payload.guests, payload.promo_code)
+                            payload.guests, payload.promo_code, payload.supplements)
     pay_now = round(float(q.get("deposit_amount") or q["total"]), 2)
     if pay_now <= 0:
         raise HTTPException(status_code=400, detail="Montant invalide")

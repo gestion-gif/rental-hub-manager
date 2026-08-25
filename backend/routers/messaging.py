@@ -85,6 +85,7 @@ async def messaging_send(payload: SendMessageIn, user=Depends(get_current_user))
             return {"sent": False, "reason": "no_email"}
         subject = (payload.subject or "").strip() or f"Message — {r.get('property_name') or 'votre séjour'}"
         await send_email(to=to, subject=subject, html=_plain_to_html(body))
+        await log_guest_message(uid, payload.reservation_id, "email", "manuel", body, to=to, subject=subject)
         return {"sent": True, "channel": "email", "to": to}
 
     if payload.channel == "platform":
@@ -97,6 +98,25 @@ async def messaging_send(payload: SendMessageIn, user=Depends(get_current_user))
         adapter = ChannexAdapter(settings["api_key"], settings.get("environment", "staging"))
         async with httpx.AsyncClient(timeout=30) as http:
             await adapter.send_booking_message(http, cx_booking, body)
+        await log_guest_message(uid, payload.reservation_id, "platform", "manuel", body)
         return {"sent": True, "channel": "platform"}
 
     raise HTTPException(status_code=400, detail="Canal inconnu")
+
+
+class WhatsAppLogIn(BaseModel):
+    reservation_id: str
+    body: str
+
+
+@api_router.post("/messaging/log-whatsapp")
+async def messaging_log_whatsapp(payload: WhatsAppLogIn, user=Depends(get_current_user)):
+    """Trace un message WhatsApp (envoyé depuis l'app du téléphone) dans l'historique."""
+    uid = user["user_id"]
+    r = await db.reservations.find_one(
+        {"id": payload.reservation_id, "user_id": uid}, {"_id": 0, "id": 1, "guest_phone": 1})
+    if not r:
+        raise HTTPException(status_code=404, detail="Réservation introuvable")
+    await log_guest_message(uid, payload.reservation_id, "whatsapp", "manuel",
+                            (payload.body or "").strip(), to=r.get("guest_phone") or "")
+    return {"ok": True}

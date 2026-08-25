@@ -156,6 +156,8 @@ async def inbox_reply(thread_uid: str, payload: ReplyIn, user=Depends(get_curren
         raise HTTPException(status_code=404, detail="Réservation liée introuvable pour cette conversation")
     async with httpx.AsyncClient(timeout=30) as http:
         await adapter.send_message(http, res["lodgify_id"], payload.message.strip(), payload.subject)
+    await log_guest_message(user["user_id"], res.get("id") or "", "platform", "manuel",
+                            payload.message.strip(), subject=payload.subject or "")
     # Une fois envoyé, le brouillon IA est validé/consommé
     await db.conversations.update_one(
         {"user_id": user["user_id"], "thread_uid": thread_uid},

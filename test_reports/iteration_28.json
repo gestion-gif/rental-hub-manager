@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 28 frontend-only testing of 5 new features (Casanéo, Expo web preview at rental-hub-manager.preview.emergentagent.com). All 5 features validated end-to-end on mobile viewport 390x844 with QA admin (qa.admin@casaneo.test). Result: 6/6 UI checks PASS. (1) Historique des messages collapsible section (testID=msg-history-toggle) renders under 'Contacter le voyageur', expands to show 'Aucun message envoyé pour cette réservation.' on a reservation without history. (2) Tourist tax auto-recalc bug fix works exactly: with Loù Cabanoù (tourist_tax_pct=5.0 + regional_tax_pct=1.1 → total 6.1%), typing 100 in nights-total sets tourist-tax=6.1, and 200 sets 12.2 (exact). (3) Comptabilité: export-pdf & export-csv buttons visible in Aperçu tab under 'Importer les revenus'; CSV click triggered a real download (journal-2026-08.csv); PDF click did not throw any error/red screen (print dialog blocked in headless as expected). (4) /settings/payments shows payment-reminders-card with reminders-switch, reminders-mode-all/direct chips and reminders-excl-Airbnb chip; mode toggling direct↔all works and card persists after full reload. Final server state verified via GET /api/preferences: {enabled:true, mode:'all', excluded_platforms:['Airbnb'], days:[7,3]} — matches user's desired state. (5) /property-form?id=<Loù Cabanoù> shows testID=prop-gyg field 'Activités (GetYourGuide)' after the Livret d'accueil section; initial value is empty (untouched, per instructions). No modifications were saved on any form. Console warnings noted only (deprecated shadow* / pointerEvents / expo-notifications on web) — non-blocking.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Console warning across many screens: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' — Expo/RN moving to unified boxShadow API. Non-blocking but should be migrated to avoid future breakage. Reference: multiple StyleSheets in /app/frontend/app/*.tsx and /app/frontend/src/components/*.tsx."},
+      {"component": "props.pointerEvents", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Reference: appears during login (likely in /app/frontend/app/login.tsx or a shared UI component)."}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_28.json"],
+  "action_items": [
+    "None blocking. Optional cleanup: replace 'shadow*' style props (shadowColor/shadowOffset/shadowOpacity/shadowRadius) with the unified 'boxShadow' style prop across the codebase to silence the deprecation warning on RN web/Expo SDK.",
+    "Optional cleanup: replace 'pointerEvents' React prop by 'style={{ pointerEvents: ... }}' on the affected component (likely one of the login screen wrappers)."
+  ],
+  "critical_code_review_comments": [
+    "reservation-form.tsx:207-219 — setNightsTotal correctly recomputes tourist_tax from (tourist_tax_pct + regional_tax_pct) of the selected property. Formula: Math.round(nightsTotal * pct) / 100 (line 76). Verified numerically: 100 × 6.1% = 6.1, 200 × 6.1% = 12.2. If pct is 0 the field is left as user-entered (not cleared) — acceptable behavior since it lets user override manually.",
+    "reservation-form.tsx:708-745 — msg-history-toggle uses Pressable + testID and renders 'Aucun message envoyé pour cette réservation.' as empty state. LGTM.",
+    "accounting.tsx:327-333 — export-pdf/export-csv buttons correctly disabled while exporting is truthy. Suggest adding aria-busy for a11y but non-blocking.",
+    "settings/payments.tsx:137-190 — payment-reminders-card structure is clean; the toggle, mode chips and per-platform excluded chips all wired to a single PUT /api/preferences call. Reload persistence verified.",
+    "property-form.tsx:344-348 — prop-gyg field present, keyboardType default (URL/email would be nicer). Trimmed on save (line 175). LGTM."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (skip requested)", "frontend": "100% (6/6 UI checks passed)"},
+  "seed_data_creation": "None. No reservation created, no property saved. Property reminders preferences ended in the desired state {enabled:true, mode:'all', excluded_platforms:['Airbnb']} as verified via GET /api/preferences.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "QA admin (qa.admin@casaneo.test) has scoped access to 3 properties: 1b472b65-11da-48da-b1e3-8942c0e110bd 'Loù Cabanoù' (tourist_tax_pct=5.0, regional_tax_pct=1.1 → best for tourist-tax tests), ee7dbed5-… 'titi et gros minet' (no tax pct), 3404f9ae-… 'Propriété de test - Casanéo' (avoid — Channex certification). Existing reservation 001a7c0e-362d-43d6-8eab-77b8ee093f27 has no messages and is safe to reuse for msg-history-toggle empty-state verification. Login flow: goto /, click show-email-login, fill login-email/login-password, click email-signin-button.",
+  "detailed_test_results": {
+    "step_1_login": "PASS — email/password login (qa.admin@casaneo.test) via 'Se connecter avec un email et un mot de passe' completes and redirects to home.",
+    "step_2_msg_history_toggle": "PASS — testID msg-history-toggle present on /reservation-form?id=001a7c0e-… collapsed text 'Historique des messages (0)'. Click expands and shows 'Aucun message envoyé pour cette réservation.'; click again collapses.",
+    "step_3_tourist_tax_recalc": "PASS — nights-total=100 → tourist-tax=6.1 (Loù Cabanoù 5.0%+1.1%=6.1%). nights-total=200 → tourist-tax=12.2. Recalculation triggers instantly on onChangeText.",
+    "step_4_accounting_exports": "PASS — export-pdf and export-csv visible under 'Importer les revenus'. CSV click fires browser download event with filename 'journal-2026-08.csv'. PDF click does not throw / no red error screen (print dialog blocked in headless as expected).",
+    "step_5_payment_reminders": "PASS — payment-reminders-card, reminders-switch, reminders-mode-all, reminders-mode-direct, reminders-excl-Airbnb all present. Mode direct↔all cycled and persisted after reload. Final server state {enabled:true, mode:'all', excluded_platforms:['Airbnb'], days:[7,3]}.",
+    "step_6_property_gyg": "PASS — testID prop-gyg present on /property-form?id=1b472b65-…; label 'Activités (GetYourGuide)' visible after Livret d'accueil section; value untouched (empty)."
+  },
+  "rca_of_issue": "N/A — no bugs found."
+}

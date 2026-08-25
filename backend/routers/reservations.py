@@ -284,6 +284,7 @@ async def send_deposit_link(reservation_id: str, user=Depends(get_current_user))
     await db.reservations.update_one(
         {"id": reservation_id, "user_id": uid},
         {"$set": {"deposit_link_sent_at": now_utc().isoformat()}})
+    await log_guest_message(uid, reservation_id, "platform", "caution", body, subject="Caution")
     return {"sent": True, "reason": "sent"}
 
 
@@ -552,6 +553,17 @@ async def email_guest_invoice(reservation_id: str, user=Depends(get_current_user
         items.append({"label": "Frais de ménage", "ttc": a["cleaning"], "vat_rate": rate})
     if a["tax"] > 0:
         items.append({"label": "Taxe de séjour", "ttc": a["tax"], "vat_rate": 0.0})
+    sup_total = 0.0
+    for s in (r.get("supplements") or []):
+        amt = float(s.get("amount_ttc") or 0)
+        if amt <= 0:
+            continue
+        qty = int(s.get("quantity") or 1)
+        label = (s.get("name") or "Supplément") + (f" × {qty}" if qty > 1 else "")
+        items.append({"label": label, "ttc": amt,
+                      "vat_rate": float(s.get("vat_rate") or 0) if vat_subjected else 0.0})
+        sup_total += amt
+    total = round(total + sup_total, 2)
 
     logo_bytes = None
     if company.get("logo_path"):
@@ -598,7 +610,90 @@ async def email_guest_invoice(reservation_id: str, user=Depends(get_current_user
         {"id": inv["id"], "user_id": uid},
         {"$set": {"sent_at": sent_at, "sent_to": guest_email, "total": total,
                   "vat_subjected": vat_subjected}})
+    await log_guest_message(uid, reservation_id, "email", "facture",
+                            f"Facture n° {inv['number']} ({total:.2f} €) envoyée en pièce jointe.",
+                            to=guest_email, subject=subject)
     return {"sent": True, "number": inv["number"], "to": guest_email, "sent_at": sent_at}
+
+
+@api_router.get("/reservations/{reservation_id}/messages")
+async def reservation_message_history(reservation_id: str, user=Depends(get_current_user)):
+    """Historique des messages envoyés au voyageur (tous canaux, manuels + automatiques)."""
+    docs = await db.message_logs.find(
+        {"reservation_id": reservation_id, "user_id": user["user_id"]},
+        {"_id": 0}).sort("sent_at", -1).to_list(200)
+    return docs
+
+
+@api_router.post("/reservations/{reservation_id}/supplements")
+async def add_reservation_supplement(reservation_id: str, body: dict = Body(...),
+                                     user=Depends(get_current_user)):
+    """Ajoute un supplément à la réservation (montant calculé selon son paramétrage)."""
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Réservation introuvable")
+    sup = await db.supplements.find_one(
+        {"id": str(body.get("supplement_id") or ""), "user_id": uid}, {"_id": 0})
+    if not sup:
+        raise HTTPException(status_code=404, detail="Supplément introuvable")
+    prop = await db.properties.find_one({"id": r.get("property_id"), "user_id": uid}, {"_id": 0}) or {}
+    try:
+        nights = (datetime.fromisoformat(r["check_out"]).date()
+                  - datetime.fromisoformat(r["check_in"]).date()).days
+    except Exception:
+        nights = 1
+    a = _res_amounts(r)
+    qty = max(1, min(50, int(body.get("quantity") or 1)))
+    amount = compute_supplement_amount(
+        sup, nights=nights, nights_total=a["nights"], cleaning=a["cleaning"],
+        guests=int(r.get("guests") or 1), bedrooms=int(prop.get("bedrooms") or 1), quantity=qty)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Montant du supplément nul")
+    item = {"id": uuid.uuid4().hex[:10], "supplement_id": sup["id"],
+            "name": sup.get("name") or "Supplément", "quantity": qty,
+            "amount_ttc": amount, "vat_rate": float(sup.get("vat_rate") or 0)}
+    sups = (r.get("supplements") or []) + [item]
+    r["supplements"] = sups
+    r["total_price"] = round(float(r.get("total_price") or 0) + amount, 2)
+    fin = dict(r.get("finance") or {})
+    fin["total"] = round(float(fin["total"]) + amount, 2) if fin.get("total") else r["total_price"]
+    r["finance"] = fin
+    recompute_payment(r)
+    await db.reservations.update_one(
+        {"id": reservation_id, "user_id": uid},
+        {"$set": {"supplements": sups, "total_price": r["total_price"], "finance": r["finance"]}})
+    item_out = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    compute_display(item_out, await status_color_map(uid))
+    return item_out
+
+
+@api_router.delete("/reservations/{reservation_id}/supplements/{item_id}")
+async def delete_reservation_supplement(reservation_id: str, item_id: str,
+                                        user=Depends(get_current_user)):
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Réservation introuvable")
+    sups = r.get("supplements") or []
+    item = next((s for s in sups if s.get("id") == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Supplément introuvable")
+    amount = float(item.get("amount_ttc") or 0)
+    sups = [s for s in sups if s.get("id") != item_id]
+    r["supplements"] = sups
+    r["total_price"] = round(max(0.0, float(r.get("total_price") or 0) - amount), 2)
+    fin = dict(r.get("finance") or {})
+    if fin.get("total"):
+        fin["total"] = round(max(0.0, float(fin["total"]) - amount), 2)
+    r["finance"] = fin
+    recompute_payment(r)
+    await db.reservations.update_one(
+        {"id": reservation_id, "user_id": uid},
+        {"$set": {"supplements": sups, "total_price": r["total_price"], "finance": r["finance"]}})
+    item_out = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
+    compute_display(item_out, await status_color_map(uid))
+    return item_out
 
 
 @api_router.post("/webhook/stripe")

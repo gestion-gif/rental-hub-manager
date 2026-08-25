@@ -79,11 +79,15 @@ class PropertyIn(BaseModel):
     ical_links: List[IcalLink] = []
     welcome_book_url: str = ""
     deposit_link: str = ""             # lien de paiement de la caution (montant prédéfini par logement)
+    getyourguide_url: str = ""         # lien GetYourGuide propre au logement (sinon lien global)
     management_fee_pct: float = 0
     default_cleaning_fee: float = 0    # frais de ménage par défaut
     default_tourist_tax: float = 0     # taxe de séjour par défaut (montant fixe, hérité)
-    tourist_tax_pct: float = 0         # taxe de séjour en % du prix des nuitées
+    tourist_tax_pct: float = 0         # taxe de séjour en % du prix des nuitées (ou taux du barème réel)
     regional_tax_pct: float = 0        # taxe additionnelle régionale en % du prix des nuitées
+    tax_mode: str = "percent"          # percent (% des nuitées) | real (barème par personne, plafonné)
+    tax_cap: float = 0                 # plafond de la taxe (€ / pers / nuit) — mode réel
+    tax_dept_pct: float = 0            # taxe additionnelle départementale (% de la taxe) — mode réel
     key_instructions: str = ""         # code boîte à clés / instructions de récupération
     key_photos: List[str] = []         # chemins des photos (boîte à clés, emplacement)
     photos: List[str] = []             # galerie photos du logement (jusqu'à 30)
@@ -91,6 +95,64 @@ class PropertyIn(BaseModel):
     owner_id: Optional[str] = None
     dynamic_pricing: Optional[dict] = None   # config tarification dynamique (par logement)
     published: bool = True                    # visible sur le site public de réservation
+class SupplementIn(BaseModel):
+    name: str
+    description: str = ""
+    photo_path: str = ""
+    calc_model: str = "fixed"          # fixed | percent
+    amount: float = 0                  # € si fixed, % si percent
+    percent_base: str = "nights"       # nights | total (nuitées + ménage) — si percent
+    charge_basis: str = "unique"       # unique | per_quantity | per_guest | per_room — si fixed
+    period: str = "per_stay"           # per_stay | per_night — si fixed
+    vat_rate: float = 20
+    price_includes_vat: bool = True    # prix saisi TTC ou HT
+    property_ids: List[str] = []       # vide = tous les logements
+    active: bool = True
+
+
+def compute_supplement_amount(sup: dict, *, nights: int, nights_total: float, cleaning: float,
+                              guests: int, bedrooms: int, quantity: int = 1) -> float:
+    """Montant TTC d'un supplément selon son paramétrage."""
+    amount = float(sup.get("amount") or 0)
+    if (sup.get("calc_model") or "fixed") == "percent":
+        base = float(nights_total or 0) + (float(cleaning or 0) if sup.get("percent_base") == "total" else 0.0)
+        raw = base * amount / 100.0
+    else:
+        basis = sup.get("charge_basis") or "unique"
+        mult = {"unique": 1, "per_quantity": max(1, int(quantity or 1)),
+                "per_guest": max(1, int(guests or 1)), "per_room": max(1, int(bedrooms or 1))}.get(basis, 1)
+        if (sup.get("period") or "per_stay") == "per_night":
+            mult *= max(1, int(nights or 1))
+        raw = amount * mult
+    if not sup.get("price_includes_vat", True):
+        raw *= 1 + float(sup.get("vat_rate") or 0) / 100.0
+    return round(raw, 2)
+
+
+async def compute_supplement_lines(uid: str, prop: dict, selections, *, nights: int,
+                                   nights_total: float, cleaning: float, guests: int):
+    """Résout des sélections [{id, quantity}] en lignes calculées. Retourne (lines, total)."""
+    lines, total = [], 0.0
+    for sel in (selections or []):
+        sup = await db.supplements.find_one(
+            {"id": str((sel or {}).get("id") or ""), "user_id": uid, "active": {"$ne": False}}, {"_id": 0})
+        if not sup:
+            continue
+        pids = sup.get("property_ids") or []
+        if pids and prop.get("id") not in pids:
+            continue
+        qty = max(1, min(50, int((sel or {}).get("quantity") or 1)))
+        amt = compute_supplement_amount(
+            sup, nights=nights, nights_total=nights_total, cleaning=cleaning,
+            guests=int(guests or 1), bedrooms=int(prop.get("bedrooms") or 1), quantity=qty)
+        if amt <= 0:
+            continue
+        lines.append({"id": uuid.uuid4().hex[:10], "supplement_id": sup["id"], "name": sup.get("name") or "Supplément",
+                      "quantity": qty, "amount_ttc": amt, "vat_rate": float(sup.get("vat_rate") or 0)})
+        total += amt
+    return lines, round(total, 2)
+
+
 class ReservationIn(BaseModel):
     property_id: str
     guest_name: str
@@ -105,6 +167,7 @@ class ReservationIn(BaseModel):
     nights_total: float = 0      # prix des nuitées
     cleaning_fee: float = 0      # frais de ménage
     tourist_tax: float = 0       # taxe de séjour
+    taxable_guests: int = 0      # personnes assujetties non exonérées (0 = tous les voyageurs)
     total_price: float = 0
     status: str = "demande"  # demande|confirmee|arrivee|depart|annulee
     notes: str = ""
@@ -289,6 +352,8 @@ async def _send_key_instructions(uid: str, reservation: dict, prop: dict, base_u
     body = _build_keys_message(reservation, prop, base_url)
     async with httpx.AsyncClient(timeout=30) as http:
         await adapter.send_message(http, reservation["lodgify_id"], body, "Récupération des clés")
+    await log_guest_message(uid, reservation.get("id") or "", "platform", "cles", body,
+                            subject="Récupération des clés")
     return True, "sent"
 class SendKeysIn(BaseModel):
     base_url: str = ""
@@ -358,6 +423,10 @@ async def _send_booking_confirmation(uid: str, r: dict, tx: dict):
         "</div>"
     )
     await send_email(to=email, subject=f"{brand} — Réservation confirmée", html=html)
+    await log_guest_message(uid, r.get("id") or "", "email", "confirmation",
+                            f"Confirmation de réservation envoyée ({r.get('property_name') or ''}, "
+                            f"{r.get('check_in')} → {r.get('check_out')}).",
+                            to=email, subject=f"{brand} — Réservation confirmée")
 async def _apply_stripe_payment(tx: dict):
     """Enregistre l'effet d'un paiement Stripe réussi sur la réservation (idempotent)."""
     if tx.get("processed"):
@@ -491,8 +560,26 @@ def _match_promo(promos: list, code: str, property_id: str, check_in: str) -> Op
                 continue
         return p
     return None
+def real_tourist_tax(prop: dict, night_prices: list, occupants: int, taxable: int = 0) -> float:
+    """Barème réel français : taux % du (prix de la nuit / occupants), plafonné par pers/nuit,
+    + taxes additionnelles départementale et régionale (% de la taxe), × nuits × assujettis."""
+    rate = float(prop.get("tourist_tax_pct") or 0) / 100.0
+    cap = float(prop.get("tax_cap") or 0)
+    dept = float(prop.get("tax_dept_pct") or 0) / 100.0
+    reg = float(prop.get("regional_tax_pct") or 0) / 100.0
+    occ = max(1, int(occupants or 1))
+    tx = int(taxable or 0) or occ
+    total = 0.0
+    for p in night_prices:
+        base = (float(p or 0) / occ) * rate
+        if cap > 0:
+            base = min(base, cap)
+        total += base * (1 + dept + reg) * tx
+    return round(total, 2)
+
+
 async def _public_quote(uid: str, property_id: str, check_in: str, check_out: str,
-                        guests: int, promo_code: str = ""):
+                        guests: int, promo_code: str = "", supplements: list = None):
     prop = await db.properties.find_one({"id": property_id, "user_id": uid}, {"_id": 0})
     if not prop or prop.get("published") is False:
         raise HTTPException(status_code=404, detail="Logement indisponible")
@@ -514,14 +601,20 @@ async def _public_quote(uid: str, property_id: str, check_in: str, check_out: st
         cur += timedelta(days=1)
     # Prix des nuitées (tarif par jour)
     nights_total = 0.0
+    night_prices = []
     cur = ci
     while cur < co:
-        nights_total += _price_for_day(prop, cur.isoformat())
+        _p = _price_for_day(prop, cur.isoformat())
+        night_prices.append(_p)
+        nights_total += _p
         cur += timedelta(days=1)
     nights_total = round(nights_total, 2)
     cleaning = round(float(prop.get("default_cleaning_fee") or 0), 2)
-    tax = round(nights_total * float(prop.get("tourist_tax_pct") or 0) / 100.0, 2)
-    tax += round(float(prop.get("default_tourist_tax") or 0) * int(guests or 1) * nights, 2) if prop.get("default_tourist_tax") else 0
+    if (prop.get("tax_mode") or "percent") == "real":
+        tax = real_tourist_tax(prop, night_prices, int(guests or 1))
+    else:
+        tax = round(nights_total * float(prop.get("tourist_tax_pct") or 0) / 100.0, 2)
+        tax += round(float(prop.get("default_tourist_tax") or 0) * int(guests or 1) * nights, 2) if prop.get("default_tourist_tax") else 0
     tax = round(tax, 2)
     # Promotion
     promos = await db.promotions.find({"user_id": uid}, {"_id": 0}).to_list(200)
@@ -536,6 +629,11 @@ async def _public_quote(uid: str, property_id: str, check_in: str, check_out: st
         discount = min(discount, nights_total)
         promo_label = promo.get("name") or promo.get("code") or "Promotion"
     total = round(max(0.0, nights_total + cleaning + tax - discount), 2)
+    # Suppléments sélectionnés (extras)
+    sup_lines, sup_total = await compute_supplement_lines(
+        uid, prop, supplements, nights=nights, nights_total=nights_total,
+        cleaning=cleaning, guests=int(guests or 1))
+    total = round(total + sup_total, 2)
     # Acompte selon la politique de réservation choisie pour le site
     deposit_amount = total
     balance_due = 0.0
@@ -556,6 +654,7 @@ async def _public_quote(uid: str, property_id: str, check_in: str, check_out: st
         "check_in": check_in, "check_out": check_out, "guests": int(guests or 1),
         "nights": nights, "nights_total": nights_total, "cleaning_fee": cleaning,
         "tourist_tax": tax, "discount": discount, "promo_label": promo_label,
+        "supplements": sup_lines, "supplements_total": sup_total,
         "total": total, "currency": "EUR",
         "deposit_amount": deposit_amount, "balance_due": balance_due, "deposit_label": deposit_label,
     }
@@ -565,12 +664,14 @@ class PublicQuoteIn(BaseModel):
     check_out: str
     guests: int = 1
     promo_code: str = ""
+    supplements: List[dict] = []
 class PublicBookingIn(BaseModel):
     property_id: str
     check_in: str
     check_out: str
     guests: int = 1
     promo_code: str = ""
+    supplements: List[dict] = []
     guest_name: str
     guest_email: str
     guest_phone: str = ""
@@ -587,6 +688,7 @@ async def _create_public_reservation(uid: str, q: dict, payload: PublicBookingIn
         "check_in": q["check_in"], "check_out": q["check_out"], "guests": q["guests"],
         "nights_total": q["nights_total"], "cleaning_fee": q["cleaning_fee"],
         "tourist_tax": q["tourist_tax"], "total_price": q["total"],
+        "supplements": q.get("supplements") or [],
         "status": status, "notes": payload.notes.strip(),
         "created_at": now_utc().isoformat(),
         "finance": {"total": q["total"], "paid": 0.0, "due": q["total"], "currency": "EUR",
@@ -617,6 +719,10 @@ async def _send_request_ack(uid: str, r: dict, slug: str, origin: str):
             f"<p style='color:#aaa;font-size:12px;margin-top:24px'>{escape(brand)}</p></div>"
         )
         await send_email(to=email, subject=f"{brand} — Demande de réservation reçue", html=html)
+        await log_guest_message(uid, r.get("id") or "", "email", "confirmation",
+                                f"Accusé de réception de la demande envoyé ({r.get('property_name') or ''}, "
+                                f"{r.get('check_in')} → {r.get('check_out')}).",
+                                to=email, subject=f"{brand} — Demande de réservation reçue")
     except Exception as e:
         logger.warning("email accusé demande échoué: %s", e)
 CHECKIN_QUESTION_LABELS = {
@@ -808,6 +914,39 @@ _COMPANY_KEYS = list(DEFAULT_COMPANY.keys())
 def _build_company(doc: Optional[dict]) -> dict:
     c = (doc or {}).get("company") or {}
     return {k: str(c.get(k) or "") for k in _COMPANY_KEYS}
+
+
+DEFAULT_PAYMENT_REMINDERS = {"enabled": False, "mode": "all", "excluded_platforms": [], "days": [7, 3]}
+
+
+def _build_payment_reminders(doc: Optional[dict]) -> dict:
+    c = (doc or {}).get("payment_reminders") or {}
+    mode = c.get("mode") if c.get("mode") in ("all", "direct") else "all"
+    days = [int(d) for d in (c.get("days") or [7, 3]) if str(d).lstrip("-").isdigit()] or [7, 3]
+    return {
+        "enabled": bool(c.get("enabled", False)),
+        "mode": mode,
+        "excluded_platforms": [str(p) for p in (c.get("excluded_platforms") or [])],
+        "days": days,
+    }
+
+
+async def log_guest_message(uid: str, reservation_id: str, channel: str, kind: str,
+                            body: str, to: str = "", subject: str = ""):
+    """Trace tout message sortant vers un voyageur (fiche réservation → Historique).
+    channel: email | whatsapp | platform — kind: manuel | auto | confirmation | cles |
+    caution | facture | relance | avis."""
+    if not reservation_id:
+        return
+    try:
+        await db.message_logs.insert_one({
+            "id": str(uuid.uuid4()), "user_id": uid, "reservation_id": reservation_id,
+            "channel": channel, "kind": kind, "subject": str(subject or "")[:200],
+            "body": str(body or "")[:4000], "to": str(to or ""),
+            "sent_at": now_utc().isoformat(),
+        })
+    except Exception:
+        logger.warning("message log failed for reservation %s", reservation_id)
 CHECKIN_PREDEFINED_KEYS = [
     "guests_count", "phone_email", "arrival_info", "arrival_time",
     "holder_id", "other_guests_id", "upload_id",
@@ -874,6 +1013,7 @@ class PreferencesIn(BaseModel):
     payment_methods: Optional[dict] = None
     ai_auto_draft: Optional[bool] = None
     vat_subjected: Optional[bool] = None
+    payment_reminders: Optional[dict] = None
     company: Optional[dict] = None
     online_checkin: Optional[dict] = None
     monthly_report_enabled: Optional[bool] = None
@@ -1969,7 +2109,98 @@ def _render_message_vars(body: str, reservation: dict, prop: dict, prefs: dict) 
             .replace("{property}", reservation.get("property_name") or prop.get("name", "") or "")
             .replace("{welcome_book}", prop.get("welcome_book_url", "") or "")
             .replace("{caution}", prop.get("deposit_link", "") or "")
-            .replace("{activites}", prefs.get("getyourguide_url", "") or ""))
+            .replace("{activites}", prop.get("getyourguide_url", "") or prefs.get("getyourguide_url", "") or ""))
+
+
+async def run_payment_reminders_for_user(uid: str) -> int:
+    """Relances de paiement automatiques (email au voyageur) : J-7 / J-3 avant l'arrivée
+    si un solde reste dû. Filtrage configurable (toutes / directes, plateformes exclues)."""
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0}) or {}
+    cfg = _build_payment_reminders(prefs)
+    if not cfg["enabled"]:
+        return 0
+    today = date.today()
+    targets = {(today + timedelta(days=int(d))).isoformat(): int(d) for d in cfg["days"]}
+    if not targets:
+        return 0
+    excluded = {str(p).strip().lower() for p in cfg["excluded_platforms"]}
+    reservations = await db.reservations.find(
+        {"user_id": uid, "check_in": {"$in": list(targets.keys())},
+         "status": {"$nin": ["annulee", "bloque", "demande"]}},
+        {"_id": 0}).to_list(2000)
+    if not reservations:
+        return 0
+    company = _build_company(prefs)
+    brand = company.get("name") or "Casanéo"
+    ps = prefs.get("public_site") or {}
+    slug = ps.get("slug") or ""
+    ch = await db.channel_settings.find_one({"user_id": uid}, {"_id": 0}) or {}
+    base = (ch.get("public_base_url") or "").rstrip("/")
+    sent = 0
+    for r in reservations:
+        platform = (r.get("platform") or "Direct").strip()
+        if cfg["mode"] == "direct" and platform.lower() != "direct":
+            continue
+        if platform.lower() in excluded:
+            continue
+        if "paid" in (r.get("markers") or []):
+            continue
+        email = (r.get("guest_email") or "").strip()
+        if not email:
+            continue
+        rr = dict(r)
+        recompute_payment(rr)
+        due = round(float((rr.get("finance") or {}).get("due") or 0), 2)
+        if due <= 0:
+            continue
+        d = targets[r["check_in"]]
+        already = await db.payment_reminders_sent.find_one(
+            {"user_id": uid, "reservation_id": r["id"], "days_before": d})
+        if already:
+            continue
+        pname = r.get("property_name") or "votre logement"
+        ci, co = r.get("check_in", ""), r.get("check_out", "")
+        pay_link = f"{base}/book/{slug}/pay/{r['id']}" if (base and slug and ps.get("enabled")) else ""
+        pay_block = (
+            '<tr><td align="center" style="padding:8px 32px 20px">'
+            f'<a href="{pay_link}" style="display:inline-block;background:#1c1c1e;color:#ffffff;'
+            'text-decoration:none;font-size:15px;font-weight:bold;padding:13px 26px;border-radius:10px">'
+            'Régler mon solde</a></td></tr>'
+        ) if pay_link else ""
+        subject = f"Rappel — solde de {due:.2f} € à régler pour votre séjour"
+        html = (
+            '<table role="presentation" width="100%" style="background:#f5f5f7;padding:24px 0"><tr><td align="center">'
+            '<table role="presentation" width="480" style="background:#ffffff;border-radius:16px;'
+            'font-family:Arial,Helvetica,sans-serif;overflow:hidden">'
+            '<tr><td style="padding:28px 32px 8px">'
+            f'<p style="font-size:18px;font-weight:bold;color:#1c1c1e;margin:0">{escape(brand)}</p></td></tr>'
+            '<tr><td style="padding:8px 32px 16px">'
+            f'<p style="font-size:15px;color:#1c1c1e;margin:0 0 12px">Bonjour {escape(r.get("guest_name") or "")},</p>'
+            '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">'
+            f'Votre arrivée à <strong>{escape(pname)}</strong> approche ({ci} → {co}). '
+            f'Il reste un solde de <strong>{due:.2f} €</strong> à régler pour votre séjour.</p>'
+            '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0">'
+            'Merci de procéder au règlement avant votre arrivée.</p></td></tr>'
+            f'{pay_block}'
+            '<tr><td style="padding:0 32px 26px">'
+            f'<p style="font-size:12px;color:#8e8e93;margin:0">Envoyé par {escape(brand)} — '
+            'nous ne demandons jamais vos informations bancaires par email.</p></td></tr>'
+            '</table></td></tr></table>'
+        )
+        try:
+            await send_email(to=email, subject=subject, html=html)
+        except Exception:
+            logger.warning("relance paiement échouée pour la réservation %s", r.get("id"))
+            continue
+        await db.payment_reminders_sent.insert_one({
+            "id": str(uuid.uuid4()), "user_id": uid, "reservation_id": r["id"],
+            "days_before": d, "amount_due": due, "to": email,
+            "sent_at": now_utc().isoformat()})
+        await log_guest_message(uid, r["id"], "email", "relance",
+                                f"Rappel de paiement : solde de {due:.2f} € pour {pname} ({ci} → {co}).",
+                                to=email, subject=subject)
+        sent += 1
+    return sent
 
 
 async def run_automations_for_user(uid: str):
@@ -2012,12 +2243,13 @@ async def run_automations_for_user(uid: str):
                         "{property}", r.get("property_name") or "").replace(
                         "{welcome_book}", (pmap.get(r.get("property_id"), {}) or {}).get("welcome_book_url", "") or "").replace(
                         "{caution}", (pmap.get(r.get("property_id"), {}) or {}).get("deposit_link", "") or "").replace(
-                        "{activites}", _gyg)
+                        "{activites}", (pmap.get(r.get("property_id"), {}) or {}).get("getyourguide_url") or _gyg)
                     try:
                         await adapter.send_message(http, r["lodgify_id"], body, t["name"])
                     except Exception:
                         continue
                     markers.add(t["marker_key"])
+                    await log_guest_message(uid, r["id"], "platform", "auto", body, subject=t["name"])
                     changed = True
                     sent += 1
             # Airbnb : caution non requise → envoi auto des clés 1 jour avant l'arrivée
@@ -2031,6 +2263,7 @@ async def run_automations_for_user(uid: str):
                         await db.reservations.update_one(
                             {"user_id": uid, "id": r["id"]},
                             {"$set": {"keys_sent_at": now_utc().isoformat()}})
+                        await log_guest_message(uid, r["id"], "platform", "cles", body, subject="Récupération des clés")
                         sent += 1
                     except Exception:
                         pass
@@ -2050,6 +2283,7 @@ async def run_automations_for_user(uid: str):
                         await db.reservations.update_one(
                             {"user_id": uid, "id": r["id"]},
                             {"$set": {"deposit_reminder_sent_at": now_utc().isoformat()}})
+                        await log_guest_message(uid, r["id"], "platform", "caution", body, subject="Rappel caution")
                         sent += 1
                     except Exception:
                         pass
@@ -2081,6 +2315,7 @@ async def run_automations_for_user(uid: str):
                     await db.reservations.update_one(
                         {"user_id": uid, "id": r["id"]},
                         {"$set": {"review_request_sent_at": now_utc().isoformat()}})
+                    await log_guest_message(uid, r["id"], "platform", "avis", body, subject="Demande d'avis")
                     sent += 1
                 except Exception:
                     pass
@@ -2339,4 +2574,11 @@ __all__ = [
     '_init_storage',
     '_put_object',
     '_get_object',
+    'log_guest_message',
+    '_build_payment_reminders',
+    'run_payment_reminders_for_user',
+    'SupplementIn',
+    'compute_supplement_amount',
+    'compute_supplement_lines',
+    'real_tourist_tax',
 ]
