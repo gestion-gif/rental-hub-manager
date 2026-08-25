@@ -624,3 +624,8 @@
 - Export vers Channex PRODUCTION réussi: Loù Cabanoù (44d3068a-945b-4bfb-bd66-84fed26c262b, occ 4) et Alyoné (ae95c14f-7834-40d8-a615-4c3019e80fce, occ 2), "Logement entier" count=1.
 - Full sync production 500 j envoyé et VÉRIFIÉ via API Channex prod: dispos cohérentes avec les résas Lodgify (26-29/08 bloqués par résa Leon Taisne), tarifs saisonniers OK (120€ fin août).
 - Reste à l'utilisateur: mapping Booking.com / Airbnb dans app.channex.io (Channels). Ensuite activer l'encaissement auto + app Stripe Tokenization sur les propriétés.
+
+## Export COMPLET vers Channex production (2026-08 fork #2)
+- Les 22 logements restants exportés (22/22 ok) → 24 logements au total dans Channex production, tous liés (channex_id + rooms + rate_plans locaux).
+- Full sync production 500 j sur les 24 logements: OK, 0 erreur. Vérifié par échantillon: résa Melia Julien (Loù Cabanoù 03→12/09) → nuits 03-11/09 à 0, 12/09 libre côté API Channex prod.
+- Reste à l'utilisateur: mappings Booking.com (1 channel par Hotel ID) et Airbnb (1 channel par compte Airbnb, plusieurs comptes possédés) dans app.channex.io.
