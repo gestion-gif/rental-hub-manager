@@ -567,3 +567,9 @@
 - Data fix: rooms de la propriété test remises à count_of_rooms=1 (aligné Channex).
 - Vérifié E2E: re-push dispo 2026-09-01..05 → API Channex confirme 0 le 2026-09-02 (nuit réservée), 1 ailleurs, pour les 2 room types.
 - Note utilisateur: la 1re résa test avait été créée sur un logement NON lié à Channex (1b472b65) → aucune sync attendue. Utiliser « Propriété de test - Casanéo ».
+
+## Fix libération ancienne plage lors de modification résa (2026-08 fork #2)
+- Bug: décaler une résa poussait la dispo des nouvelles dates (0) mais l'ancienne restait à 0 dans Channex ET dans db.availability locale.
+- Fix (routers/reservations.py update_reservation): capture old {check_in, check_out, property_id} avant update; si dates/logement changés → _set_property_rooms_availability(old, closed=False), re-fermeture des dates couvertes par d'autres résas actives, puis enqueue_channex_ari(old range).
+- Réparation données: fermeture périmée du 2026-09-02 rouverte + re-push.
+- Vérifié E2E via API (PUT réservation): 26/08→09/09 puis retour → Channex confirme à chaque fois ancienne date=1, nouvelle=0. État final: 26/08 = 0 (résa test utilisateur), tout le reste = 1.

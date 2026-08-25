@@ -51,6 +51,10 @@ async def create_reservation(payload: ReservationIn, user=Depends(get_current_us
 
 @api_router.put("/reservations/{reservation_id}")
 async def update_reservation(reservation_id: str, payload: ReservationIn, user=Depends(get_current_user)):
+    uid = user["user_id"]
+    old = await db.reservations.find_one(
+        {"id": reservation_id, "user_id": uid},
+        {"_id": 0, "check_in": 1, "check_out": 1, "property_id": 1})
     data = payload.dict()
     name = f"{data.get('guest_first_name', '')} {data.get('guest_last_name', '')}".strip()
     if name:
@@ -82,6 +86,20 @@ async def update_reservation(reservation_id: str, payload: ReservationIn, user=D
             {"$set": {"finance": item["finance"]}})
         item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     await ensure_cleaning(user["user_id"], item["property_id"], item.get("check_out"), item.get("status"))
+    # Dates ou logement modifiés : libérer l'ancienne plage (localement + côté Channex)
+    if old and (old.get("check_in") != item.get("check_in")
+                or old.get("check_out") != item.get("check_out")
+                or old.get("property_id") != item.get("property_id")):
+        await _set_property_rooms_availability(uid, old["property_id"], old.get("check_in"), old.get("check_out"), False)
+        # Re-fermer les dates de l'ancienne plage couvertes par d'autres résas actives
+        others = await db.reservations.find(
+            {"user_id": uid, "property_id": old["property_id"], "id": {"$ne": reservation_id},
+             "status": {"$nin": ["annulee", "demande"]},
+             "check_in": {"$lt": old.get("check_out")}, "check_out": {"$gt": old.get("check_in")}},
+            {"_id": 0, "check_in": 1, "check_out": 1}).to_list(200)
+        for o in others:
+            await _set_property_rooms_availability(uid, old["property_id"], o.get("check_in"), o.get("check_out"), True)
+        await enqueue_channex_ari(uid, old["property_id"], old.get("check_in"), old.get("check_out"), rates=False)
     await _set_property_rooms_availability(user["user_id"], item["property_id"], item.get("check_in"), item.get("check_out"),
                                            item.get("status") != "annulee")
     await enqueue_channex_ari(user["user_id"], item["property_id"], item.get("check_in"), item.get("check_out"), rates=False)
