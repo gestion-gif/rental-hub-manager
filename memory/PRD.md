@@ -635,3 +635,10 @@
 - 1re VRAIE résa production reçue et intégrée: Julie Charpentier (Booking.com, Loù Cabanoù, 27→30/10, 226.54€) via webhook (4 events reçus, feed acquitté). Dates 27-29/10 bien bloquées côté Channex (vérifié API).
 - En attente: connexion Stripe dans Channex User Profile par le user → ensuite installer app stripe_tokenization par API (POST /applications/install {property_id, application_code:"stripe_tokenization"}) sur les 24 logements (tenté: erreur "user has no stripe connection for billing account" tant que Stripe non connecté).
 - Rappel post-déploiement: re-enregistrer le webhook Channex sur l'URL de production.
+
+## Post-déploiement PRODUCTION (2026-08 fork #2)
+- App déployée: https://rental-hub-manager.emergent.host (backend K8s, frontend Expo Go via QR). ⚠️ DB de production SÉPARÉE et VIDE (confirmé par support): données preview non copiées.
+- 2 chemins pour peupler la prod: (A) email support@emergent.sh pour migration DB preview→prod (recommandé pour garder compta/préférences/historique), (B) reconfiguration via l'app prod: login Google → Lodgify connect+import propriétés+import tarifs → Channex connect (clé prod) + IMPORT (pas export!) + activer webhook.
+- Fix anti-doublons (routers/channex.py import): si aucune property avec channex_id, matching par NOM insensible à la casse sur les logements non liés → liaison au lieu de création (rend le chemin B idempotent après import Lodgify).
+- Deployment health check: PASS après fix du delete_many iCal (soft-cancel). Warnings restants non bloquants (URLs auth Emergent hardcodées = normales, store review metadata pour publication stores).
+- RAPPEL WEBHOOK: en prod, re-cliquer "Activer la réception des réservations" pour enregistrer le webhook Channex sur l'URL de prod.

@@ -814,10 +814,14 @@ async def run_ical_sync(user_id: str, property_id: str):
                             "source": "ical", "ical_uid": uid, "created_at": now_utc().isoformat(),
                         })
                         imported += 1; link_imported += 1
-                await db.reservations.delete_many({
-                    "user_id": user_id, "property_id": property_id, "source": "ical",
-                    "platform": platform, "ical_uid": {"$nin": feed_uids},
-                })
+                # Évènements disparus du flux → annulation (jamais de suppression :
+                # un flux vide/partiel transitoire ne doit pas effacer de données)
+                if feed_uids:
+                    await db.reservations.update_many(
+                        {"user_id": user_id, "property_id": property_id, "source": "ical",
+                         "platform": platform, "ical_uid": {"$nin": feed_uids},
+                         "status": {"$ne": "annulee"}},
+                        {"$set": {"status": "annulee"}})
                 meta["last_imported"] = link_imported
                 meta["last_updated"] = link_updated
                 meta["last_count"] = len(valid_events)

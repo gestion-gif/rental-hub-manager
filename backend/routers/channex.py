@@ -257,6 +257,18 @@ async def channex_import(user=Depends(get_current_user)):
             cp = map_channex_property(rp)
             cid = cp["channex_id"]
             existing = await db.properties.find_one({"user_id": uid, "channex_id": cid}, {"_id": 0})
+            if not existing:
+                # Reconnaissance par nom (insensible à la casse) : évite les doublons
+                # quand les logements existent déjà localement (ex: import Lodgify préalable)
+                import re as _re
+                existing = await db.properties.find_one(
+                    {"user_id": uid,
+                     "name": {"$regex": f"^{_re.escape(cp['title'].strip())}$", "$options": "i"},
+                     "$or": [{"channex_id": None}, {"channex_id": ""}, {"channex_id": {"$exists": False}}]},
+                    {"_id": 0})
+                if existing:
+                    await db.properties.update_one(
+                        {"id": existing["id"], "user_id": uid}, {"$set": {"channex_id": cid}})
             if existing:
                 pid = existing["id"]
             else:
