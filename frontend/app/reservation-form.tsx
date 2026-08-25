@@ -82,6 +82,9 @@ export default function ReservationForm() {
   const [cvMsg, setCvMsg] = useState<string | null>(null);
   const [checklist, setChecklist] = useState({ caution: false, keys: false, welcome_book: false, cleaning: false });
   const [contactOpen, setContactOpen] = useState(false);
+  const [invoice, setInvoice] = useState<any>(null);
+  const [invBusy, setInvBusy] = useState(false);
+  const [invMsg, setInvMsg] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     property_id: "",
@@ -131,6 +134,10 @@ export default function ReservationForm() {
               status: r.status,
               notes: r.notes || "",
             });
+            try {
+              const inv = await api.get(`/reservations/${id}/invoice`);
+              if (inv?.exists) setInvoice(inv);
+            } catch {}
           }
         } else if (pr.length) {
           const pid = params.property && pr.some((p: any) => p.id === params.property) ? params.property : pr[0].id;
@@ -410,6 +417,33 @@ export default function ReservationForm() {
 
 
 
+  async function sendInvoice() {
+    if (invBusy) return;
+    if (!form.guest_email.trim()) {
+      setInvMsg("Renseignez l'email du voyageur pour envoyer la facture.");
+      return;
+    }
+    setInvBusy(true);
+    setInvMsg(null);
+    try {
+      const res = await api.post(`/reservations/${id}/invoice/email`, {});
+      if (res.sent) {
+        setInvoice({ exists: true, number: res.number, sent_at: res.sent_at, sent_to: res.to });
+        setInvMsg(`Facture ${res.number} envoyée à ${res.to} ✓`);
+      } else if (res.reason === "no_guest_email") {
+        setInvMsg("Renseignez l'email du voyageur pour envoyer la facture.");
+      } else {
+        setInvMsg("Envoi impossible.");
+      }
+    } catch (e: any) {
+      setInvMsg(e?.message || "Erreur lors de l'envoi de la facture.");
+    } finally {
+      setInvBusy(false);
+    }
+  }
+
+
+
   useEffect(() => {
     if (!editing) return;
     (async () => {
@@ -605,6 +639,23 @@ export default function ReservationForm() {
               <Ionicons name="paper-plane-outline" size={18} color={colors.brandPrimary} />
               <Text style={styles.contactBtnText}>Contacter le voyageur</Text>
             </Pressable>
+          )}
+          {editing && showPrices && (
+            <>
+              <Pressable testID="send-invoice-btn" onPress={sendInvoice} disabled={invBusy} style={[styles.contactBtn, invBusy && { opacity: 0.6 }]}>
+                {invBusy ? (
+                  <ActivityIndicator size="small" color={colors.brandPrimary} />
+                ) : (
+                  <Ionicons name="document-text-outline" size={18} color={colors.brandPrimary} />
+                )}
+                <Text style={styles.contactBtnText}>Envoyer la facture au voyageur</Text>
+              </Pressable>
+              {(invMsg || invoice?.sent_at) ? (
+                <Text style={styles.invoiceStatus} testID="invoice-status">
+                  {invMsg || `Facture ${invoice.number} envoyée le ${dayjs(invoice.sent_at).format("DD/MM/YYYY")} à ${invoice.sent_to}`}
+                </Text>
+              ) : null}
+            </>
           )}
           {editing && (
             <ContactGuestModal visible={contactOpen} reservationId={String(id)} onClose={() => setContactOpen(false)} />
@@ -930,6 +981,7 @@ function ChipRow({ items, value, onSelect, prefix }: any) {
 const styles = StyleSheet.create({
   contactBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: spacing.sm, paddingVertical: 12, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary + "10" },
   contactBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.brandPrimary },
+  invoiceStatus: { fontFamily: font.medium, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, textAlign: "center", marginTop: 6 },
 
   cvCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
   clCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },

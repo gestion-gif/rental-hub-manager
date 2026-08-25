@@ -873,6 +873,7 @@ class PreferencesIn(BaseModel):
     commission_rates: Optional[dict] = None
     payment_methods: Optional[dict] = None
     ai_auto_draft: Optional[bool] = None
+    vat_subjected: Optional[bool] = None
     company: Optional[dict] = None
     online_checkin: Optional[dict] = None
     monthly_report_enabled: Optional[bool] = None

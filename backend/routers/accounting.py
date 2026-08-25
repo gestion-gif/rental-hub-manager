@@ -415,6 +415,7 @@ async def accounting_summary(
     if owner_id:
         q["owner_id"] = owner_id
     items = await db.transactions.find(q, {"_id": 0}).to_list(20000)
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0, "vat_subjected": 1})
     pname, powner, oname = await _prop_owner_maps(uid)
 
     def blank():
@@ -465,6 +466,7 @@ async def accounting_summary(
             "ht": round(recettes["ht"] - depenses["ht"], 2),
         },
         "tva": {"collectee": tva_col, "deductible": tva_ded, "nette": round(tva_col - tva_ded, 2)},
+        "vat_subjected": bool((prefs or {}).get("vat_subjected", False)),
         "by_category": {"recette": cat_rec, "depense": cat_dep},
         "by_property": sorted(by_prop.values(), key=lambda x: -(x["recettes"] + x["depenses"])),
         "by_owner": sorted(by_owner.values(), key=lambda x: -(x["recettes"] + x["depenses"])),

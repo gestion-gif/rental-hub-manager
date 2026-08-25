@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput, Alert } from "react-native";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput, Alert, Switch } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -37,6 +37,7 @@ export default function CompanySettings() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [form, setForm] = useState<Company>(EMPTY);
+  const [vatSubjected, setVatSubjected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -45,6 +46,7 @@ export default function CompanySettings() {
     try {
       const prefs = await api.get("/preferences");
       setForm({ ...EMPTY, ...(prefs.company || {}) });
+      setVatSubjected(!!prefs.vat_subjected);
     } catch {}
     setLoading(false);
   }, []);
@@ -78,7 +80,7 @@ export default function CompanySettings() {
     if (saving) return;
     setSaving(true);
     try {
-      await api.put("/preferences", { company: form });
+      await api.put("/preferences", { company: form, vat_subjected: vatSubjected });
       Alert.alert("Enregistré", "Les coordonnées de votre société ont été enregistrées. Elles apparaîtront sur les relevés PDF et emails.");
     } catch {
       Alert.alert("Erreur", "Enregistrement impossible.");
@@ -158,6 +160,24 @@ export default function CompanySettings() {
             </View>
           </View>
 
+          <View style={styles.vatCard}>
+            <View style={{ flex: 1, paddingRight: spacing.md }}>
+              <Text style={styles.vatTitle}>Soumis à TVA (20 %)</Text>
+              <Text style={styles.vatHint}>
+                {vatSubjected
+                  ? "Vos factures clients détaillent la TVA (20 % sur nuitées et ménage) et la comptabilité affiche le suivi de TVA."
+                  : "La mention « TVA non applicable, art. 293 B du CGI » figurera sur vos factures clients."}
+              </Text>
+            </View>
+            <Switch
+              testID="company-vat-toggle"
+              value={vatSubjected}
+              onValueChange={setVatSubjected}
+              trackColor={{ false: colors.border, true: colors.brandPrimary }}
+              thumbColor="#fff"
+            />
+          </View>
+
           <Pressable
             testID="company-save"
             onPress={save}
@@ -189,6 +209,9 @@ const styles = StyleSheet.create({
   logoRemove: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
   logoRemoveText: { fontFamily: font.medium, fontSize: fontSize.xs, color: "#E5484D" },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
+  vatCard: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md },
+  vatTitle: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface, marginBottom: 4 },
+  vatHint: { fontFamily: font.regular, fontSize: fontSize.xs, color: colors.onSurfaceTertiary, lineHeight: 17 },
   fullField: { width: "100%", marginBottom: spacing.md },
   halfField: { width: "48%", marginBottom: spacing.md },
   fieldLabel: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary, marginBottom: 6 },

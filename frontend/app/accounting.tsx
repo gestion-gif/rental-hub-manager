@@ -232,18 +232,22 @@ function ApercuTab({ summary, onImport, importing }: any) {
         <Text style={styles.resultSub}>HT : {s.resultat.ht.toFixed(2)} €</Text>
       </View>
 
-      <Text style={styles.sectionTitle}>TVA</Text>
-      <View style={styles.tvaCard}>
-        <TvaRow label="Collectée (sur recettes)" value={s.tva.collectee} />
-        <TvaRow label="Déductible (sur dépenses)" value={s.tva.deductible} />
-        <View style={styles.tvaSep} />
-        <View style={styles.tvaRow}>
-          <Text style={styles.tvaNetLabel}>TVA nette {s.tva.nette >= 0 ? "à reverser" : "crédit"}</Text>
-          <Text style={[styles.tvaNetValue, { color: s.tva.nette >= 0 ? colors.onSurface : colors.success }]}>
-            {Math.abs(s.tva.nette).toFixed(2)} €
-          </Text>
-        </View>
-      </View>
+      {s.vat_subjected !== false && (
+        <>
+          <Text style={styles.sectionTitle}>TVA</Text>
+          <View style={styles.tvaCard}>
+            <TvaRow label="Collectée (sur recettes)" value={s.tva.collectee} />
+            <TvaRow label="Déductible (sur dépenses)" value={s.tva.deductible} />
+            <View style={styles.tvaSep} />
+            <View style={styles.tvaRow}>
+              <Text style={styles.tvaNetLabel}>TVA nette {s.tva.nette >= 0 ? "à reverser" : "crédit"}</Text>
+              <Text style={[styles.tvaNetValue, { color: s.tva.nette >= 0 ? colors.onSurface : colors.success }]}>
+                {Math.abs(s.tva.nette).toFixed(2)} €
+              </Text>
+            </View>
+          </View>
+        </>
+      )}
 
       {depCats.length > 0 && (
         <>

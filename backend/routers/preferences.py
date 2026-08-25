@@ -12,6 +12,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "commission_rates": _build_commission_rates(doc),
         "payment_methods": _build_payment_methods(doc),
         "ai_auto_draft": bool((doc or {}).get("ai_auto_draft", True)),
+        "vat_subjected": bool((doc or {}).get("vat_subjected", False)),
         "company": _build_company(doc),
         "online_checkin": _build_checkin(doc),
         "monthly_report_enabled": bool((doc or {}).get("monthly_report_enabled", True)),
@@ -70,6 +71,9 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
 
     if payload.ai_auto_draft is not None:
         set_doc["ai_auto_draft"] = bool(payload.ai_auto_draft)
+
+    if payload.vat_subjected is not None:
+        set_doc["vat_subjected"] = bool(payload.vat_subjected)
 
     if payload.company is not None:
         set_doc["company"] = {k: str(payload.company.get(k) or "").strip() for k in _COMPANY_KEYS}
@@ -153,6 +157,7 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "commission_rates": _build_commission_rates(doc),
         "payment_methods": _build_payment_methods(doc),
         "ai_auto_draft": bool((doc or {}).get("ai_auto_draft", True)),
+        "vat_subjected": bool((doc or {}).get("vat_subjected", False)),
         "company": _build_company(doc),
         "online_checkin": _build_checkin(doc),
         "monthly_report_enabled": bool((doc or {}).get("monthly_report_enabled", True)),

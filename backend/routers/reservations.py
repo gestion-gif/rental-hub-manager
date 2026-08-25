@@ -1,6 +1,10 @@
 # ruff: noqa: F403, F405
 from core import *  # noqa: F401
 from core import enqueue_channex_ari  # noqa: F401
+import base64
+from html import escape
+from pymongo import ReturnDocument
+from invoicing import build_invoice_pdf, fr_date
 
 
 @api_router.get("/reservations")
@@ -494,6 +498,107 @@ async def checkout_status(session_id: str, user=Depends(get_current_user)):
         "status": st.status,
         "payment_status": st.payment_status,
     }
+
+
+@api_router.get("/reservations/{reservation_id}/invoice")
+async def get_guest_invoice(reservation_id: str, user=Depends(get_current_user)):
+    """Facture client de la réservation (si déjà générée)."""
+    inv = await db.invoices.find_one(
+        {"reservation_id": reservation_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not inv:
+        return {"exists": False}
+    return {"exists": True, **inv}
+
+
+@api_router.post("/reservations/{reservation_id}/invoice/email")
+async def email_guest_invoice(reservation_id: str, user=Depends(get_current_user)):
+    """Génère la facture PDF du séjour (numérotation séquentielle annuelle) et l'envoie
+    par email au voyageur en pièce jointe. Réutilise le même numéro en cas de renvoi."""
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Réservation introuvable")
+    guest_email = (r.get("guest_email") or "").strip()
+    if not guest_email:
+        return {"sent": False, "reason": "no_guest_email"}
+    prop = await db.properties.find_one({"id": r.get("property_id"), "user_id": uid}, {"_id": 0}) or {}
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
+    company = _build_company(prefs)
+    vat_subjected = bool((prefs or {}).get("vat_subjected", False))
+
+    # Numéro séquentiel annuel — réutilisé si une facture existe déjà pour cette réservation
+    inv = await db.invoices.find_one({"reservation_id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not inv:
+        year = now_utc().year
+        ctr = await db.invoice_counters.find_one_and_update(
+            {"user_id": uid, "year": year}, {"$inc": {"seq": 1}},
+            upsert=True, return_document=ReturnDocument.AFTER)
+        inv = {"id": str(uuid.uuid4()), "user_id": uid, "reservation_id": reservation_id,
+               "number": f"{year}-{int(ctr['seq']):04d}", "year": year, "seq": int(ctr["seq"]),
+               "date": now_utc().date().isoformat(), "created_at": now_utc().isoformat()}
+        await db.invoices.insert_one(dict(inv))
+
+    a = _res_amounts(r)
+    try:
+        nights = (datetime.fromisoformat(r["check_out"]).date()
+                  - datetime.fromisoformat(r["check_in"]).date()).days
+    except Exception:
+        nights = 0
+    total = round(a["nights"] + a["cleaning"] + a["tax"], 2)
+    rate = 20.0 if vat_subjected else 0.0
+    items = [{"label": f"Hébergement — {nights} nuit{'s' if nights > 1 else ''}",
+              "ttc": a["nights"], "vat_rate": rate}]
+    if a["cleaning"] > 0:
+        items.append({"label": "Frais de ménage", "ttc": a["cleaning"], "vat_rate": rate})
+    if a["tax"] > 0:
+        items.append({"label": "Taxe de séjour", "ttc": a["tax"], "vat_rate": 0.0})
+
+    logo_bytes = None
+    if company.get("logo_path"):
+        try:
+            logo_bytes, _ct = await run_in_threadpool(_get_object, company["logo_path"])
+        except Exception:
+            logo_bytes = None
+
+    ci, co = fr_date(r.get("check_in")), fr_date(r.get("check_out"))
+    pname = prop.get("name") or r.get("property_name") or "votre logement"
+    pdf_bytes = await run_in_threadpool(
+        build_invoice_pdf,
+        number=inv["number"], issue_date=fr_date(inv["date"]), company=company,
+        vat_subjected=vat_subjected,
+        guest={"name": r.get("guest_name") or "", "email": guest_email,
+               "phone": r.get("guest_phone") or ""},
+        stay={"property_name": pname, "check_in": ci, "check_out": co,
+              "nights": nights, "guests": int(r.get("guests") or 1)},
+        items=items, total_ttc=total, logo_bytes=logo_bytes)
+
+    brand = company.get("name") or "Casanéo"
+    subject = f"Votre facture {inv['number']} — {pname}"
+    html = (
+        '<table role="presentation" width="100%" style="background:#f5f5f7;padding:24px 0"><tr><td align="center">'
+        '<table role="presentation" width="480" style="background:#ffffff;border-radius:16px;'
+        'font-family:Arial,Helvetica,sans-serif;overflow:hidden">'
+        '<tr><td style="padding:28px 32px">'
+        f'<p style="font-size:18px;font-weight:bold;color:#1c1c1e;margin:0 0 14px">{escape(brand)}</p>'
+        f'<p style="font-size:15px;color:#1c1c1e;margin:0 0 12px">Bonjour {escape(r.get("guest_name") or "")},</p>'
+        '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">'
+        f'Veuillez trouver en pièce jointe votre facture <strong>n° {escape(inv["number"])}</strong> '
+        f'concernant votre séjour à <strong>{escape(pname)}</strong> du {ci} au {co}, '
+        f'pour un montant total de <strong>{total:.2f} €</strong>.</p>'
+        '<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px">Merci de votre confiance et à bientôt !</p>'
+        f'<p style="font-size:12px;color:#8e8e93;margin:16px 0 0">Envoyé par {escape(brand)} — '
+        'nous ne demandons jamais vos informations bancaires par email.</p>'
+        '</td></tr></table></td></tr></table>'
+    )
+    await send_email(to=guest_email, subject=subject, html=html,
+                     attachments=[{"filename": f"Facture-{inv['number']}.pdf",
+                                   "content": base64.b64encode(pdf_bytes).decode()}])
+    sent_at = now_utc().isoformat()
+    await db.invoices.update_one(
+        {"id": inv["id"], "user_id": uid},
+        {"$set": {"sent_at": sent_at, "sent_to": guest_email, "total": total,
+                  "vat_subjected": vat_subjected}})
+    return {"sent": True, "number": inv["number"], "to": guest_email, "sent_at": sent_at}
 
 
 @api_router.post("/webhook/stripe")

@@ -503,3 +503,16 @@
 - Frontend : `app/accounting.tsx` (onglets Aperçu/Journal/Récurrent, sélecteur de mois, import revenus, cartes résultat/TVA, répartitions), `app/accounting-form.tsx` (écriture recette/dépense + photo justificatif + scan IA), `app/accounting-recurring-form.tsx`. Entrée menu latéral "Comptabilité" (Revenus, gate revenue). Écrans modaux enregistrés dans app/_layout.tsx.
 - FAQ mise à jour (`src/data/help.ts`) : topic "comptabilite" + SCREEN_HELP.accounting ; article bandeau félicitations + son dans topic "reservations".
 - Tests : iteration_27 backend 11/11 pass (dont scan IA réel : ticket Carrefour 16.05€ TVA 5.5% correctement lu). Aucune API mockée.
+
+## Session (2026-08 fork) — Facture client PDF + toggle "Soumis à TVA"
+### Paramètres société (`app/settings/company.tsx`)
+- Toggle "Soumis à TVA (20 %)" (Switch, testID company-vat-toggle), stocké dans `preferences.vat_subjected` (bool, défaut false). PUT/GET /api/preferences (`PreferencesIn.vat_subjected` dans core.py).
+- Impact comptabilité : `GET /api/accounting/summary` renvoie `vat_subjected` ; la carte TVA de l'aperçu (`app/accounting.tsx`) est masquée si false.
+### Facture client (PDF + email)
+- `backend/invoicing.py` (nouveau) : `build_invoice_pdf()` avec fpdf2 (2.8.8, ajouté à requirements.txt), police LiberationSans (unicode €/accents), logo société depuis Object Storage, blocs Facturé à / Séjour, tableau HT/TVA/TTC si assujetti sinon montant simple + mention "TVA non applicable, art. 293 B du CGI". Taxe de séjour toujours TVA 0 %. TVA 20 % sur nuitées + ménage (montants TTC).
+- `backend/emailer.py` : `send_email(..., attachments=[{filename, content(base64)}])` — le proxy Emergent/Resend accepte les pièces jointes (vérifié, 202).
+- Endpoints (routers/reservations.py) :
+  - `GET /api/reservations/{id}/invoice` → {exists, number, sent_at, sent_to}
+  - `POST /api/reservations/{id}/invoice/email` → génère + envoie le PDF au guest_email. Numérotation séquentielle annuelle atomique (`invoice_counters` {user_id, year, seq} → n° "2026-0001") ; le numéro est réutilisé en cas de renvoi. Collections : `invoices`, `invoice_counters`.
+- Frontend (`app/reservation-form.tsx`) : bouton "Envoyer la facture au voyageur" (testID send-invoice-btn, visible en édition si rôle voit les prix), statut inline "Facture N envoyée le … à …".
+- Tests : E2E curl (envoi réel à delivered@resend.dev, numéro 2026-0001, renvoi = même numéro, toggle TVA persisté, summary expose vat_subjected) + rendu PDF vérifié (2 modes TVA) + screenshots UI. Données de test nettoyées (compteur remis à zéro).
