@@ -1103,9 +1103,11 @@ async def enqueue_channex_availability(uid: str, property_id: str, date_from: st
             {"user_id": uid, "room_id": room["id"], "closed": True,
              "date": {"$gte": d0.isoformat(), "$lte": d1.isoformat()}}, {"_id": 0, "date": 1}).to_list(1000)
         closed_dates = {c["date"] for c in closed_docs}
+        # Logement entier : une réservation bloque tout → dispo 0 (sinon Channex
+        # plafonne cap-1 à count_of_rooms et la date reste vendable → surbooking).
         values += _date_ranges(
             d0, d1,
-            lambda d, cd=closed_dates, c=cap: max(0, c - (1 if (d.isoformat() in booked or d.isoformat() in cd) else 0)),
+            lambda d, cd=closed_dates, c=cap: 0 if (d.isoformat() in booked or d.isoformat() in cd) else c,
             lambda v, rt=cx_rt: {"property_id": cx_pid, "room_type_id": rt, "availability": v},
         )
     if values:

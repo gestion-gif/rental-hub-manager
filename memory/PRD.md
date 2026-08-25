@@ -558,3 +558,12 @@
 - Backend: GET /api/accounting/annual?year=YYYY (routers/accounting.py) → months[12] {month, recettes, depenses, recettes_ht, depenses_ht, resultat, resultat_ht}, totals, + prev_year/prev_months/prev_totals (N-1 pour comparaison, requête unique sur 2 ans).
 - Frontend (accounting.tsx): nouvel onglet "Annuel" (tab-annuel) entre Aperçu et Journal. Sélecteur de période bascule en année quand l'onglet est actif. Cartes Recettes/Dépenses/Résultat annuels (+ % vs N-1 si données), tableau 12 mois avec double barres (recettes vertes / dépenses rouges, échelle sur le max), résultat coloré + rappel N-1, meilleur mois marqué d'une étoile, ligne Total. Tap sur un mois (annual-month-YYYY-MM) → ouvre l'Aperçu sur ce mois. FAB masqué sur Annuel/Récurrent.
 - Testé: curl backend OK (totaux 2026 corrects), screenshot navigation onglet + tap mois → Aperçu septembre 2026 OK.
+
+## Fix critique sync dispo Channex (2026-08 fork #2)
+- Bug: résa test ne bloquait pas la date dans Channex. Cause racine: rooms locales avaient count_of_rooms=5 (import périmé) alors que Channex=1 → push dispo = 5-1=4 → Channex plafonne à count_of_rooms(1) → date restait vendable (risque surbooking).
+- Fix 1 (core.py enqueue_channex_availability): logement entier → date réservée/fermée = dispo **0** (au lieu de cap-1), sinon cap.
+- Fix 2 (routers/channex.py full_sync): même logique 0/cap.
+- Fix 3 (routers/channex.py import): rafraîchit count_of_rooms depuis Channex pour les rooms existantes (données non périmées).
+- Data fix: rooms de la propriété test remises à count_of_rooms=1 (aligné Channex).
+- Vérifié E2E: re-push dispo 2026-09-01..05 → API Channex confirme 0 le 2026-09-02 (nuit réservée), 1 ailleurs, pour les 2 room types.
+- Note utilisateur: la 1re résa test avait été créée sur un logement NON lié à Channex (1b472b65) → aucune sync attendue. Utiliser « Propriété de test - Casanéo ».

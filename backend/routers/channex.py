@@ -199,9 +199,10 @@ async def channex_full_sync(payload: FullSyncIn = Body(default=FullSyncIn()),
             for room in rooms:
                 cap = int(room.get("count_of_rooms") or 1)
                 cx_rt = room["channex_room_type_id"]
+                # Logement entier : réservé → dispo 0 pour toutes les room types
                 avail_values += _date_ranges(
                     today, end,
-                    lambda d: max(0, cap - (1 if d.isoformat() in booked else 0)),
+                    lambda d, c=cap: 0 if d.isoformat() in booked else c,
                     lambda v, rt=cx_rt: {"property_id": cx_pid, "room_type_id": rt, "availability": v},
                 )
             # 1 appel tarifs+restrictions : tous les rate plans (prix saison → centimes, min stay)
@@ -275,6 +276,10 @@ async def channex_import(user=Depends(get_current_user)):
                 ex_room = await db.rooms.find_one({"user_id": uid, "channex_room_type_id": rtid}, {"_id": 0})
                 if ex_room:
                     room_id = ex_room["id"]
+                    # Rafraîchit la capacité depuis Channex (évite un cap local périmé)
+                    await db.rooms.update_one(
+                        {"id": room_id, "user_id": uid},
+                        {"$set": {"count_of_rooms": cr.get("count_of_rooms") or 1}})
                 else:
                     room_id = str(uuid.uuid4())
                     await db.rooms.insert_one({
