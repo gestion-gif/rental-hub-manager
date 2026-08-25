@@ -619,3 +619,8 @@
 2. IMPORT TARIFS LODGIFY: LodgifyAdapter.get_property + rates_calendar (lodgify.py). POST /api/channel/import-rates: prix par défaut (is_default) → base_price, jours à prix différent → saisons (plages consécutives même prix, max 120). Résultat: 24/24 logements maj (ex: Loù Cabanoù base 68€ + 18 saisons).
 3. ALERTES ÉCHEC ENCAISSEMENT: _record_auto_charge_error (core.py) envoie un email au gestionnaire (db.users.email) à la tentative 1 et à l'abandon (3/3) avec résa, montant dû, motif, action à faire.
 4. EXPORT ANNUEL PDF/CSV (accounting.tsx): boutons annual-export-pdf / annual-export-csv dans l'onglet Annuel. PDF: tableau 12 mois + N-1 + totaux + HT (expo-print). CSV: Mois;Recettes;Dépenses;Résultat TTC;HT;N-1 + ligne TOTAL (; décimales virgule, BOM). Testé: resultat-annuel-2026.csv téléchargé.
+
+## Premier export PRODUCTION: Loù Cabanoù + Alyoné (2026-08 fork #2)
+- Export vers Channex PRODUCTION réussi: Loù Cabanoù (44d3068a-945b-4bfb-bd66-84fed26c262b, occ 4) et Alyoné (ae95c14f-7834-40d8-a615-4c3019e80fce, occ 2), "Logement entier" count=1.
+- Full sync production 500 j envoyé et VÉRIFIÉ via API Channex prod: dispos cohérentes avec les résas Lodgify (26-29/08 bloqués par résa Leon Taisne), tarifs saisonniers OK (120€ fin août).
+- Reste à l'utilisateur: mapping Booking.com / Airbnb dans app.channex.io (Channels). Ensuite activer l'encaissement auto + app Stripe Tokenization sur les propriétés.
