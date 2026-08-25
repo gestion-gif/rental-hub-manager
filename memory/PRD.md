@@ -596,3 +596,10 @@
 - Evan (Channex) a signalé des GET availability/rates. Causes: (1) curls manuels de debug de l'agent (ponctuels, terminés), (2) /channex/import relisait les tarifs (list_rates 60 j) à CHAQUE import même pour des logements déjà importés.
 - Fix (routers/channex.py import): list_rates appelé uniquement au premier import d'un logement (aucun rate_plan local lié) pour seed du prix de base. Ensuite: push ARI uniquement, aucun pull.
 - Le code ne lit JAMAIS /availability (les lectures vues par Channex étaient les vérifications manuelles de debug).
+
+## Export des logements Casanéo → Channex (2026-08 fork #2)
+- Adapter (channex.py): create_property / create_room_type / create_rate_plan / delete_property.
+- POST /api/channex/export-properties {property_ids?: []} (défaut: tous les logements sans channex_id). Pour chaque logement: Property (title, EUR, FR, Europe/Paris, ville/adresse/CP, email+tél société, property_type "apartment" — "vacation_rental" invalide!), Room Type "Logement entier" (count_of_rooms=1, occ=capacity), Rate Plan "Tarif standard" (options rate en CENTIMES, sell_mode per_room, rate_mode manual). Puis liaison locale: properties.channex_id + insertion rooms/rate_plans (mêmes structures que l'import → sync ARI immédiate). _sync_log export_property par logement, 1 s entre logements (rate limit), maj properties_count.
+- Frontend (settings/channex.tsx): bouton "Exporter mes logements vers Channex" (channex-export, orange) avec confirmDialog + rapport (créés/erreurs).
+- Testé E2E sur staging: export "Loù Cabanoù" → vérifié via API Channex (room type 1 unité occ 4, rate plan 90.00 EUR) + liens locaux corrects. Puis NETTOYÉ (delete Channex + unset channex_id + suppression room/rate locaux) pour ne pas lier de vrais logements au staging avant la bascule production.
+- Reste manuel côté user: mapping Booking.com/Airbnb dans l'UI Channex après export en production.

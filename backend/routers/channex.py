@@ -343,3 +343,102 @@ async def channex_import(user=Depends(get_current_user)):
     return {"ok": True, "imported_properties": imported_props,
             "imported_rooms": imported_rooms, "imported_rate_plans": imported_rates}
 
+
+@api_router.post("/channex/export-properties")
+async def channex_export_properties(body: dict = Body(default={}), user=Depends(get_current_user)):
+    """Crée dans Channex les logements Casanéo non encore liés (Property + Room Type 1 unité
+    + Rate Plan). Ensuite seul le mapping OTA reste à faire dans l'interface Channex.
+    body.property_ids: liste optionnelle (défaut = tous les logements sans channex_id)."""
+    uid = user["user_id"]
+    adapter, doc = await get_channex_adapter(uid)
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channex non connecté")
+    q = {"user_id": uid, "$or": [{"channex_id": None}, {"channex_id": ""}, {"channex_id": {"$exists": False}}]}
+    ids = [str(i) for i in (body.get("property_ids") or []) if i]
+    if ids:
+        q["id"] = {"$in": ids}
+    props = await db.properties.find(q, {"_id": 0}).to_list(500)
+    if not props:
+        raise HTTPException(status_code=400, detail="Aucun logement à exporter (tous déjà liés à Channex)")
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0, "company": 1})
+    company = (prefs or {}).get("company") or {}
+    results = []
+    created = 0
+    async with httpx.AsyncClient(timeout=120) as http:
+        for prop in props:
+            name = prop.get("name") or "Logement"
+            try:
+                capacity = max(1, int(prop.get("capacity") or 2))
+                cx_prop = await adapter.create_property(http, {
+                    "title": name,
+                    "currency": "EUR",
+                    "country": "FR",
+                    "timezone": "Europe/Paris",
+                    "city": prop.get("city") or prop.get("location") or "",
+                    "address": prop.get("address") or "",
+                    "zip_code": prop.get("postal_code") or "",
+                    "email": company.get("email") or "",
+                    "phone": company.get("phone") or "",
+                    "property_type": "apartment",
+                })
+                cx_pid = cx_prop.get("id")
+                if not cx_pid:
+                    raise HTTPException(status_code=502, detail="Channex n'a pas renvoyé d'ID de propriété")
+                cx_room = await adapter.create_room_type(http, {
+                    "property_id": cx_pid,
+                    "title": "Logement entier",
+                    "count_of_rooms": 1,
+                    "occ_adults": capacity,
+                    "occ_children": 0,
+                    "occ_infants": 0,
+                    "default_occupancy": capacity,
+                    "room_kind": "room",
+                })
+                cx_rtid = cx_room.get("id")
+                base_price = float(prop.get("base_price") or 0)
+                cx_rate = await adapter.create_rate_plan(http, {
+                    "property_id": cx_pid,
+                    "room_type_id": cx_rtid,
+                    "title": "Tarif standard",
+                    "currency": "EUR",
+                    "sell_mode": "per_room",
+                    "rate_mode": "manual",
+                    "options": [{"occupancy": capacity, "is_primary": True,
+                                 "rate": int(round(base_price * 100))}],
+                })
+                cx_rpid = cx_rate.get("id")
+                # Lier localement (mêmes structures que l'import → la synchro fonctionne)
+                await db.properties.update_one(
+                    {"id": prop["id"], "user_id": uid}, {"$set": {"channex_id": cx_pid}})
+                room_id = str(uuid.uuid4())
+                await db.rooms.insert_one({
+                    "id": room_id, "user_id": uid, "property_id": prop["id"],
+                    "name": "Logement entier", "channex_room_type_id": cx_rtid,
+                    "max_guests": capacity, "count_of_rooms": 1,
+                    "created_at": now_utc().isoformat(),
+                })
+                await db.rate_plans.insert_one({
+                    "id": str(uuid.uuid4()), "user_id": uid, "property_id": prop["id"],
+                    "room_id": room_id, "name": "Tarif standard",
+                    "channex_rate_plan_id": cx_rpid, "base_price": base_price, "min_stay": 1,
+                    "closed": False, "created_at": now_utc().isoformat(),
+                })
+                created += 1
+                results.append({"property": name, "ok": True, "channex_id": cx_pid})
+                await _sync_log(uid, "export_property", "success", f"{name} → Channex {cx_pid}")
+            except HTTPException as e:
+                results.append({"property": name, "ok": False, "error": str(e.detail)})
+                await _sync_log(uid, "export_property", "error", f"{name}: {e.detail}")
+            except Exception as e:
+                results.append({"property": name, "ok": False, "error": str(e)[:200]})
+                await _sync_log(uid, "export_property", "error", f"{name}: {str(e)[:150]}")
+            await asyncio.sleep(1)  # rate limit Channex
+    # rafraîchir le compteur de logements côté statut
+    try:
+        async with httpx.AsyncClient(timeout=30) as http:
+            count = await adapter.validate(http)
+        await db.channex_settings.update_one({"user_id": uid}, {"$set": {"properties_count": count}})
+    except Exception:
+        pass
+    return {"ok": True, "created": created, "total": len(props), "results": results}
+

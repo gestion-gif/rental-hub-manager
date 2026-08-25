@@ -71,6 +71,34 @@ export default function ChannexSettings() {
     setConnecting(false);
   }
 
+  const [exporting, setExporting] = useState(false);
+
+  async function exportProps() {
+    if (exporting) return;
+    confirmDialog(
+      "Exporter vers Channex",
+      "Créer dans Channex tous vos logements pas encore liés (fiche + type d'hébergement + plan tarifaire) ? Il ne restera que le mapping Booking.com / Airbnb à faire dans l'interface Channex.",
+      "Exporter",
+      async () => {
+        setExporting(true);
+        try {
+          const r = await api.post("/channex/export-properties", {});
+          const errs = (r.results || []).filter((x: any) => !x.ok);
+          notify(
+            "Export terminé",
+            `${r.created}/${r.total} logement(s) créé(s) dans Channex.` +
+            (errs.length ? `\n\nErreurs :\n${errs.map((e: any) => `• ${e.property} : ${e.error}`).join("\n").slice(0, 400)}` : ""),
+          );
+          await load();
+          await refreshProps();
+        } catch (e: any) {
+          notify("Erreur", e?.message || "Export impossible.");
+        }
+        setExporting(false);
+      },
+    );
+  }
+
   async function importChannex() {
     if (importing) return;
     setImporting(true);
@@ -194,6 +222,11 @@ export default function ChannexSettings() {
                 <Pressable testID="channex-import" onPress={importChannex} disabled={importing || (status.properties_count || 0) === 0} style={[styles.importBtn, ((status.properties_count || 0) === 0) && { opacity: 0.5 }]}>
                   {importing ? <ActivityIndicator size="small" color="#fff" /> : (
                     <><Ionicons name="download-outline" size={16} color="#fff" /><Text style={styles.importText}>Importer dans Casanéo (logements, chambres, tarifs)</Text></>
+                  )}
+                </Pressable>
+                <Pressable testID="channex-export" onPress={exportProps} disabled={exporting} style={[styles.syncBtn, { backgroundColor: "#B4690E" }, exporting && { opacity: 0.6 }]}>
+                  {exporting ? <ActivityIndicator size="small" color="#fff" /> : (
+                    <><Ionicons name="arrow-up-circle-outline" size={16} color="#fff" /><Text style={styles.importText}>Exporter mes logements vers Channex</Text></>
                   )}
                 </Pressable>
                 <Pressable testID="channex-fullsync" onPress={fullSync} disabled={syncing || (status.properties_count || 0) === 0} style={[styles.syncBtn, ((status.properties_count || 0) === 0) && { opacity: 0.5 }]}>

@@ -111,6 +111,25 @@ class ChannexAdapter:
         """Acquitte une révision : elle ne réapparaîtra plus dans le feed."""
         return await self._post(http, f"/booking_revisions/{revision_id}/ack", {})
 
+    async def create_property(self, http, payload: dict) -> dict:
+        """Crée une Property Channex. Retourne data {id, attributes}."""
+        body = await self._post(http, "/properties", {"property": payload})
+        return (body or {}).get("data") or {}
+
+    async def create_room_type(self, http, payload: dict) -> dict:
+        body = await self._post(http, "/room_types", {"room_type": payload})
+        return (body or {}).get("data") or {}
+
+    async def create_rate_plan(self, http, payload: dict) -> dict:
+        body = await self._post(http, "/rate_plans", {"rate_plan": payload})
+        return (body or {}).get("data") or {}
+
+    async def delete_property(self, http, property_id: str):
+        r = await http.delete(f"{self.base}/properties/{property_id}", headers=self._headers())
+        if r.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"Channex {r.status_code}: {r.text[:200]}")
+        return True
+
     async def stripe_payment_method(self, http, booking_id: str) -> str:
         """App Stripe Tokenization Channex : crée un PaymentMethod Stripe depuis la carte
         stockée chez Channex. Retourne le token (pm_...) ou '' si indisponible."""
