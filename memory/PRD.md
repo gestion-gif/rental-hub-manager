@@ -608,3 +608,8 @@
 - Demande user: exporter seulement 2 logements. Réponse: Channex facture par logement actif → export sélectif recommandé.
 - settings/channex.tsx: le bouton channex-export ouvre désormais une modale bottom-sheet (export-modal) listant les logements NON liés (GET /properties filtré !channex_id) avec cases à cocher, "Tout sélectionner" (export-select-all), et bouton "Exporter N logement(s)" (export-confirm) → POST /channex/export-properties {property_ids}.
 - Vérifié par screenshot: modale, sélection, libellé dynamique. Note env: la base ne contient que 3 logements (1 exportable) — les "24 propriétés" des notes précédentes n'existent pas dans ce fork.
+
+## Reconnexion Lodgify + nettoyage logement test (2026-08 fork #2)
+- Lodgify reconnecté (clé fournie par l'utilisateur, stockée dans channel_settings). Import: 24 logements Lodgify (23 créés + Loù Cabanoù reconnu par lodgify_id), 0 résa orpheline. ⚠️ Prix de base non fournis par l'API Lodgify: seuls 3 logements ont un base_price — l'utilisateur doit re-saisir ses tarifs avant l'export Channex.
+- "titi et gros minet" SUPPRIMÉ (validé par user): Channex staging (delete_property c7bea5cd), Casanéo (DELETE /properties → property+résas), rooms/rate_plans/availability/interventions nettoyés. Reste 25 logements (24 Lodgify + Propriété de test - Casanéo).
+- "Propriété de test - Casanéo" à SUPPRIMER lors de la bascule production Channex (accord user).
