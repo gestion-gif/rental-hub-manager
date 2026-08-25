@@ -67,6 +67,16 @@ function GlobalView({ insets, router }: any) {
     setBusy(null);
   }
 
+  async function importRates() {
+    setBusy("rates"); setMsg(null);
+    try {
+      const r = await api.post("/channel/import-rates");
+      setMsg({ type: "ok", text: `Tarifs importés pour ${r.updated}/${r.total} logement(s) (prix de base + saisons)` });
+      await load();
+    } catch (e: any) { setMsg({ type: "err", text: e instanceof ApiError ? e.message : "Échec de l'import des tarifs" }); }
+    setBusy(null);
+  }
+
   async function sync() {
     setBusy("sync"); setMsg(null);
     try {
@@ -115,6 +125,8 @@ function GlobalView({ insets, router }: any) {
           )}
           <View style={{ height: spacing.md }} />
           <PrimaryButton testID="import-props" label="Importer les logements Lodgify" onPress={importProps} loading={busy === "import"} variant="secondary" icon={<Ionicons name="download-outline" size={16} color={colors.onSurface} />} />
+          <View style={{ height: spacing.sm }} />
+          <PrimaryButton testID="import-rates" label="Importer les tarifs Lodgify" onPress={importRates} loading={busy === "rates"} variant="secondary" icon={<Ionicons name="pricetag-outline" size={16} color={colors.onSurface} />} />
           <View style={{ height: spacing.sm }} />
           <PrimaryButton testID="sync-reservations" label="Synchroniser les réservations" onPress={sync} loading={busy === "sync"} icon={<Ionicons name="sync" size={16} color={colors.onBrandPrimary} />} />
           <View style={{ height: spacing.sm }} />
