@@ -629,3 +629,9 @@
 - Les 22 logements restants exportés (22/22 ok) → 24 logements au total dans Channex production, tous liés (channex_id + rooms + rate_plans locaux).
 - Full sync production 500 j sur les 24 logements: OK, 0 erreur. Vérifié par échantillon: résa Melia Julien (Loù Cabanoù 03→12/09) → nuits 03-11/09 à 0, 12/09 libre côté API Channex prod.
 - Reste à l'utilisateur: mappings Booking.com (1 channel par Hotel ID) et Airbnb (1 channel par compte Airbnb, plusieurs comptes possédés) dans app.channex.io.
+
+## Vérification synchro production complète (2026-08 fork #2)
+- 21 channels actifs sur Channex prod: 2 Airbnb (airbnb gg: 22 logements, Airbnb Thierry: 2) + 19 Booking.com (1/logement). ⚠️ "Booking cosy cocoon" is_active=FALSE (mapping à finaliser côté user).
+- 1re VRAIE résa production reçue et intégrée: Julie Charpentier (Booking.com, Loù Cabanoù, 27→30/10, 226.54€) via webhook (4 events reçus, feed acquitté). Dates 27-29/10 bien bloquées côté Channex (vérifié API).
+- En attente: connexion Stripe dans Channex User Profile par le user → ensuite installer app stripe_tokenization par API (POST /applications/install {property_id, application_code:"stripe_tokenization"}) sur les 24 logements (tenté: erreur "user has no stripe connection for billing account" tant que Stripe non connecté).
+- Rappel post-déploiement: re-enregistrer le webhook Channex sur l'URL de production.
