@@ -1,0 +1,34 @@
+{
+  "summary": "Backend-only tests for the auto-charge (Booking.com/Channex → Stripe) flow. Created /app/backend/tests/test_iter30_auto_charge.py with 8 tests, all passing (8/8, 100%). Verified: (1) invalid channex_booking_id → HTTP 402 with French error mentioning 'Carte indisponible' / 'Channex', with auto_charge={status:'error', attempts:1, error, at} persisted in Mongo; (2) second call increments attempts to 2; (3) auto_charge.status='done' → 402 'Déjà encaissé'; (4) finance.due=0 → 402 'Aucun montant dû'; (5) GET/PUT /api/preferences auto_charge block works (days_before 45 → persisted → reset to 60/false); (6) regression: GET /api/reservations returns list, GET /api/channex/status returns {connected:true, environment:'production'}. SAFETY respected: only the fake reservation (channex_booking_id 00000000-...-dead) was targeted, Channex returned 404 before any Stripe call — no real card charged. Fake reservation cleaned up by teardown fixture (verified: leftover=None).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter30_auto_charge.py",
+    "/app/test_reports/pytest/pytest_iter30.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "auto_charge_reservation (core.py:1313): idempotency_key now correctly includes token suffix (token[-8:]) — allows retry after Channex issues a new pm_. Verified logic is sound.",
+    "channex.py:133 stripe_payment_method: correctly handles token returned as dict {'id':'pm_...'} by extracting .get('id'). Verified.",
+    "core.py:1367-1372 MOTO fallback: try MOTO first, on 'moto'-mentioned exception retry without MOTO. Sound pattern for accounts that lack MOTO capability.",
+    "core.py:1286 alert email only fired on attempts 1 and 3 — prevents email spam. Good.",
+    "Order of guards in auto_charge_reservation: 'done' check happens AFTER 'due<=0' check (line 1323 vs 1325). So a paid reservation with due=0 returns 'Aucun montant dû' instead of 'Déjà encaissé'. Minor semantic nit — after payment recompute_payment usually sets due=0 anyway, so both messages are technically valid. Tests are written to match current behavior (set due=0 explicitly for TEST 3, keep due=100 for TEST 2)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter30_auto_charge.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A (backend-only per request)"},
+  "seed_data_creation": "Fake reservation test-ac-agent-1 (guest 'Test Agent AC', channex_booking_id 00000000-0000-0000-0000-00000000dead, property fe0ca91b-7fa2-4051-af54-c337ff920e28, user_e235f66c67c3) inserted at test start, deleted at test teardown. Post-run verification: no leftover in Mongo.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Test file uses class-scoped fixtures so all 8 auto-charge tests stay on ONE xdist worker (loadscope groups by class). Do NOT split back into multiple classes or you'll get races on the shared fake reservation. To rerun serially: python -m pytest backend/tests/test_iter30_auto_charge.py -v. SAFETY: never widen the test to any reservation other than 'test-ac-agent-1' — real reservations have LIVE Stripe cards.",
+  "rca_of_issue": "Not applicable — original user issue (Helen Flynn charge failing) was traced by main agent to Stripe Radar rule (outcome=blocked, reason=rule, not_sent_to_network) on the user's own Stripe account. That's environmental and CANNOT be reproduced/fixed from code. What we validated: the 3 code bugs main agent fixed along the way (dict token extraction, idempotency_key with token suffix, MOTO fallback) don't regress the error-handling path — attempts counter increments correctly, French error messages surface, guard clauses ('Déjà encaissé', 'Aucun montant dû') return 402 as designed."
+}

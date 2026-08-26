@@ -653,3 +653,9 @@
 - Clé Stripe LIVE configurée en preview (.env). Encaissement tenté (accord user) sur résa Julie Charpentier 226.54€: flux complet OK (token pm_ récupéré, PaymentIntent live créé) mais REFUS carte decline_code="fraudulent" = VCC Booking non activée avant le check-in (27/10). À réencaisser à partir du 27/10.
 - Amélioration (core.py run_auto_charge_for_user): après 3 échecs, une ultime tentative automatique à partir du jour d'arrivée (date d'activation des VCC Booking).
 - Production: STRIPE_API_KEY à modifier par le USER dans Deployment panel → Secrets → Redeploy (les secrets existants ne sont PAS écrasés par le .env preview lors d'un redeploy — confirmé support). Si onglet Secrets absent/non éditable → support@emergent.sh avec Job ID.
+
+## Bug encaissement Helen Flynn — diagnostic + fixes (2026-08 fork #2)
+- Cause racine du refus (Helen 571.43€ ET Julie 226.54€): outcome=blocked, reason=rule, not_sent_to_network → RÈGLE RADAR du compte Stripe du user bloque le paiement (risk_level highest car débit off-session sans CVC). PAS un bug code. Helen: payment_collect=property (carte perso du client, pas VCC).
+- 3 fixes code (core.py/channex.py): (1) token Channex renvoyé en dict {'id':'pm_'} → extraction, (2) idempotency_key inclut suffixe du token (chaque tentative = nouveau pm_, sinon erreur idempotence), (3) tentative avec MOTO + fallback auto sans MOTO si non activé sur le compte (MOTO actuellement NON activé chez le user).
+- Actions USER côté Stripe: dashboard → paiement bloqué → voir la règle → Radar → Rules (désactiver/allowlist) ; et/ou demander à Stripe l'activation MOTO (le code l'utilisera automatiquement).
+- testing_agent iteration 30: 8/8 pass (chaîne d'erreur 402 FR, attempts++, protections 'Déjà encaissé'/'Aucun montant dû', prefs auto_charge, régression résas+channex status). Test file: backend/tests/test_iter30_auto_charge.py.

@@ -1346,18 +1346,30 @@ async def auto_charge_reservation(uid: str, r: dict) -> dict:
 
     import stripe as stripe_sdk
 
-    def _charge():
+    def _charge(use_moto: bool):
         stripe_sdk.api_key = STRIPE_API_KEY
-        return stripe_sdk.PaymentIntent.create(
+        kwargs = dict(
             amount=int(round(due * 100)), currency=currency,
             payment_method=token, payment_method_types=["card"],
             confirm=True, off_session=True,
             description=f"Réservation {r.get('platform', '')} · {r.get('guest_name', '')} · {r.get('check_in', '')}",
             metadata={"reservation_id": r["id"], "channex_booking_id": str(bid)},
-            idempotency_key=f"autocharge-{r['id']}-{int(round(due * 100))}",
+            idempotency_key=f"autocharge-{r['id']}-{int(round(due * 100))}-{token[-8:]}{'-moto' if use_moto else ''}",
         )
+        if use_moto:
+            # MOTO : encaissement initié par le commerçant (carte transmise par l'OTA).
+            # Exempte de SCA et réduit le scoring fraude. Nécessite l'option MOTO
+            # activée sur le compte Stripe (sinon erreur → fallback sans MOTO).
+            kwargs["payment_method_options"] = {"card": {"moto": True}}
+        return stripe_sdk.PaymentIntent.create(**kwargs)
     try:
-        intent = await asyncio.to_thread(_charge)
+        try:
+            intent = await asyncio.to_thread(_charge, True)
+        except Exception as e_moto:
+            if "moto" in str(e_moto).lower():
+                intent = await asyncio.to_thread(_charge, False)
+            else:
+                raise
     except Exception as e:
         err = f"Stripe : {e}"
         await _record_auto_charge_error(uid, r, err)
