@@ -1871,36 +1871,191 @@ async def _translate_to_fr(uid: str, thread_uid: str, texts: list) -> list:
 class ReplyIn(BaseModel):
     message: str
     subject: str = ""
+class ReviewReplyIn(BaseModel):
+    reply: str = ""
+CX_PROVIDER_LABEL = {"bookingcom": "Booking.com", "airbnb": "Airbnb", "expedia": "Expedia"}
+def _normalize_cx_msgs(raw: list) -> list:
+    """Convertit les messages Channex (JSON:API) en liste normalisée triée."""
+    msgs = []
+    for m in raw or []:
+        a = (m or {}).get("attributes") or {}
+        sender = a.get("sender")
+        text = strip_html(a.get("message", "") or "")
+        if sender == "system":
+            meta = a.get("meta") or {}
+            bd = meta.get("booking_details") or {}
+            if (a.get("message") or "").lower() == "inquiry" and bd:
+                text = (f"Demande de réservation : {bd.get('checkin_date', '')} → "
+                        f"{bd.get('checkout_date', '')} · {bd.get('number_of_guests', '?')} voyageur(s)")
+            elif not text:
+                continue
+        if not text and (a.get("attachments") or []):
+            text = "📎 Pièce jointe"
+        if not text:
+            continue
+        msgs.append({
+            "id": m.get("id"), "text": text, "type": sender,
+            "date": a.get("inserted_at"), "mine": sender == "property",
+        })
+    msgs.sort(key=lambda x: x["date"] or "")
+    return msgs
+async def sync_channex_threads(uid: str, force: bool = False) -> int:
+    """Synchronise les fils de discussion Channex (app Messages) → db.conversations."""
+    adapter, settings = await get_channex_adapter(uid)
+    if not adapter:
+        return 0
+    last = (settings or {}).get("threads_synced_at") or ""
+    if not force and last:
+        try:
+            if (now_utc() - datetime.fromisoformat(last)).total_seconds() < 60:
+                return 0
+        except Exception:
+            pass
+    async with httpx.AsyncClient(timeout=60) as http:
+        threads = await adapter.list_message_threads(http)
+    props = await db.properties.find(
+        {"user_id": uid, "channex_id": {"$nin": [None, ""]}},
+        {"_id": 0, "id": 1, "name": 1, "channex_id": 1}).to_list(500)
+    pmap = {p["channex_id"]: p for p in props}
+    count = 0
+    for t in threads:
+        a = (t or {}).get("attributes") or {}
+        rel = (t or {}).get("relationships") or {}
+        tid = t.get("id")
+        if not tid:
+            continue
+        cx_pid = (((rel.get("property") or {}).get("data")) or {}).get("id")
+        cx_bid = (((rel.get("booking") or {}).get("data")) or {}).get("id")
+        prop = pmap.get(cx_pid) or {}
+        resa = None
+        if cx_bid:
+            resa = await db.reservations.find_one(
+                {"user_id": uid, "channex_booking_id": cx_bid},
+                {"_id": 0, "id": 1, "check_in": 1, "check_out": 1, "guest_name": 1})
+        lm = a.get("last_message") or {}
+        last_at = a.get("last_message_received_at") or a.get("updated_at") or ""
+        conv = await db.conversations.find_one(
+            {"user_id": uid, "thread_uid": tid}, {"_id": 0, "seen_at": 1})
+        seen = (conv or {}).get("seen_at") or ""
+        unread = bool(lm.get("sender") == "guest" and last_at and str(last_at) > str(seen))
+        src = CX_PROVIDER_LABEL.get(str(a.get("provider") or "").lower(), a.get("provider") or "OTA")
+        await db.conversations.update_one(
+            {"user_id": uid, "thread_uid": tid},
+            {"$set": {
+                "user_id": uid, "thread_uid": tid, "provider": "channex",
+                "guest_name": (resa or {}).get("guest_name") or a.get("title") or "Voyageur",
+                "property_id": prop.get("id"), "property_name": prop.get("name") or "",
+                "source": src, "channex_booking_id": cx_bid, "channex_property_id": cx_pid,
+                "arrival": (resa or {}).get("check_in"), "departure": (resa or {}).get("check_out"),
+                "is_closed": bool(a.get("is_closed")),
+                "last_preview": strip_html(lm.get("message") or "")[:160],
+                "last_activity": last_at, "unread": unread,
+            }}, upsert=True)
+        count += 1
+    await db.channex_settings.update_one(
+        {"user_id": uid}, {"$set": {"threads_synced_at": now_utc().isoformat()}})
+    return count
+async def sync_channex_reviews(uid: str, force: bool = False) -> int:
+    """Synchronise les avis OTA Channex (app Reviews) → db.reviews."""
+    adapter, settings = await get_channex_adapter(uid)
+    if not adapter:
+        return 0
+    last = (settings or {}).get("reviews_synced_at") or ""
+    if not force and last:
+        try:
+            if (now_utc() - datetime.fromisoformat(last)).total_seconds() < 600:
+                return 0
+        except Exception:
+            pass
+    async with httpx.AsyncClient(timeout=60) as http:
+        raw = await adapter.list_ota_reviews(http)
+    props = {p["channex_id"]: p for p in await db.properties.find(
+        {"user_id": uid, "channex_id": {"$nin": [None, ""]}},
+        {"_id": 0, "id": 1, "name": 1, "channex_id": 1}).to_list(500)}
+    count = 0
+    for rv in raw:
+        a = (rv or {}).get("attributes") or {}
+        rel = (rv or {}).get("relationships") or {}
+        rid = rv.get("id")
+        if not rid:
+            continue
+        cx_pid = (((rel.get("property") or {}).get("data")) or {}).get("id")
+        prop = props.get(cx_pid) or {}
+        score10 = float(a.get("overall_score") or 0)
+        if a.get("is_hidden") or (not score10 and not (a.get("content") or "").strip()):
+            # Avis Airbnb masqué (visible après feedback hôte) ou vide → ignorer
+            await db.reviews.delete_one({"user_id": uid, "channex_review_id": rid})
+            continue
+        ota = str(a.get("ota") or "")
+        _rp = a.get("reply")
+        if isinstance(_rp, dict):
+            _rp = _rp.get("reply")
+        doc = {
+            "user_id": uid, "channex_review_id": rid,
+            "property_id": prop.get("id") or "", "property_name": prop.get("name") or "",
+            "guest_name": a.get("guest_name") or "",
+            "comment": a.get("content") or "",
+            "rating": round(score10 / 2, 1) if score10 else 0,
+            "score10": score10,
+            "ota": CX_PROVIDER_LABEL.get(ota.lower(), ota),
+            "reply": str(_rp or ""),
+            "is_replied": bool(a.get("is_replied")),
+            "date": str(a.get("received_at") or a.get("inserted_at") or "")[:10],
+            "source": "channex",
+        }
+        existing = await db.reviews.find_one(
+            {"user_id": uid, "channex_review_id": rid}, {"_id": 0, "id": 1})
+        if existing:
+            await db.reviews.update_one(
+                {"user_id": uid, "channex_review_id": rid}, {"$set": doc})
+        else:
+            doc["id"] = str(uuid.uuid4())
+            doc["created_at"] = now_utc().isoformat()
+            await db.reviews.insert_one(doc)
+        count += 1
+    await db.channex_settings.update_one(
+        {"user_id": uid}, {"$set": {"reviews_synced_at": now_utc().isoformat()}})
+    return count
+async def _conv_messages(uid: str, thread_uid: str, conv: Optional[dict]) -> list:
+    """Messages normalisés d'une conversation (Channex ou Lodgify selon le provider)."""
+    if (conv or {}).get("provider") == "channex":
+        adapter, _ = await get_channex_adapter(uid)
+        if not adapter:
+            raise HTTPException(status_code=400, detail="Channex non connecté")
+        async with httpx.AsyncClient(timeout=30) as http:
+            raw = await adapter.thread_messages(http, thread_uid)
+        return _normalize_cx_msgs(raw)
+    adapter, _ = await get_channel_adapter(uid)
+    if not adapter:
+        raise HTTPException(status_code=400, detail="Channel manager non connecté")
+    async with httpx.AsyncClient(timeout=30) as http:
+        thread = await adapter.get_thread(http, thread_uid)
+    return _normalize_msgs(thread)
 async def _generate_drafts_for_user(uid: str) -> int:
     """Pré-génère les brouillons IA pour les conversations non lues (notifications)."""
     if not await _ai_auto_draft_enabled(uid):
         return 0
-    adapter, _ = await get_channel_adapter(uid)
-    if not adapter:
-        return 0
     convs = await db.conversations.find(
         {"user_id": uid, "unread": True}, {"_id": 0}).sort("last_activity", -1).to_list(30)
     count = 0
-    async with httpx.AsyncClient(timeout=30) as http:
-        for conv in convs[:15]:
-            try:
-                thread = await adapter.get_thread(http, conv["thread_uid"])
-            except Exception:
-                continue
-            msgs = _normalize_msgs(thread)
-            if not msgs or msgs[-1].get("mine"):
-                continue
-            last = msgs[-1]
-            if conv.get("ai_draft") and conv.get("ai_draft_msg_id") == last["id"]:
-                continue
-            prop = await db.properties.find_one(
-                {"id": conv.get("property_id"), "user_id": uid}, {"_id": 0})
-            try:
-                draft = await _make_guest_draft(uid, conv["thread_uid"], last["text"], prop)
-            except Exception:
-                continue
-            await _store_draft(uid, conv["thread_uid"], last["id"], draft)
-            count += 1
+    for conv in convs[:15]:
+        try:
+            msgs = await _conv_messages(uid, conv["thread_uid"], conv)
+        except Exception:
+            continue
+        if not msgs or msgs[-1].get("mine"):
+            continue
+        last = msgs[-1]
+        if conv.get("ai_draft") and conv.get("ai_draft_msg_id") == last["id"]:
+            continue
+        prop = await db.properties.find_one(
+            {"id": conv.get("property_id"), "user_id": uid}, {"_id": 0})
+        try:
+            draft = await _make_guest_draft(uid, conv["thread_uid"], last["text"], prop)
+        except Exception:
+            continue
+        await _store_draft(uid, conv["thread_uid"], last["id"], draft)
+        count += 1
     return count
 class StaffIn(BaseModel):
     name: str
@@ -2719,6 +2874,12 @@ __all__ = [
     '_store_draft',
     '_translate_to_fr',
     'ReplyIn',
+    'ReviewReplyIn',
+    'CX_PROVIDER_LABEL',
+    '_normalize_cx_msgs',
+    'sync_channex_threads',
+    'sync_channex_reviews',
+    '_conv_messages',
     '_generate_drafts_for_user',
     'StaffIn',
     'MemberIn',

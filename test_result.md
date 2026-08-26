@@ -463,3 +463,15 @@ backend_iteration_20:
 previous_agent_communication:
     -agent: "main"
     -message: "Iteration 13 (voir historique ci-dessus)."
+
+backend_iteration_31:
+  - task: "Channex Messages (inbox channex-native: sync threads, lecture, reply) + Reviews OTA (sync, reply via Channex, suggestion IA)"
+    implemented: true
+    working: true
+    file: "backend/core.py, backend/channex.py, backend/routers/inbox.py, backend/routers/reviews.py, backend/server.py"
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "testing"
+        -comment: "10/10 pass (tests/test_iter31_channex_inbox_reviews.py). Bug trouvé: Channex attributes.reply = objet {reply} pour avis répondus → crash React. Corrigé par main agent (coercition str + migration 14 docs + garde String() frontend), vérifié par screenshots (modal réponse + suggestion IA OK, rien publié)."

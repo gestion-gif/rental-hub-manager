@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 31 — Channex Messages & Reviews. Backend API: 10/10 tests passing (100%) covering /api/inbox (list + unread-count + single thread w/ AI draft & translation), and /api/reviews (list + summary + ai-reply + guarded empty-body 400s + local-review reply guard + OTA delete guard). Frontend Inbox works correctly (81 channex conversations, Booking.com + Airbnb source badges visible, unread badge shows 18, thread opens with guest/host bubbles + French translation toggle + AI draft + composer; no message was sent per safety rules). Frontend Reviews screen is COMPLETELY BROKEN by a data-shape bug on the /api/reviews payload: 14 OTA reviews store `reply` as an object `{reply: '...'}` instead of a plain string, which crashes React with 'Objects are not valid as a React child (found: object with keys {reply})' before the page can render — no reviews list, no 'Répondre à l'avis' button reachable, cannot test the AI suggestion modal. SAFETY (Channex production): no reply/message was published; only empty-body → 400 paths exercised.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/reviews (data written by sync_channex_reviews in core.py:1998)",
+        "issue": "14/101 OTA reviews returned with `reply` field shaped as `{reply: '<text>'}` (nested object) instead of string. Channex API's `attributes.reply` for replied reviews is an object; core.py:1998 stores it verbatim (`a.get('reply') or ''`). This crashes the /reviews screen in the app (React 'Objects are not valid as a React child'). Fix: extract text — e.g. `_reply = a.get('reply') or ''; reply_text = _reply.get('reply', '') if isinstance(_reply, dict) else _reply`. A one-shot Mongo migration is also needed on existing rows (14 impacted for user_e235f66c67c3): flatten reviews.reply where it is a dict.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "/reviews (app/reviews.tsx line 114: <Text>{r.reply}</Text>)",
+        "issue": "Renders `r.reply` directly without normalisation. Even if the ingest is fixed, the UI should be defensive: `<Text>{typeof r.reply === 'string' ? r.reply : (r.reply?.reply ?? '')}</Text>` or normalise once in load().",
+        "testID": "review-reply-* (unreachable — page crashes)",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Répondre à un avis OTA + Suggestion IA",
+        "issue": "Could not test end-to-end because the parent screen crashes on load (see reviews `reply` object bug). Modal open, AI suggest, empty-body guard 400, and OTA delete guard were verified at the API level — all pass.",
+        "affected_testIDs": ["review-reply-<id>", "review-ai-suggest", "review-reply-input", "review-reply-send"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter31_channex_inbox_reviews.py",
+    "/app/test_reports/pytest/pytest_iter31.xml"
+  ],
+  "action_items": [
+    "FIX BACKEND (core.py:1998 sync_channex_reviews): normalise the reply field before persisting. Replace `\"reply\": a.get(\"reply\") or \"\"` with e.g.: `_rp = a.get(\"reply\"); \"reply\": (_rp.get(\"reply\") if isinstance(_rp, dict) else _rp) or \"\"`. Same defensive coercion is worth doing before returning in GET /api/reviews to unblock the UI even for legacy rows.",
+    "MIGRATE existing data: run a one-shot flatten on db.reviews where reply is a dict (14 documents impacted for user_e235f66c67c3). Suggested aggregation update: for rv in db.reviews.find({'reply': {'$type': 'object'}}): db.reviews.update_one({'_id': rv['_id']}, {'$set': {'reply': (rv['reply'] or {}).get('reply', '')}}).",
+    "HARDEN FRONTEND (app/reviews.tsx:114 and :117 gating): guard <Text>{r.reply}</Text> with a string coercion so a bad payload never white-screens the page again. Also consider the same in the reply modal's quote block.",
+    "AFTER FIX: re-run /reviews page in web preview — expect the 'Note moyenne globale' hero, the 'Par logement' list, the 'Derniers avis' cards with OTA badges + X/10 scores, and a reachable 'Répondre à l'avis' button + AI-suggestion flow (test with 'do NOT click Publier')."
+  ],
+  "critical_code_review_comments": [
+    "core.py:1998 does no shape validation on Channex `attributes.reply`. Channex returns an object for replied reviews. Any external payload consumed by ingestion should be coerced to primitive before persisting.",
+    "app/reviews.tsx line 114/187: `<Text>{r.reply}</Text>` and `<Text>{review.comment}</Text>` trust the server contract. In React Native, rendering an object inside <Text> throws a fatal error which brings the whole screen down (no error boundary at that route). Adding a defensive coercion (String(x) or a validator in the API client) prevents future breakage.",
+    "inbox.py:31-77 correctly returns messages sorted chronologically and calls Claude for draft + translation in parallel with asyncio.gather — good. `unread` is set to False on read as expected.",
+    "reviews.py:98 empty-reply 400 and :103 local-review guard work as documented. reviews.py:87 delete guard for OTA reviews works as documented. reviews.py:105 'already replied' guard exists but not exercised (SAFETY: no publish).",
+    "core.py:1985 correctly hides empty/hidden Airbnb reviews (score10=0 with no content → delete). Verified via API: no OTA review with score10==0 in the current dataset."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter31_channex_inbox_reviews.py (new, 10 tests)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "50% — Inbox flow OK end-to-end; Reviews screen non-functional due to backend data-shape bug"},
+  "seed_data_creation": "Test 'test_reply_on_local_review_forbidden' creates and deletes a local review (guest_name='TEST_QA_local_review'). Cleanup verified in the same test's finally block. No other seed data.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend tests live at /app/backend/tests/test_iter31_channex_inbox_reviews.py — run with `python -m pytest backend/tests/test_iter31_channex_inbox_reviews.py -v`. SAFETY: do NOT send text through POST /api/inbox/{uid}/reply (real guests) or POST /api/reviews/{id}/reply on OTA (real public replies) — the file already only exercises empty-body 400 and local-review 400. The Channex account is PRODUCTION for user_e235f66c67c3. To re-verify the reviews UI after main agent fixes the shape bug: login as qa.admin@casaneo.test / CasaneoQA2026!, open /reviews, expect the hero + per-property + list of avis with OTA badges + X/10; click 'Répondre à l'avis' on an unreplied Airbnb/Booking review and then 'Suggestion IA' (wait ≤30s) — the reply-input should populate. DO NOT click 'Publier la réponse'.",
+  "rca_of_issue": "Root cause of Reviews screen crash: Channex `/reviews` API returns for replied reviews `attributes.reply = {reply: '<text>'}` (nested object) rather than a plain string. core.py:1998 in sync_channex_reviews persists that verbatim into db.reviews.reply. GET /api/reviews then returns 14 documents with a dict-shaped `reply`. On the frontend, app/reviews.tsx line 114 renders `{r.reply}` inside a <Text> component, which React interprets as an object-child and throws 'Objects are not valid as a React child (found: object with keys {reply})'. The exception propagates, unmounts the whole ReviewsScreen, and shows the LogBox red screen instead of the reviews list. Impact: 100% of users with any replied OTA review cannot access the /reviews screen. Reproduction: (1) login as qa.admin, (2) GET /reviews screen, (3) observe LogBox error (screenshot /tmp/step_reviews.png). Fix: normalise `reply` in sync (core.py:1998) + migrate the 14 existing rows + add a defensive String() coercion in the UI so this can never white-screen again."
+}

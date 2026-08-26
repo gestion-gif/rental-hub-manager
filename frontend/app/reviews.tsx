@@ -29,6 +29,7 @@ export default function ReviewsScreen() {
   const [props, setProps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [replyReview, setReplyReview] = useState<any>(null);
 
   const load = useCallback(async () => {
     try {
@@ -90,9 +91,13 @@ export default function ReviewsScreen() {
             <View key={r.id} style={styles.reviewCard}>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <Stars n={r.rating} />
+                {!!r.score10 && <Text style={styles.score10}>{r.score10}/10</Text>}
                 <View style={{ flex: 1 }} />
+                {!!r.ota && (
+                  <View style={styles.otaTag}><Text style={styles.otaTagText}>{r.ota}</Text></View>
+                )}
                 <Text style={styles.reviewDate}>{r.date ? dayjs(r.date).format("DD/MM/YYYY") : ""}</Text>
-                {canModify(user) && (
+                {canModify(user) && !r.channex_review_id && (
                   <Pressable testID={`review-del-${r.id}`} onPress={() => remove(r.id)} hitSlop={8} style={{ marginLeft: 8 }}>
                     <Ionicons name="trash-outline" size={16} color="#E5484D" />
                   </Pressable>
@@ -100,6 +105,21 @@ export default function ReviewsScreen() {
               </View>
               <Text style={styles.reviewProp}>{r.property_name}{r.guest_name ? ` · ${r.guest_name}` : ""}</Text>
               {!!r.comment && <Text style={styles.reviewComment}>{r.comment}</Text>}
+              {!!r.reply && (
+                <View style={styles.replyBox}>
+                  <View style={styles.replyHead}>
+                    <Ionicons name="return-down-forward" size={13} color={colors.brandPrimary} />
+                    <Text style={styles.replyLabel}>Votre réponse</Text>
+                  </View>
+                  <Text style={styles.replyText}>{typeof r.reply === "string" ? r.reply : String(r.reply?.reply || "")}</Text>
+                </View>
+              )}
+              {canModify(user) && !!r.channex_review_id && !r.is_replied && (
+                <Pressable testID={`review-reply-${r.id}`} onPress={() => setReplyReview(r)} style={styles.replyBtn}>
+                  <Ionicons name="chatbubble-outline" size={14} color={colors.brandPrimary} />
+                  <Text style={styles.replyBtnText}>Répondre à l’avis</Text>
+                </Pressable>
+              )}
             </View>
           ))}
         </ScrollView>
@@ -112,7 +132,88 @@ export default function ReviewsScreen() {
       )}
 
       <AddReviewModal open={addOpen} onClose={() => setAddOpen(false)} props={props} onSaved={() => { setAddOpen(false); load(); }} />
+      <ReplyModal review={replyReview} onClose={() => setReplyReview(null)} onSent={() => { setReplyReview(null); load(); }} />
     </View>
+  );
+}
+
+function ReplyModal({ review, onClose, onSent }: any) {
+  const [reply, setReply] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  React.useEffect(() => { if (review) setReply(""); }, [review]);
+
+  async function suggest() {
+    if (!review) return;
+    setAiLoading(true);
+    try {
+      const r = await api.post(`/reviews/${review.id}/ai-reply`, {});
+      setReply(r.reply || "");
+    } catch { Alert.alert("Erreur", "Impossible de générer une suggestion."); }
+    setAiLoading(false);
+  }
+
+  async function send() {
+    const t = reply.trim();
+    if (!t || !review) return;
+    setSending(true);
+    try {
+      await api.post(`/reviews/${review.id}/reply`, { reply: t });
+      onSent();
+    } catch (e: any) {
+      Alert.alert("Erreur", e?.message || "Publication impossible.");
+    }
+    setSending(false);
+  }
+
+  return (
+    <Modal visible={!!review} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.sheetHead}>
+            <Text style={styles.sheetTitle}>Répondre à l’avis</Text>
+            <Pressable onPress={onClose}><Ionicons name="close" size={22} color={colors.onSurface} /></Pressable>
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled">
+            {!!review && (
+              <View style={styles.quoteBox}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Stars n={review.rating} size={13} />
+                  {!!review.score10 && <Text style={styles.score10}>{review.score10}/10</Text>}
+                  {!!review.ota && <Text style={styles.quoteMeta}>· {review.ota}</Text>}
+                </View>
+                <Text style={styles.quoteMeta}>{review.property_name}{review.guest_name ? ` · ${review.guest_name}` : ""}</Text>
+                {!!review.comment && <Text style={styles.quoteText} numberOfLines={6}>{review.comment}</Text>}
+              </View>
+            )}
+            <Pressable testID="review-ai-suggest" onPress={suggest} disabled={aiLoading} style={styles.aiBtn}>
+              {aiLoading ? (
+                <ActivityIndicator size="small" color={colors.brandPrimary} />
+              ) : (
+                <>
+                  <Ionicons name="sparkles" size={14} color={colors.brandPrimary} />
+                  <Text style={styles.aiBtnText}>Suggestion IA</Text>
+                </>
+              )}
+            </Pressable>
+            <TextInput
+              testID="review-reply-input"
+              value={reply}
+              onChangeText={setReply}
+              placeholder="Votre réponse publique au voyageur…"
+              placeholderTextColor={colors.onSurfaceTertiary}
+              style={[styles.mInput, { minHeight: 110, textAlignVertical: "top" }]}
+              multiline
+            />
+            <Text style={styles.replyHint}>La réponse sera publiée sur {review?.ota || "la plateforme"} via Channex. Elle sera visible publiquement.</Text>
+            <Pressable testID="review-reply-send" onPress={send} disabled={sending || !reply.trim()} style={[styles.saveBtn, (sending || !reply.trim()) && { opacity: 0.6 }]}>
+              {sending ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Publier la réponse</Text>}
+            </Pressable>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -175,7 +276,7 @@ function AddReviewModal({ open, onClose, props, onSaved }: any) {
               placeholderTextColor={colors.onSurfaceTertiary} style={[styles.mInput, { minHeight: 80, textAlignVertical: "top" }]} multiline />
 
             <Pressable testID="review-save" onPress={save} disabled={saving} style={[styles.saveBtn, saving && { opacity: 0.6 }]}>
-              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Enregistrer l'avis</Text>}
+              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Enregistrer l’avis</Text>}
             </Pressable>
           </ScrollView>
         </Pressable>
@@ -202,6 +303,21 @@ const styles = StyleSheet.create({
   propCount: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
   reviewCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.sm },
   reviewDate: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
+  score10: { fontFamily: font.bold, fontSize: fontSize.sm, color: colors.onSurface, marginLeft: 6 },
+  otaTag: { backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm, marginRight: 8 },
+  otaTagText: { fontFamily: font.semibold, fontSize: 11, color: colors.onSurfaceSecondary },
+  replyBox: { marginTop: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md },
+  replyHead: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 3 },
+  replyLabel: { fontFamily: font.semibold, fontSize: 11, color: colors.brandPrimary, textTransform: "uppercase", letterSpacing: 0.4 },
+  replyText: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceSecondary, lineHeight: 19 },
+  replyBtn: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, marginTop: spacing.sm, paddingVertical: 7, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.brandPrimary + "14", borderWidth: 1, borderColor: colors.brandPrimary + "33" },
+  replyBtnText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
+  quoteBox: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
+  quoteMeta: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 3 },
+  quoteText: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceSecondary, marginTop: 6, lineHeight: 19 },
+  aiBtn: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingVertical: 7, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.sm },
+  aiBtnText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.brandPrimary },
+  replyHint: { fontFamily: font.regular, fontSize: 11, color: colors.onSurfaceTertiary, marginBottom: spacing.sm },
   reviewProp: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurface, marginTop: 6 },
   reviewComment: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceSecondary, marginTop: 4, lineHeight: 20 },
   empty: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, textAlign: "center", paddingVertical: spacing.sm },

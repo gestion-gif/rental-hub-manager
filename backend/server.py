@@ -51,7 +51,8 @@ async def _ai_draft_loop():
     await asyncio.sleep(90)
     while True:
         try:
-            uids = await db.channel_settings.distinct("user_id")
+            uids = set(await db.channel_settings.distinct("user_id"))
+            uids |= set(await db.channex_settings.distinct("user_id"))
             for uid in uids:
                 try:
                     await _generate_drafts_for_user(uid)
@@ -60,6 +61,29 @@ async def _ai_draft_loop():
         except Exception:
             logger.exception("ai draft loop error")
         await asyncio.sleep(1800)  # toutes les 30 min
+
+
+async def _channex_msg_review_loop():
+    """Toutes les ~10 min : synchronise les fils de discussion (app Messages)
+    et les avis OTA (app Reviews) Channex de chaque utilisateur."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            settings = await db.channex_settings.find(
+                {"api_key": {"$nin": [None, ""]}}, {"_id": 0, "user_id": 1}).to_list(1000)
+            for s in settings:
+                try:
+                    await sync_channex_threads(s["user_id"], force=True)
+                except Exception:
+                    logger.exception("channex threads sync error %s", s.get("user_id"))
+                try:
+                    await sync_channex_reviews(s["user_id"], force=True)
+                except Exception:
+                    logger.exception("channex reviews sync error %s", s.get("user_id"))
+                await asyncio.sleep(2)
+        except Exception:
+            logger.exception("channex msg/review loop error")
+        await asyncio.sleep(600)
 
 
 app.include_router(api_router)
@@ -118,6 +142,7 @@ async def startup():
     asyncio.create_task(_public_site_loop())
     asyncio.create_task(_channex_outbox_loop())
     asyncio.create_task(_channex_bookings_loop())
+    asyncio.create_task(_channex_msg_review_loop())
     asyncio.create_task(_payment_reminder_loop())
     asyncio.create_task(_auto_charge_loop())
 

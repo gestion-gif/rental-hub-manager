@@ -63,7 +63,7 @@ export default function Inbox() {
             <View style={styles.empty}>
               <Ionicons name="mail-open-outline" size={40} color={colors.onSurfaceTertiary} />
               <Text style={styles.emptyTitle}>Aucune conversation</Text>
-              <Text style={styles.emptyText}>Connectez Lodgify et synchronisez vos réservations pour importer les messages voyageurs.</Text>
+              <Text style={styles.emptyText}>Les messages voyageurs (Booking.com, Airbnb) apparaîtront ici dès qu’une conversation existe sur Channex.</Text>
             </View>
           }
           renderItem={({ item }) => (
@@ -82,6 +82,9 @@ export default function Inbox() {
                   <View style={styles.sourceTag}><Text style={styles.sourceText}>{item.source}</Text></View>
                 </View>
                 <Text style={[styles.prop, item.unread && styles.propUnread]} numberOfLines={1}>{item.property_name}</Text>
+                {!!item.last_preview && (
+                  <Text style={[styles.preview, item.unread && styles.previewUnread]} numberOfLines={1}>{item.last_preview}</Text>
+                )}
                 {!!item.ai_draft && !item.ai_draft_validated && (
                   <View style={styles.draftTag}>
                     <Ionicons name="sparkles" size={11} color={colors.brandPrimary} />
@@ -119,6 +122,8 @@ const styles = StyleSheet.create({
   guestUnread: { fontFamily: font.bold },
   prop: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, marginTop: 2 },
   propUnread: { fontFamily: font.medium, color: colors.onSurfaceSecondary },
+  preview: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2, fontStyle: "italic" },
+  previewUnread: { fontFamily: font.semibold, color: colors.onSurface, fontStyle: "normal" },
   dates: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 2 },
   sourceTag: { backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.sm },
   sourceText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },

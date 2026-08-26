@@ -218,7 +218,7 @@ export default function ThreadDetail() {
                 {sending ? <ActivityIndicator size="small" color={colors.onBrandPrimary} /> : <Ionicons name="send" size={18} color={colors.onBrandPrimary} />}
               </Pressable>
             </View>
-            <Text style={styles.disclaimer}>Le message sera envoyé au voyageur via Lodgify.</Text>
+            <Text style={styles.disclaimer}>Le message sera envoyé au voyageur via {data?.source || "la plateforme"}.</Text>
           </View>
         </KeyboardAvoidingView>
       )}

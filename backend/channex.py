@@ -152,6 +152,39 @@ class ChannexAdapter:
                                "is_active": True, "send_data": True, "is_global": True}}
         return await self._post(http, "/webhooks", payload)
 
+    async def _get_pages(self, http, path: str, max_pages: int = 3) -> list:
+        out = []
+        for page in range(1, max_pages + 1):
+            body = await self._get(http, path, self._page(page, 100))
+            data = body.get("data", [])
+            out.extend(data)
+            meta = body.get("meta") or {}
+            total = int(meta.get("total", len(out)))
+            if len(out) >= total or not data:
+                break
+        return out
+
+    async def list_message_threads(self, http, max_pages: int = 3) -> list:
+        """Fils de discussion (app Messages Channex : Booking.com / Airbnb / Expedia)."""
+        return await self._get_pages(http, "/message_threads", max_pages)
+
+    async def thread_messages(self, http, thread_id: str, max_pages: int = 2) -> list:
+        """Messages d'un fil (ordre desc côté Channex, à retrier côté appelant)."""
+        return await self._get_pages(http, f"/message_threads/{thread_id}/messages", max_pages)
+
+    async def send_thread_message(self, http, thread_id: str, message: str) -> dict:
+        body = await self._post(http, f"/message_threads/{thread_id}/messages",
+                                {"message": {"message": message}})
+        return (body or {}).get("data") or {}
+
+    async def list_ota_reviews(self, http, max_pages: int = 3) -> list:
+        """Avis OTA (app Messages & Reviews Channex)."""
+        return await self._get_pages(http, "/reviews", max_pages)
+
+    async def reply_review(self, http, review_id: str, reply: str) -> dict:
+        body = await self._post(http, f"/reviews/{review_id}/reply", {"reply": {"reply": reply}})
+        return (body or {}).get("data") or {}
+
     async def list_rates(self, http, property_id: str, date_from: str, date_to: str) -> dict:
         """Nightly rates (ARI) for a property over a window.
         Returns {rate_plan_id: {date: {'rate': '150.00', ...}}}. Rates are already in main

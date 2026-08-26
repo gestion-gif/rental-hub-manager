@@ -6,6 +6,10 @@ from core import *  # noqa: F401
 async def inbox(user=Depends(get_current_user)):
     if not _can_inbox(user):
         raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
+    try:
+        await sync_channex_threads(user["user_id"])
+    except Exception:
+        logger.exception("channex threads sync failed")
     convs = await db.conversations.find(
         {"user_id": user["user_id"], **_prop_scope(user, "property_id")}, {"_id": 0}).sort("last_activity", -1).to_list(500)
     return convs
@@ -23,15 +27,10 @@ async def inbox_unread_count(user=Depends(get_current_user)):
 async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
     if not _can_inbox(user):
         raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
-    adapter, _ = await get_channel_adapter(user["user_id"])
-    if not adapter:
-        raise HTTPException(status_code=400, detail="Channel manager non connecté")
     uid = user["user_id"]
     conv = await db.conversations.find_one(
         {"user_id": uid, "thread_uid": thread_uid}, {"_id": 0})
-    async with httpx.AsyncClient(timeout=30) as http:
-        thread = await adapter.get_thread(http, thread_uid)
-    msgs = _normalize_msgs(thread)
+    msgs = await _conv_messages(uid, thread_uid, conv)
 
     need_draft = bool(msgs and not msgs[-1].get("mine"))
     guest_idx = [i for i, m in enumerate(msgs) if not m.get("mine")]
@@ -74,13 +73,18 @@ async def inbox_thread(thread_uid: str, user=Depends(get_current_user)):
 
     await db.conversations.update_one(
         {"user_id": uid, "thread_uid": thread_uid},
-        {"$set": {"unread": False}})
-    resa = await db.reservations.find_one(
-        {"user_id": uid, "thread_uid": thread_uid}, {"_id": 0, "id": 1})
+        {"$set": {"unread": False,
+                  "seen_at": now_utc().replace(tzinfo=None).isoformat()}})
+    if conv and conv.get("provider") == "channex" and conv.get("channex_booking_id"):
+        resa = await db.reservations.find_one(
+            {"user_id": uid, "channex_booking_id": conv["channex_booking_id"]}, {"_id": 0, "id": 1})
+    else:
+        resa = await db.reservations.find_one(
+            {"user_id": uid, "thread_uid": thread_uid}, {"_id": 0, "id": 1})
     return {
         "thread_uid": thread_uid,
         "reservation_id": (resa or {}).get("id"),
-        "guest_name": thread.get("guest_name") or (conv or {}).get("guest_name"),
+        "guest_name": (conv or {}).get("guest_name"),
         "property_name": (conv or {}).get("property_name"),
         "source": (conv or {}).get("source"),
         "messages": msgs,
@@ -93,16 +97,11 @@ async def generate_draft(thread_uid: str, payload: dict = Body(default={}), user
     """Génère (ou régénère) un brouillon de réponse IA pour une conversation."""
     if not _can_inbox(user):
         raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
-    adapter, _ = await get_channel_adapter(user["user_id"])
-    if not adapter:
-        raise HTTPException(status_code=400, detail="Channel manager non connecté")
     uid = user["user_id"]
     tone = (payload or {}).get("tone") or "chaleureux"
     conv = await db.conversations.find_one(
         {"user_id": uid, "thread_uid": thread_uid}, {"_id": 0})
-    async with httpx.AsyncClient(timeout=30) as http:
-        thread = await adapter.get_thread(http, thread_uid)
-    msgs = _normalize_msgs(thread)
+    msgs = await _conv_messages(uid, thread_uid, conv)
     last_guest = next((m for m in reversed(msgs) if not m.get("mine")), None)
     if not last_guest:
         raise HTTPException(status_code=400, detail="Aucun message voyageur auquel répondre")
@@ -146,28 +145,46 @@ async def inbox_reply(thread_uid: str, payload: ReplyIn, user=Depends(get_curren
         raise HTTPException(status_code=403, detail="Accès à la boîte de réception non autorisé")
     if not payload.message.strip():
         raise HTTPException(status_code=400, detail="Message vide")
-    adapter, _ = await get_channel_adapter(user["user_id"])
-    if not adapter:
-        raise HTTPException(status_code=400, detail="Channel manager non connecté")
-    res = await db.reservations.find_one(
-        {"user_id": user["user_id"], "thread_uid": thread_uid, "lodgify_id": {"$nin": [None, ""]}},
-        {"_id": 0})
-    if not res or not res.get("lodgify_id"):
-        raise HTTPException(status_code=404, detail="Réservation liée introuvable pour cette conversation")
-    async with httpx.AsyncClient(timeout=30) as http:
-        await adapter.send_message(http, res["lodgify_id"], payload.message.strip(), payload.subject)
-    await log_guest_message(user["user_id"], res.get("id") or "", "platform", "manuel",
-                            payload.message.strip(), subject=payload.subject or "")
+    uid = user["user_id"]
+    text = payload.message.strip()
+    conv = await db.conversations.find_one(
+        {"user_id": uid, "thread_uid": thread_uid}, {"_id": 0})
+    if conv and conv.get("provider") == "channex":
+        adapter, _ = await get_channex_adapter(uid)
+        if not adapter:
+            raise HTTPException(status_code=400, detail="Channex non connecté")
+        async with httpx.AsyncClient(timeout=30) as http:
+            await adapter.send_thread_message(http, thread_uid, text)
+        resa = None
+        if conv.get("channex_booking_id"):
+            resa = await db.reservations.find_one(
+                {"user_id": uid, "channex_booking_id": conv["channex_booking_id"]}, {"_id": 0, "id": 1})
+        await log_guest_message(uid, (resa or {}).get("id") or "", "platform", "manuel",
+                                text, subject=payload.subject or "")
+    else:
+        adapter, _ = await get_channel_adapter(uid)
+        if not adapter:
+            raise HTTPException(status_code=400, detail="Channel manager non connecté")
+        res = await db.reservations.find_one(
+            {"user_id": uid, "thread_uid": thread_uid, "lodgify_id": {"$nin": [None, ""]}},
+            {"_id": 0})
+        if not res or not res.get("lodgify_id"):
+            raise HTTPException(status_code=404, detail="Réservation liée introuvable pour cette conversation")
+        async with httpx.AsyncClient(timeout=30) as http:
+            await adapter.send_message(http, res["lodgify_id"], text, payload.subject)
+        await log_guest_message(uid, res.get("id") or "", "platform", "manuel",
+                                text, subject=payload.subject or "")
     # Une fois envoyé, le brouillon IA est validé/consommé
     await db.conversations.update_one(
-        {"user_id": user["user_id"], "thread_uid": thread_uid},
-        {"$set": {"last_activity": now_utc().isoformat(), "ai_draft_validated": True},
+        {"user_id": uid, "thread_uid": thread_uid},
+        {"$set": {"last_activity": now_utc().isoformat(), "ai_draft_validated": True,
+                  "last_preview": text[:160]},
          "$unset": {"ai_draft": "", "ai_draft_msg_id": "", "ai_draft_at": ""}})
     return {
         "ok": True,
         "message": {
             "id": str(uuid.uuid4()),
-            "text": payload.message.strip(),
+            "text": text,
             "type": "Owner",
             "date": now_utc().isoformat(),
             "mine": True,
