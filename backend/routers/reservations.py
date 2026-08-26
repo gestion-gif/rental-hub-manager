@@ -155,6 +155,7 @@ async def set_reservation_paid(reservation_id: str, body: dict, user=Depends(get
 
 
 @api_router.post("/reservations/{reservation_id}/auto-charge")
+@api_router.post("/reservations/{reservation_id}/charge-card")
 async def manual_auto_charge(reservation_id: str, user=Depends(get_current_user)):
     """Encaisse maintenant la carte OTA (Booking.com via Channex) pour cette réservation."""
     uid = user["user_id"]
@@ -167,6 +168,57 @@ async def manual_auto_charge(reservation_id: str, user=Depends(get_current_user)
     item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     compute_display(item, await status_color_map(uid))
     return {**result, "reservation": item}
+
+
+@api_router.get("/reservations/{reservation_id}/card-status")
+async def reservation_card_status(reservation_id: str, refresh: int = 0, user=Depends(get_current_user)):
+    """Carte OTA disponible ? Renvoie {available, brand, last4, exp} (mis en cache 24 h)."""
+    uid = user["user_id"]
+    r = await db.reservations.find_one({"id": reservation_id, "user_id": uid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    if r.get("source") != "channex" or not r.get("channex_booking_id"):
+        return {"available": False, "reason": "Réservation sans carte OTA (non Channex)"}
+    cached = r.get("card_status")
+    if cached and not refresh:
+        try:
+            age = (now_utc() - datetime.fromisoformat(cached["checked_at"])).total_seconds()
+            if age < 86400:
+                return cached
+        except Exception:
+            pass
+    adapter, _ = await get_channex_adapter(uid)
+    if not adapter:
+        return {"available": False, "reason": "Channex non connecté"}
+    token = ""
+    err = ""
+    async with httpx.AsyncClient(timeout=60) as http:
+        try:
+            token = await adapter.stripe_payment_method(http, r["channex_booking_id"])
+        except HTTPException as e:
+            err = str(e.detail)[:200]
+        except Exception as e:
+            err = str(e)[:200]
+    if not token:
+        status = {"available": False, "reason": err or "Carte indisponible via Channex",
+                  "checked_at": now_utc().isoformat()}
+    else:
+        import stripe as stripe_sdk
+        def _pm():
+            stripe_sdk.api_key = STRIPE_API_KEY
+            return stripe_sdk.PaymentMethod.retrieve(token)
+        try:
+            pm = await asyncio.to_thread(_pm)
+            card = pm.get("card") or {}
+            status = {"available": True, "brand": card.get("brand"), "last4": card.get("last4"),
+                      "exp_month": card.get("exp_month"), "exp_year": card.get("exp_year"),
+                      "checked_at": now_utc().isoformat()}
+        except Exception as e:
+            status = {"available": False, "reason": f"Stripe : {str(e)[:150]}",
+                      "checked_at": now_utc().isoformat()}
+    await db.reservations.update_one({"id": reservation_id, "user_id": uid},
+                                     {"$set": {"card_status": status}})
+    return status
 
 
 @api_router.post("/reservations/{reservation_id}/payments")

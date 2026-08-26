@@ -659,3 +659,9 @@
 - 3 fixes code (core.py/channex.py): (1) token Channex renvoyé en dict {'id':'pm_'} → extraction, (2) idempotency_key inclut suffixe du token (chaque tentative = nouveau pm_, sinon erreur idempotence), (3) tentative avec MOTO + fallback auto sans MOTO si non activé sur le compte (MOTO actuellement NON activé chez le user).
 - Actions USER côté Stripe: dashboard → paiement bloqué → voir la règle → Radar → Rules (désactiver/allowlist) ; et/ou demander à Stripe l'activation MOTO (le code l'utilisera automatiquement).
 - testing_agent iteration 30: 8/8 pass (chaîne d'erreur 402 FR, attempts++, protections 'Déjà encaissé'/'Aucun montant dû', prefs auto_charge, régression résas+channex status). Test file: backend/tests/test_iter30_auto_charge.py.
+
+## Endpoints pour la version PC (Casanéo Desktop) + Channex PCI (2026-08 fork #2)
+- User a souscrit Channex PCI (accès cartes OK).
+- POST /api/reservations/{id}/charge-card : alias de /auto-charge (débit 1 clic Channex tokenization + Stripe off-session MOTO/fallback). Testé: 402 propre si non-channex.
+- GET /api/reservations/{id}/card-status?refresh=0|1 : {available, brand, last4, exp_month, exp_year, checked_at} — cache 24 h sur reservations.card_status ; réponses propres si non-channex/Channex déconnecté. Testé live: Helen Flynn → mastercard •••• 1719 exp 11/2027.
+- ⚠️ Ces endpoints ne seront dispo en PRODUCTION qu'après redéploiement.
