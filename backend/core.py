@@ -1348,6 +1348,16 @@ async def auto_charge_reservation(uid: str, r: dict) -> dict:
 
     def _charge(use_moto: bool):
         stripe_sdk.api_key = STRIPE_API_KEY
+        # Recommandation Stripe : attacher les billing_details (nom/email) au
+        # PaymentMethod pour réduire le scoring fraude Radar.
+        try:
+            billing = {"name": (r.get("guest_name") or "").strip() or None}
+            email = (r.get("guest_email") or "").strip()
+            if email:
+                billing["email"] = email
+            stripe_sdk.PaymentMethod.modify(token, billing_details={k: v for k, v in billing.items() if v})
+        except Exception:
+            pass  # non bloquant
         kwargs = dict(
             amount=int(round(due * 100)), currency=currency,
             payment_method=token, payment_method_types=["card"],
