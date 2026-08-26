@@ -642,3 +642,14 @@
 - Fix anti-doublons (routers/channex.py import): si aucune property avec channex_id, matching par NOM insensible à la casse sur les logements non liés → liaison au lieu de création (rend le chemin B idempotent après import Lodgify).
 - Deployment health check: PASS après fix du delete_many iCal (soft-cancel). Warnings restants non bloquants (URLs auth Emergent hardcodées = normales, store review metadata pour publication stores).
 - RAPPEL WEBHOOK: en prod, re-cliquer "Activer la réception des réservations" pour enregistrer le webhook Channex sur l'URL de prod.
+
+## Encaissement Booking opérationnel (2026-08 fork #2)
+- App Stripe Tokenization: DÉJÀ installée sur les 23 logements Channex (Stripe connecté par le user dans Channex User Profile). Vérifié: POST /bookings/{id}/stripe_payment_method renvoie un PaymentMethod pour la résa Julie Charpentier.
+- Fix (channex.py stripe_payment_method): le token arrive sous forme {'id': 'pm_...'} → extraction de l'id (sinon dict passé à Stripe = échec).
+- Clé Stripe LIVE du user configurée dans backend/.env (compte "MHP IMMOBILIER", charges_enabled=True). ⚠️ En PRODUCTION le user doit l'ajouter lui-même: Deployment Panel → Secrets → STRIPE_API_KEY + redeploy.
+- Rappel VCC Booking: cartes virtuelles activées à une date précise (souvent le check-in) → refus avant activation = normal, réessayer après.
+
+## Encaissement Julie Charpentier tenté + clé live (2026-08 fork #2)
+- Clé Stripe LIVE configurée en preview (.env). Encaissement tenté (accord user) sur résa Julie Charpentier 226.54€: flux complet OK (token pm_ récupéré, PaymentIntent live créé) mais REFUS carte decline_code="fraudulent" = VCC Booking non activée avant le check-in (27/10). À réencaisser à partir du 27/10.
+- Amélioration (core.py run_auto_charge_for_user): après 3 échecs, une ultime tentative automatique à partir du jour d'arrivée (date d'activation des VCC Booking).
+- Production: STRIPE_API_KEY à modifier par le USER dans Deployment panel → Secrets → Redeploy (les secrets existants ne sont PAS écrasés par le .env preview lors d'un redeploy — confirmé support). Si onglet Secrets absent/non éditable → support@emergent.sh avec Job ID.

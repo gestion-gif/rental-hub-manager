@@ -1407,8 +1407,15 @@ async def run_auto_charge_for_user(uid: str) -> dict:
         {"_id": 0}).to_list(500)
     charged = errors = 0
     for r in candidates:
-        if int((r.get("auto_charge") or {}).get("attempts") or 0) >= 3:
-            continue  # abandon après 3 échecs (traiter manuellement)
+        ac = r.get("auto_charge") or {}
+        attempts = int(ac.get("attempts") or 0)
+        if attempts >= 3:
+            # Cartes virtuelles Booking : souvent activées le jour d'arrivée seulement.
+            # → une ultime tentative à partir du check-in si les échecs datent d'avant.
+            last_at = str(ac.get("at") or "")[:10]
+            ci = str(r.get("check_in") or "")
+            if not (ci and today >= ci and last_at < ci):
+                continue
         res = await auto_charge_reservation(uid, r)
         if res.get("ok"):
             charged += 1
