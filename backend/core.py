@@ -195,6 +195,21 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = authorization.split(" ", 1)[1]
+    if token.startswith("csk_"):
+        # Clé API permanente (accès externe, ex. version web PC)
+        rec = await db.api_keys.find_one(
+            {"key_hash": sha256(token.encode()).hexdigest(), "revoked_at": None}, {"_id": 0})
+        if not rec:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        user = await db.users.find_one({"user_id": rec["user_id"]}, {"_id": 0})
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        asyncio.ensure_future(db.api_keys.update_one(
+            {"id": rec["id"]}, {"$set": {"last_used_at": now_utc().isoformat()}}))
+        user["role"] = "owner"
+        user["allowed_property_ids"] = None
+        user["auth_type"] = "api_key"
+        return user
     session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
     if not session:
         raise HTTPException(status_code=401, detail="Invalid session")

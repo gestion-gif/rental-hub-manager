@@ -676,3 +676,11 @@
 - Testé (testing_agent iteration 31): backend 10/10 pass. Frontend inbox OK (81 convs, badges, traduction). Bug reply-objet corrigé + vérifié via screenshots (modal réponse + suggestion IA générée, PAS publié). Données réelles: 5 fils, 98 avis (moyenne 4.68).
 - ⚠️ En PRODUCTION: dispo après redéploiement (Publish → Deploy).
 - Backlog: intégration Pricelabs (s'assurer que Casanéo n'écrase pas les tarifs poussés par Pricelabs via Channex — poser la question du mode par logement), SaaS billing (P3).
+
+## Clés API permanentes pour la version web PC (2026-08 fork #3)
+- Besoin user: un "token d'application" pour que son projet web PC (autre projet Emergent) appelle l'API sans reconnexion tous les 7 jours.
+- Backend (routers/api_keys.py): POST /api/api-keys {label} → génère csk_<64 hex> (affichée UNE fois, sha256 stocké), GET /api/api-keys (liste sans hash), DELETE /api/api-keys/{id} (révocation immédiate). Réservé au compte principal (owner Google) — membres et clés API elles-mêmes → 403 (anti-escalade). Limite 10 clés actives. Index unique key_hash (server.py startup).
+- core.py get_current_user: si le Bearer commence par csk_ → lookup db.api_keys par hash (revoked_at:None) → contexte owner complet + last_used_at mis à jour (non bloquant).
+- Frontend: settings/access-tokens.tsx (liste, création avec label, affichage unique avec bouton Copier via expo-clipboard, révocation) + entrée menu Réglages → "Clés API".
+- Auto-testé (8/8): membre→403, création owner ok, hash/raw non exposés en liste, clé valide→200 sur /reservations, clé ne peut pas créer de clé (403), clé invalide→401, révocation→401 ensuite.
+- ⚠️ Dispo en PRODUCTION après redéploiement. Le user devra créer la clé depuis son compte Google (mobile ou web) puis la coller dans son projet PC.

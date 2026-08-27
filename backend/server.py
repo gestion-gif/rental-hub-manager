@@ -9,7 +9,7 @@ from routers import (  # noqa: F401
     auth, properties, reservations, public_site, interventions, ical, dashboard,
     analytics, ai, preferences, channex, policies, push, sync, inbox, team, owners,
     statements, reviews, promotions, templates, automations, files, messaging,
-    accounting, supplements,
+    accounting, supplements, api_keys,
 )
 
 # Route handlers referenced by the background loops below
@@ -133,6 +133,7 @@ async def startup():
     await db.properties.create_index("user_id")
     await db.reservations.create_index("user_id")
     await db.interventions.create_index("user_id")
+    await db.api_keys.create_index("key_hash", unique=True)
     asyncio.create_task(automation_scheduler())
     asyncio.create_task(_ical_auto_sync_loop())
     asyncio.create_task(_lodgify_auto_sync_loop())

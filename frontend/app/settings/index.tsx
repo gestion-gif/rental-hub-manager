@@ -36,6 +36,7 @@ const SECTIONS = [
     { path: "/settings/channex", icon: "swap-horizontal-outline", title: "Channex", sub: "Channel manager (connexion & lecture)" },
     { path: "/settings/ical", icon: "calendar-outline", title: "Import / Export iCal", sub: "Synchro calendriers .ics (Airbnb, Booking…)" },
     { path: "/settings/booking-site", icon: "globe-outline", title: "Site de réservation", sub: "Site public de réservation directe (paiement en ligne)" },
+    { path: "/settings/access-tokens", icon: "key-outline", title: "Clés API", sub: "Accès externe (version web PC…)" },
   ] },
   { title: "Affichage", items: [
     { path: "/settings/status-colors", icon: "color-palette-outline", title: "Couleurs des statuts", sub: "Personnalisez le code couleur" },
