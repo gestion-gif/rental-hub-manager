@@ -152,8 +152,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.lg },
-  logoWrap: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.92)", borderRadius: 16, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, marginBottom: spacing.lg },
-  logoImg: { width: 224, height: 58 },
+  logoWrap: { alignSelf: "flex-start", borderRadius: 16, marginBottom: spacing.lg, overflow: "hidden" },
+  logoImg: { width: 232, height: 73 },
   appleBtn: { width: "100%", height: 52, marginTop: spacing.md },
   logoBox: {
     width: 40,

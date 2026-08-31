@@ -42,7 +42,7 @@
           "image": "./assets/images/splash-image.png",
           "imageWidth": 240,
           "resizeMode": "contain",
-          "backgroundColor": "#FFFFFF"
+          "backgroundColor": "#020830"
         }
       ],
       "expo-audio"

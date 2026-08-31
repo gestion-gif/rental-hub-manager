@@ -166,7 +166,7 @@ export default function DrawerLayout() {
 
 const styles = StyleSheet.create({
   brand: { paddingHorizontal: spacing.lg, marginBottom: spacing.lg },
-  brandLogo: { width: 170, height: 46 },
+  brandLogo: { width: 170, height: 54 },
   logo: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
   brandText: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
   userRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.lg, marginBottom: spacing.md },

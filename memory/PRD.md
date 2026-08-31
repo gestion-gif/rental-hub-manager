@@ -684,3 +684,9 @@
 - Frontend: settings/access-tokens.tsx (liste, création avec label, affichage unique avec bouton Copier via expo-clipboard, révocation) + entrée menu Réglages → "Clés API".
 - Auto-testé (8/8): membre→403, création owner ok, hash/raw non exposés en liste, clé valide→200 sur /reservations, clé ne peut pas créer de clé (403), clé invalide→401, révocation→401 ensuite.
 - ⚠️ Dispo en PRODUCTION après redéploiement. Le user devra créer la clé depuis son compte Google (mobile ou web) puis la coller dans son projet PC.
+
+## Nouveau logo Casanéo (2026-08 fork #3)
+- Source: image uploadée (1536x1024, wordmark blanc/cyan sur fond bleu nuit, badge "Made with AI" en haut à droite EXCLU des crops).
+- Assets régénérés via PIL depuis /tmp/newlogo.png: frontend/assets/images/casaneo-logo.png (badge arrondi 1040x328 fond bleu), icon.png + adaptive-icon.png (emblème C sur carré dégradé bleu 1024), favicon.png, splash-image.png (+ splash backgroundColor #020830 dans app.json). Backend assets/casaneo-logo.png remplacé (servi via /api/assets/casaneo-logo.png → emails, relevés, PDF).
+- login.tsx: logoWrap carte blanche supprimée (badge autonome, 232x73). (tabs)/_layout.tsx: brandLogo 170x54.
+- Vérifié par screenshots (login + drawer). ⚠️ Icône d'app/splash: visibles seulement après regénération des builds iOS/Android (pas dans Expo Go).
