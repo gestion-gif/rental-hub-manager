@@ -134,6 +134,11 @@ async def startup():
     await db.reservations.create_index("user_id")
     await db.interventions.create_index("user_id")
     await db.api_keys.create_index("key_hash", unique=True)
+    try:
+        from demo_seed import ensure_demo_account
+        await ensure_demo_account()
+    except Exception:
+        logger.exception("demo account seed failed")
     asyncio.create_task(automation_scheduler())
     asyncio.create_task(_ical_auto_sync_loop())
     asyncio.create_task(_lodgify_auto_sync_loop())

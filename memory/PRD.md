@@ -709,3 +709,8 @@
 - GET /api/privacy (routers/public_site.py, HTMLResponse, sans auth) : page FR complète (données, finalités, sous-traitants Emergent/Channex/Stripe/OTA/IA/Resend, conservation, RGPD, suppression de compte, contact gestion@mhpimmo.fr, logo). Supporte dark mode via prefers-color-scheme.
 - URL pour métadonnées stores (PROD après redeploy): https://rental-hub-manager.emergent.host/api/privacy
 - login.tsx: lien "Politique de confidentialité" ajouté sous le bouton de connexion (Linking.openURL vers EXPO_PUBLIC_BACKEND_URL/api/privacy).
+
+## Compte démo stores (2026-08 fork #3)
+- backend/demo_seed.py: ensure_demo_account() appelé au startup (server.py) — tenant isolé user_id demo_store_review, member admin demo.stores@casaneo.app / CasaneoDemo2026!, 3 logements + 9 réservations (dates RELATIVES à today, statuts variés, finance complète) + 3 avis. Re-seed auto si plus de résa future ou version bump. delete_many strictement scoppé au user_id démo.
+- Testé: login OK, isolation vérifiée (0 fuite de vraies données), dashboard/KPI démo OK en preview.
+- ⚠️ Sera créé en PRODUCTION automatiquement au démarrage après redéploiement.
