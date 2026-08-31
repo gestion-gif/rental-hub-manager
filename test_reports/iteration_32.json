@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 32 — MODE SOMBRE (dark mode) frontend sweep. Logged in as qa.admin@casaneo.test, navigated to /settings/appearance, verified the 3 options (Automatique / Clair / Sombre) are present with correct testIDs (theme-system / theme-light / theme-dark). Selecting 'Sombre' triggers window.location.reload after 250 ms and the whole app re-renders with the bleu-nuit Casanéo palette (#0B1330 surface / #F0F3FB onSurface / #4468F0 brand). Swept 11 screens (/, /calendar list + Réglette calendar view, /planning, /properties, a reservation detail, /inbox, /reviews, /settings, /statement, /accounting, /property/[id]) plus the /reservation-form modal — ALL are cleanly styled: dark surface, readable text, buttons legible, borders/dividers use the dark palette. No sombre-sur-sombre or blanc-sur-blanc found. Toggled back to 'Clair' → reload → app reverts to white surfaces without residual dark artefacts. SAFETY: no reservation was saved, no OTA message or review was published (Channex is prod).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "/property/[id]",
+        "issues": [
+          "The property hero image at the top (property.image URL uploaded by owner, e.g. Alyoné logo) has a WHITE background baked into the marketing asset itself — so in dark mode that hero strip still appears mostly white. This is a content/asset issue, not a theme bug; property tiles in /properties show the same white-background logos. Not blocking, only flagging as a minor visual dissonance in dark mode. Consider adding a subtle dark tint/overlay behind hero images when the pref is dark, if the design team wants a fully consistent look."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/root/.emergent/automation_output/20260831_062151/ (dark sweep: 10_home_light, 11_appearance_light, 12_after_dark_reload, 20_home_dark, 21_calendar_dark, 22_planning_dark, 23_properties_dark, 24_inbox_dark, 25_reviews_dark, 26_settings_dark, 27_statement_dark, 28_accounting_dark, 30_reservation_detail_dark, 32_property_detail_dark, 40_appearance_dark_before_light, 41_after_light_reload, 42_home_light_after, 43_calendar_light_after)",
+    "/root/.emergent/automation_output/20260831_062543/reservation_form_test/ (50_calendar_list_dark, 51_reservation_form_modal_dark)"
+  ],
+  "action_items": [
+    "Nothing blocking. Optional polish: darken/tint the property hero background on /property/[id] when themePref=dark so the owner-supplied white-background marketing logos blend better with the bleu-nuit surface. Same suggestion for the /properties tile grid — a card-frame dark background is already applied, so it is minor."
+  ],
+  "critical_code_review_comments": [
+    "theme.ts: _syncInitialScheme() reads localStorage synchronously on web BEFORE any screen module evaluates its StyleSheet.create({...}) — which is exactly why StyleSheet.create captures the correct palette on first render after location.reload(). Well designed. AsyncStorage is still used for React Native (initTheme) and is awaited behind the themeReady gate in _layout.tsx — no FOUC observed in the web preview.",
+    "theme.ts:62 mutates the exported `colors` object via Object.assign so any existing imports keep working after applyThemePref(). Combined with location.reload() this makes the change atomic across all StyleSheet.create() captures. Note: any code that calls applyThemePref() WITHOUT reloading would leave already-captured StyleSheet colours stale — currently only the appearance screen calls applyThemePref and it immediately reloads (setTimeout 250 ms), so the only risk is if a future PR triggers applyThemePref elsewhere without reloading.",
+    "Hard-coded '#fff' occurrences (grep): mostly text/icon colours ON coloured buttons (brand background), plus a few switch knobs and the /statement previewDoc (explicitly documented as intentional paper look). No wrong background:'#fff' was found on top-level containers. Safe.",
+    "settings/appearance.tsx: testIDs theme-system/theme-light/theme-dark are wired correctly; radio state persists via AsyncStorage and is re-hydrated on mount from THEME_PREF_KEY. Good.",
+    "Reservation-form modal (/reservation-form) in dark mode: input placeholders use a muted grey which reads well against the dark surface; the platform pill buttons (Direct / Airbnb / Booking.com / Vrbo) keep their brand colours; the Statut chips (Demande orange, Confirmée, Arrivée, Départ) are consistent with the light mode design. Text-input fields have a slightly darker inner background — legible."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not tested per request)", "frontend": "100% — dark mode applied cleanly on 11 screens + reservation-form modal; light mode revert works"},
+  "seed_data_creation": "None. The reservation form was opened and closed WITHOUT saving; no Channex message/reply was sent.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Dark mode is stable and complete. Preference is stored in browser localStorage under the key 'themePref' (values: system|light|dark). Any new browser context starts with 'system' (light unless the OS is dark). To debug: `localStorage.setItem('themePref','dark'); location.reload();` after login. testIDs on /settings/appearance: theme-system / theme-light / theme-dark. If E1 later adds screens or components, verify they do not hard-code a background color — all backgrounds should come from `colors` in /app/frontend/src/theme.ts. The property hero on /property/[id] still shows the owner-uploaded image (may have white background baked in) — flagged as a minor design polish, not a bug.",
+  "rca_of_issue": "No bug found. Design note: the property hero on /property/[id] and the property tile logos on /properties are owner-supplied marketing images with white backgrounds — they appear light in dark mode. This is a content/asset choice, not a theme miswiring."
+}

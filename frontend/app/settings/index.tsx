@@ -39,6 +39,7 @@ const SECTIONS = [
     { path: "/settings/access-tokens", icon: "key-outline", title: "Clés API", sub: "Accès externe (version web PC…)" },
   ] },
   { title: "Affichage", items: [
+    { path: "/settings/appearance", icon: "moon-outline", title: "Apparence", sub: "Mode clair, sombre ou automatique" },
     { path: "/settings/status-colors", icon: "color-palette-outline", title: "Couleurs des statuts", sub: "Personnalisez le code couleur" },
   ] },
 ];

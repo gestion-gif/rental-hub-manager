@@ -1,6 +1,6 @@
 import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { LogBox, Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import * as Linking from "expo-linking";
@@ -14,6 +14,7 @@ import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/context/AuthContext";
 import { PreferencesProvider } from "@/src/context/PreferencesContext";
 import PushRegistrar from "@/src/PushRegistrar";
+import { initTheme } from "@/src/theme";
 
 // Disable logbox errors etc so that users can see the app
 // and agent works as expected.
@@ -55,7 +56,10 @@ export default function RootLayout() {
     "Geist-Bold": require("../assets/fonts/Geist-Bold.ttf"),
   });
 
-  const ready = (iconsLoaded || iconError) && (fontsLoaded || fontError);
+  const [themeReady, setThemeReady] = useState(false);
+  useEffect(() => { initTheme().finally(() => setThemeReady(true)); }, []);
+
+  const ready = (iconsLoaded || iconError) && (fontsLoaded || fontError) && themeReady;
 
   useEffect(() => {
     if (ready) {

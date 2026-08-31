@@ -697,3 +697,10 @@
 
 ## Renommage app (2026-08 fork #3)
 - app.json: "name" → "Casanéo Terrain" (slug/scheme/bundleIdentifier inchangés pour ne pas casser les builds/preview). Visible sous l icône après regénération des builds.
+
+## Mode sombre complet (2026-08 fork #3)
+- theme.ts: lightColors + darkColors (bleu nuit: surface #0B1330, brandPrimary #4468F0, borders #243056). `colors` = objet MUTABLE muté via Object.assign avant rendu des routes.
+- Mécanisme: pref 'themePref' (system/light/dark) dans AsyncStorage. Web: lecture SYNCHRONE de localStorage à l'éval du module theme.ts. Natif: fallback système sync (Appearance.getColorScheme) + initTheme() async dans _layout.tsx qui GATE le rendu (routes lazy → styles StyleSheet.create bakés avec la bonne palette). Toggle → save + applyThemePref + reload (web location.reload / natif DevSettings.reload, fallback Alert redémarrage en build release).
+- Écran /settings/appearance (Automatique/Clair/Sombre) + entrée menu Réglages → Affichage.
+- Testé (testing_agent iteration_32): PASS — 11 écrans + modal réservation vérifiés en sombre, retour clair sans résidus. Note design (non-bug): photos logements à fond blanc (assets uploadés).
+- ⚠️ testing screenshots: nouveau contexte navigateur = retour clair (localStorage vide), PAS un bug.
