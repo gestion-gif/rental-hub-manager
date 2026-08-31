@@ -719,3 +719,6 @@
 - /app/store_assets/fiche-stores.md : textes complets FR (nom, sous-titre 30c, description courte 80c, description longue, mots-clés 100c, nouveautés, URLs, compte démo, questionnaire confidentialité).
 - Captures: /app/store_assets/ios/ (6 x 1290x2796) et /app/store_assets/android/ (6 x 1080x2340), prises avec le compte démo (données fictives), incl. mode sombre.
 - Bannière Play Store 1024x500 générée: /app/store_assets/android/feature_graphic_1024x500.png (dégradé bleu nuit + wordmark extrait + tagline Geist).
+
+## Plan commercial SaaS (2026-08 fork #3)
+- /app/business/plan-commercial-casaneo.md : plan complet FR (marché, concurrence tarifs 2026 réels Superhote/Smily/Hostaway/Beds24, positionnement suite web PC + app mobile Terrain en complément, grille tarifaire Starter 39/Essentiel 79/Pro 149/Scale 249 €HT/mois, prévisionnel 12 mois → 40 clients / 3400€ MRR, canaux acquisition, plan 90 jours, prérequis produit P0 = inscription self-service + facturation Stripe abonnements, KPIs, risques).
