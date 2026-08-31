@@ -714,3 +714,7 @@
 - backend/demo_seed.py: ensure_demo_account() appelé au startup (server.py) — tenant isolé user_id demo_store_review, member admin demo.stores@casaneo.app / CasaneoDemo2026!, 3 logements + 9 réservations (dates RELATIVES à today, statuts variés, finance complète) + 3 avis. Re-seed auto si plus de résa future ou version bump. delete_many strictement scoppé au user_id démo.
 - Testé: login OK, isolation vérifiée (0 fuite de vraies données), dashboard/KPI démo OK en preview.
 - ⚠️ Sera créé en PRODUCTION automatiquement au démarrage après redéploiement.
+
+## Fiche stores (2026-08 fork #3)
+- /app/store_assets/fiche-stores.md : textes complets FR (nom, sous-titre 30c, description courte 80c, description longue, mots-clés 100c, nouveautés, URLs, compte démo, questionnaire confidentialité).
+- Captures: /app/store_assets/ios/ (6 x 1290x2796) et /app/store_assets/android/ (6 x 1080x2340), prises avec le compte démo (données fictives), incl. mode sombre.
