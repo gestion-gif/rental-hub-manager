@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable, Alert, Platform } from "react-native";
+import { View, Text, StyleSheet, Pressable, Alert, Platform, Linking } from "react-native";
 import { Image } from "expo-image";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { LinearGradient } from "expo-linear-gradient";
@@ -137,7 +137,14 @@ export default function Login() {
         )}
 
         <Text style={styles.legal}>
-          En continuant, vous acceptez nos conditions d'utilisation.
+          En continuant, vous acceptez nos conditions d’utilisation.{" "}
+          <Text
+            testID="privacy-link"
+            style={styles.legalLink}
+            onPress={() => Linking.openURL(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/privacy`)}
+          >
+            Politique de confidentialité
+          </Text>
         </Text>
       </KeyboardAwareScrollView>
     </View>
@@ -192,5 +199,10 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     textAlign: "center",
     marginTop: spacing.lg,
+  },
+  legalLink: {
+    color: "rgba(255,255,255,0.9)",
+    fontFamily: font.semibold,
+    textDecorationLine: "underline",
   },
 });

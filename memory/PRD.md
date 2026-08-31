@@ -704,3 +704,8 @@
 - Écran /settings/appearance (Automatique/Clair/Sombre) + entrée menu Réglages → Affichage.
 - Testé (testing_agent iteration_32): PASS — 11 écrans + modal réservation vérifiés en sombre, retour clair sans résidus. Note design (non-bug): photos logements à fond blanc (assets uploadés).
 - ⚠️ testing screenshots: nouveau contexte navigateur = retour clair (localStorage vide), PAS un bug.
+
+## Politique de confidentialité publique (2026-08 fork #3)
+- GET /api/privacy (routers/public_site.py, HTMLResponse, sans auth) : page FR complète (données, finalités, sous-traitants Emergent/Channex/Stripe/OTA/IA/Resend, conservation, RGPD, suppression de compte, contact gestion@mhpimmo.fr, logo). Supporte dark mode via prefers-color-scheme.
+- URL pour métadonnées stores (PROD après redeploy): https://rental-hub-manager.emergent.host/api/privacy
+- login.tsx: lien "Politique de confidentialité" ajouté sous le bouton de connexion (Linking.openURL vers EXPO_PUBLIC_BACKEND_URL/api/privacy).
