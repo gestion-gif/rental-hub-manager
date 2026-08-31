@@ -694,3 +694,6 @@
 ## Thème bleu nuit assorti au logo (2026-08 fork #3)
 - theme.ts (source unique des couleurs): brand #020830 (fond logo), brandPrimary #0E2364 (boutons/actions, texte blanc OK), surfaceInverse #020830, info #1EB8E0 (cyan flèche du logo). onSurface/success/warning/error inchangés. STATUS colors inchangées.
 - Aucun hex brand hardcodé ailleurs (vérifié) → propagation automatique app entière. Vérifié par screenshots (dashboard + avis).
+
+## Renommage app (2026-08 fork #3)
+- app.json: "name" → "Casanéo Terrain" (slug/scheme/bundleIdentifier inchangés pour ne pas casser les builds/preview). Visible sous l icône après regénération des builds.
