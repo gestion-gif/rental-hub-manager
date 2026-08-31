@@ -47,6 +47,8 @@ async def update_property(property_id: str, payload: PropertyIn, user=Depends(ge
         data.pop("owner_id", None)
     if data.get("dynamic_pricing") is None:
         data.pop("dynamic_pricing", None)
+    if data.get("pricelabs_managed") is None:
+        data.pop("pricelabs_managed", None)
     res = await db.properties.update_one(
         {"id": property_id, "user_id": user["user_id"]},
         {"$set": data},

@@ -99,7 +99,14 @@ export default function SubscriptionScreen() {
             </>)}
           </View>
 
-          {st !== "exempt" && (<>
+          {st !== "exempt" && (Platform.OS === "ios" ? (
+            <View style={styles.iosNotice}>
+              <Ionicons name="globe-outline" size={18} color={colors.onSurfaceSecondary} />
+              <Text style={styles.iosNoticeText}>
+                La souscription et la gestion de l’abonnement s’effectuent depuis la version web de Casanéo.
+              </Text>
+            </View>
+          ) : (<>
             <Text style={styles.section}>Formules (mensuel, sans engagement)</Text>
             {plans.map((p) => {
               const current = status?.plan === p.id && st === "active";
@@ -121,7 +128,7 @@ export default function SubscriptionScreen() {
               );
             })}
             <Text style={styles.hint}>Paiement sécurisé par Stripe. Gérez ou résiliez à tout moment depuis « Gérer ». Prix HT.</Text>
-          </>)}
+          </>))}
         </ScrollView>
       )}
     </View>
@@ -150,4 +157,6 @@ const styles = StyleSheet.create({
   currentTag: { backgroundColor: colors.success + "22", borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: spacing.md },
   currentText: { fontFamily: font.bold, fontSize: fontSize.sm, color: colors.success },
   hint: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: spacing.sm, lineHeight: 18 },
+  iosNotice: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.md },
+  iosNoticeText: { flex: 1, fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceSecondary, lineHeight: 20 },
 });

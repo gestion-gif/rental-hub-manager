@@ -86,7 +86,11 @@ multi-propriétaires qui veulent gagner du temps au quotidien.
 - E-mail : `demo.stores@casaneo.app`
 - Mot de passe : `CasaneoDemo2026!`
 - Note pour le réviseur : « Compte de démonstration avec données fictives.
-  Se connecter via “Se connecter avec un email et un mot de passe”. »
+  Se connecter via “Se connecter avec un email et un mot de passe”.
+  Ce compte démo est un compte *membre d'équipe* : la suppression de compte
+  (guideline 5.1.1(v)) est disponible dans Réglages → “Supprimer mon compte”
+  pour tout compte propriétaire créé via “Créer un compte” sur l'écran de
+  connexion (inscription libre, essai 14 jours). »
 
 ## 8. Captures d'écran (fournies dans ce dossier)
 

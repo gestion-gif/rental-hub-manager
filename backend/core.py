@@ -94,6 +94,7 @@ class PropertyIn(BaseModel):
     lodgify_id: Optional[str] = None
     owner_id: Optional[str] = None
     dynamic_pricing: Optional[dict] = None   # config tarification dynamique (par logement)
+    pricelabs_managed: Optional[bool] = None  # tarifs gérés par Pricelabs → aucun push de prix vers Channex
     published: bool = True                    # visible sur le site public de réservation
 class SupplementIn(BaseModel):
     name: str
@@ -1187,6 +1188,12 @@ async def enqueue_channex_availability(uid: str, property_id: str, date_from: st
 async def enqueue_channex_rates(uid: str, property_id: str, date_from: str, date_to: str):
     prop = await _channex_linked_prop(uid, property_id)
     if not prop:
+        return
+    if prop.get("pricelabs_managed"):
+        # Protection Pricelabs : les tarifs de ce logement sont pilotés par Pricelabs.
+        # On ne pousse JAMAIS de prix/min stay vers Channex pour éviter d'écraser Pricelabs.
+        await _sync_log(uid, "delta_push", "success",
+                        f"{prop.get('name')}: tarifs NON envoyés (gérés par Pricelabs)")
         return
     rate_plans = await db.rate_plans.find(
         {"user_id": uid, "property_id": property_id, "channex_rate_plan_id": {"$nin": [None, ""]}},

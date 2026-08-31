@@ -13,7 +13,8 @@
       "usesAppleSignIn": true,
       "bundleIdentifier": "com.emergent.rentalhubmanager.p4jvi7",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Ajouter des photos de l'état des lieux"
+        "NSPhotoLibraryUsageDescription": "Ajouter des photos de l'état des lieux",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

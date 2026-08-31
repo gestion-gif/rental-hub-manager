@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { View, Text, StyleSheet, Pressable, Platform } from "react-native";
 import { Drawer } from "expo-router/drawer";
 import { DrawerContentScrollView } from "@react-navigation/drawer";
 import { Ionicons } from "@expo/vector-icons";
@@ -152,10 +152,12 @@ function PaywallScreen({ onSubscribed }: { onSubscribed: () => void }) {
     <View style={pw.container}>
       <Ionicons name="lock-closed" size={56} color="#fff" />
       <Text style={pw.title}>Votre essai gratuit est terminé</Text>
-      <Text style={pw.sub}>Vos données sont conservées en sécurité. Choisissez une formule pour continuer à utiliser Casanéo.</Text>
-      <Pressable testID="paywall-subscribe" onPress={() => router.push("/settings/subscription")} style={pw.cta}>
-        <Text style={pw.ctaText}>Voir les formules</Text>
-      </Pressable>
+      <Text style={pw.sub}>Vos données sont conservées en sécurité. {Platform.OS === "ios" ? "Réactivez votre compte depuis la version web de Casanéo." : "Choisissez une formule pour continuer à utiliser Casanéo."}</Text>
+      {Platform.OS !== "ios" && (
+        <Pressable testID="paywall-subscribe" onPress={() => router.push("/settings/subscription")} style={pw.cta}>
+          <Text style={pw.ctaText}>Voir les formules</Text>
+        </Pressable>
+      )}
       <Pressable testID="paywall-refresh" onPress={() => api.get("/billing/status").then((s) => { if (s.entitled) onSubscribed(); }).catch(() => {})} style={pw.linkBtn}>
         <Text style={pw.link}>J'ai souscrit — actualiser</Text>
       </Pressable>

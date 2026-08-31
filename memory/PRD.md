@@ -739,3 +739,18 @@
 - server.py _trial_reminder_loop (quotidien): users non exempts, sans abonnement actif, trial_ends_at entre now et now+4j, trial_reminder_sent≠true → email FR (formules+prix) via send_email (Resend), flag trial_reminder_sent. Testé: requête match OK + email envoyé à delivered@resend.dev.
 - Vérifié par screenshots: inscription → onboarding (3 étapes), étape 1 → formulaire logement, login normal → dashboard OK.
 - Question user "Connect dans Stripe": il s'agit du Customer PORTAL (Réglages → Billing → Customer portal), pas de Stripe Connect — URL directe https://dashboard.stripe.com/settings/billing/portal
+
+## Conformité App Store — blockers corrigés (2026-08 fork #3)
+- Revue skill expo-appstore-readiness-review effectuée (rapport livré au user: 2 blockers, 3 warnings).
+- FIX 5.1.1(v): DELETE /api/auth/account (owner only, refuse membres/clé API/compte démo, annule l'abonnement Stripe, delete_many({user_id}) sur toutes les collections + sessions + user). Testé 6/6 (403 membre, 403 démo, 200 owner, données/sessions purgées, token invalidé). UI: Réglages → "Supprimer mon compte" (double confirmation, masqué pour membres) + "Contacter le support" (mailto gestion@mhpimmo.fr).
+- FIX 3.1.1 (IAP): sur iOS natif (Platform.OS==='ios'), les boutons d'achat Stripe sont masqués — settings/subscription.tsx affiche "gérez depuis la version web" (sans lien d'achat), PaywallScreen sans bouton "Voir les formules". Web/Android inchangés.
+- FIX warnings: RootErrorBoundary dans app/_layout.tsx (écran erreur FR + réessayer), ITSAppUsesNonExemptEncryption=false dans app.json, adaptiveIcon backgroundColor → #020830.
+- fiche-stores.md: note réviseur mise à jour (compte démo = membre; suppression visible pour comptes propriétaires créés via inscription).
+- Icône App Store: normal que l'ancienne apparaisse tant qu'un nouveau build n'est pas généré (icône embarquée dans le binaire).
+
+## Protection Pricelabs (2026-08 fork #4)
+- Champ `pricelabs_managed` (bool, optionnel) sur Property (PropertyIn core.py). PUT /properties/{id} ne l'écrase pas si absent du payload (pop si None).
+- core.py enqueue_channex_rates: si prop.pricelabs_managed → return early (aucun push tarifs/min stay vers Channex) + sync_log "tarifs NON envoyés (gérés par Pricelabs)". La dispo (enqueue_channex_availability) reste synchronisée.
+- routers/channex.py full-sync: si pricelabs_managed → rest_values vide (dispo seule poussée), résultat expose pricelabs_managed + log adapté.
+- UI: property-form.tsx section "Tarification externe" → Switch "Tarifs gérés par PriceLabs" (testID prop-pricelabs), chargé/sauvé avec le formulaire.
+- Testé: PUT ON/OFF + préservation si champ omis (API), unit test enqueue (0 outbox si ON, 1 si OFF, log OK), screenshot UI OK.

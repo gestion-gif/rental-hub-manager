@@ -206,8 +206,11 @@ async def channex_full_sync(payload: FullSyncIn = Body(default=FullSyncIn()),
                     lambda v, rt=cx_rt: {"property_id": cx_pid, "room_type_id": rt, "availability": v},
                 )
             # 1 appel tarifs+restrictions : tous les rate plans (prix saison → centimes, min stay)
+            # Protection Pricelabs : si les tarifs du logement sont gérés par Pricelabs,
+            # on ne pousse AUCUN prix (uniquement la disponibilité) pour ne pas l'écraser.
+            pricelabs = bool(prop.get("pricelabs_managed"))
             rest_values = []
-            for rpn in rate_plans:
+            for rpn in ([] if pricelabs else rate_plans):
                 cx_rp = rpn["channex_rate_plan_id"]
                 ms = int(rpn.get("min_stay") or 1)
                 rest_values += _date_ranges(
@@ -232,11 +235,14 @@ async def channex_full_sync(payload: FullSyncIn = Body(default=FullSyncIn()),
                 "property": prop.get("name"), "channex_id": cx_pid,
                 "rooms": len(rooms), "rate_plans": len(rate_plans),
                 "availability_ranges": len(avail_values), "rate_ranges": len(rest_values),
+                "pricelabs_managed": pricelabs,
                 "task_ids": task_ids,
             })
+            tarif_msg = "tarifs NON envoyés (gérés par Pricelabs)" if pricelabs \
+                else f"{len(rest_values)} plages tarifs"
             await _sync_log(uid, "full_sync", "success",
                             f"{prop.get('name')}: {len(avail_values)} plages dispo, "
-                            f"{len(rest_values)} plages tarifs — tasks={task_ids}")
+                            f"{tarif_msg} — tasks={task_ids}")
             await asyncio.sleep(1)  # espacer les logements (rate limit)
     return {"ok": True, "environment": doc.get("environment"), "days": days,
             "properties": len(props), "results": results}

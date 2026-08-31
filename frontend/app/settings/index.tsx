@@ -1,11 +1,13 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, Linking, Alert, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 import { HelpButton } from "@/src/components/HelpButton";
+import { api } from "@/src/api";
+import { useAuth } from "@/src/context/AuthContext";
 
 const SECTIONS = [
   { title: "Entreprise", items: [
@@ -50,6 +52,29 @@ export default function SettingsHub() {
   const router = useRouter();
   const [open, setOpen] = useState<string | null>(SECTIONS[0].title);
   const toggle = (t: string) => setOpen((cur) => (cur === t ? null : t));
+  const { user, signOut } = useAuth();
+
+  async function doDelete() {
+    try {
+      await api.del("/auth/account");
+      await signOut();
+    } catch (e: any) {
+      const msg = e?.message || "Suppression impossible.";
+      if (Platform.OS === "web") window.alert(msg); else Alert.alert("Erreur", msg);
+    }
+  }
+
+  function confirmDelete() {
+    const warn = "Cette action est DÉFINITIVE : votre compte, vos logements, réservations et toutes vos données seront supprimés.";
+    if (Platform.OS === "web") {
+      if (typeof window !== "undefined" && window.confirm(`${warn}\n\nConfirmer la suppression du compte ?`)) doDelete();
+      return;
+    }
+    Alert.alert("Supprimer mon compte", warn, [
+      { text: "Annuler", style: "cancel" },
+      { text: "Supprimer définitivement", style: "destructive", onPress: doDelete },
+    ]);
+  }
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
@@ -84,6 +109,31 @@ export default function SettingsHub() {
             </View>
           );
         })}
+
+        <Pressable
+          testID="settings-support"
+          onPress={() => Linking.openURL("mailto:gestion@mhpimmo.fr?subject=Support%20Casan%C3%A9o")}
+          style={styles.row}
+        >
+          <View style={styles.iconWrap}><Ionicons name="help-buoy-outline" size={20} color={colors.onSurface} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle}>Contacter le support</Text>
+            <Text style={styles.rowSub}>gestion@mhpimmo.fr — nous répondons rapidement</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceTertiary} />
+        </Pressable>
+
+        {user?.role !== "member" && (
+          <Pressable testID="settings-delete-account" onPress={confirmDelete} style={[styles.row, { borderColor: "#E5484D44" }]}>
+            <View style={[styles.iconWrap, { backgroundColor: "#E5484D14" }]}>
+              <Ionicons name="trash-outline" size={20} color="#E5484D" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.rowTitle, { color: "#E5484D" }]}>Supprimer mon compte</Text>
+              <Text style={styles.rowSub}>Suppression définitive du compte et de toutes les données</Text>
+            </View>
+          </Pressable>
+        )}
       </ScrollView>
     </View>
   );

@@ -132,6 +132,40 @@ class RegisterIn(BaseModel):
     password: str
 
 
+@api_router.delete("/auth/account")
+async def delete_account(user=Depends(get_current_user)):
+    """Suppression de compte in-app (exigence Apple 5.1.1(v)).
+    Supprime le compte propriétaire et TOUTES les données associées."""
+    if user.get("role") == "member":
+        raise HTTPException(status_code=403, detail="Seul le titulaire du compte peut le supprimer")
+    if user.get("auth_type") == "api_key":
+        raise HTTPException(status_code=403, detail="Suppression impossible via une clé API")
+    uid = user["user_id"]
+    if uid == "demo_store_review":
+        raise HTTPException(status_code=403, detail="Le compte de démonstration ne peut pas être supprimé")
+    # Résilie l'abonnement Stripe s'il existe (best effort)
+    try:
+        doc = await db.users.find_one({"user_id": uid}, {"_id": 0, "billing": 1})
+        sub_id = ((doc or {}).get("billing") or {}).get("stripe_subscription_id")
+        if sub_id and STRIPE_API_KEY:
+            import stripe as _stripe
+            _stripe.api_key = STRIPE_API_KEY
+            _stripe.Subscription.cancel(sub_id)
+    except Exception:
+        logger.exception("stripe cancel on account deletion failed")
+    # Supprime toutes les données du tenant dans toutes les collections
+    names = await db.list_collection_names()
+    for cname in names:
+        try:
+            await db[cname].delete_many({"user_id": uid})
+        except Exception:
+            pass
+    await db.user_sessions.delete_many({"user_id": uid})
+    await db.users.delete_one({"user_id": uid})
+    logger.info("account deleted: %s", uid)
+    return {"ok": True}
+
+
 async def _create_owner_session(user_doc: dict) -> dict:
     token = secrets.token_urlsafe(32)
     await db.user_sessions.insert_one({

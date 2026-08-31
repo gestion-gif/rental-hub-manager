@@ -1,7 +1,7 @@
 import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect, useState } from "react";
-import { LogBox, Platform } from "react-native";
+import React, { useEffect, useState } from "react";
+import { LogBox, Platform, View, Text, Pressable } from "react-native";
 import * as Notifications from "expo-notifications";
 import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -15,6 +15,35 @@ import { AuthProvider } from "@/src/context/AuthContext";
 import { PreferencesProvider } from "@/src/context/PreferencesContext";
 import PushRegistrar from "@/src/PushRegistrar";
 import { initTheme } from "@/src/theme";
+
+class RootErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: "#020830", alignItems: "center", justifyContent: "center", padding: 32 }}>
+          <Text style={{ color: "#fff", fontSize: 22, fontWeight: "700", textAlign: "center" }}>Oups, une erreur est survenue</Text>
+          <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 15, textAlign: "center", marginTop: 10 }}>
+            Réessayez — si le problème persiste, contactez le support (gestion@mhpimmo.fr).
+          </Text>
+          <Pressable
+            onPress={() => this.setState({ error: null })}
+            style={{ backgroundColor: "#fff", borderRadius: 14, paddingVertical: 13, paddingHorizontal: 28, marginTop: 24 }}
+          >
+            <Text style={{ color: "#020830", fontSize: 16, fontWeight: "700" }}>Réessayer</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // Disable logbox errors etc so that users can see the app
 // and agent works as expected.
@@ -96,6 +125,7 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <RootErrorBoundary>
       <SafeAreaProvider>
         <KeyboardProvider>
           <AuthProvider>
@@ -153,6 +183,7 @@ export default function RootLayout() {
           </AuthProvider>
         </KeyboardProvider>
       </SafeAreaProvider>
+      </RootErrorBoundary>
     </GestureHandlerRootView>
   );
 }

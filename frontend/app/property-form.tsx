@@ -57,6 +57,7 @@ export default function PropertyForm() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [published, setPublished] = useState(true);
+  const [pricelabsManaged, setPricelabsManaged] = useState(false);
   const [uploadingKeys, setUploadingKeys] = useState(false);
 
   useEffect(() => {
@@ -98,6 +99,7 @@ export default function PropertyForm() {
         setKeyPhotos(p.key_photos || []);
         setPhotos(p.photos || []);
         setPublished(p.published !== false);
+        setPricelabsManaged(p.pricelabs_managed === true);
       } catch {}
       setLoading(false);
     })();
@@ -181,6 +183,7 @@ export default function PropertyForm() {
       key_photos: keyPhotos,
       photos,
       published,
+      pricelabs_managed: pricelabsManaged,
       rooms,
       amenities,
       seasons: existing.current.seasons || [],
@@ -305,6 +308,16 @@ export default function PropertyForm() {
           </View>
         </View>
         <Text style={styles.helper}>Calculées en % du prix des nuitées et pré-remplies automatiquement dans la réservation. Modifiable aussi dans Paramètres → Taxe de séjour.</Text>
+
+        <SectionLabel text="Tarification externe" />
+        <View style={styles.pubRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pubTitle}>Tarifs gérés par PriceLabs</Text>
+            <Text style={styles.helper}>Casanéo n'enverra plus aucun prix ni durée min. de séjour vers Channex pour ce logement, afin de ne pas écraser les tarifs poussés par PriceLabs. La disponibilité reste synchronisée.</Text>
+          </View>
+          <Switch testID="prop-pricelabs" value={pricelabsManaged} onValueChange={setPricelabsManaged}
+            trackColor={{ false: colors.border, true: colors.brandPrimary }} thumbColor="#fff" />
+        </View>
 
         <SectionLabel text="Site de réservation" />
         <View style={styles.pubRow}>
