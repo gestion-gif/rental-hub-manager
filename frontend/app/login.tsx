@@ -110,9 +110,14 @@ export default function Login() {
         )}
 
         {!showEmail ? (
-          <Pressable testID="show-email-login" onPress={() => setShowEmail(true)} style={styles.linkBtn}>
-            <Text style={styles.linkText}>Se connecter avec un email et un mot de passe</Text>
-          </Pressable>
+          <>
+            <Pressable testID="show-email-login" onPress={() => setShowEmail(true)} style={styles.linkBtn}>
+              <Text style={styles.linkText}>Se connecter avec un email et un mot de passe</Text>
+            </Pressable>
+            <Pressable testID="go-register" onPress={() => router.push("/register")} style={styles.linkBtn}>
+              <Text style={styles.linkText}>Nouveau ? Créer un compte — essai gratuit 14 jours</Text>
+            </Pressable>
+          </>
         ) : (
           <View style={styles.emailBox}>
             <Field

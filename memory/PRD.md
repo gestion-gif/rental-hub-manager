@@ -722,3 +722,13 @@
 
 ## Plan commercial SaaS (2026-08 fork #3)
 - /app/business/plan-commercial-casaneo.md : plan complet FR (marché, concurrence tarifs 2026 réels Superhote/Smily/Hostaway/Beds24, positionnement suite web PC + app mobile Terrain en complément, grille tarifaire Starter 39/Essentiel 79/Pro 149/Scale 249 €HT/mois, prévisionnel 12 mois → 40 clients / 3400€ MRR, canaux acquisition, plan 90 jours, prérequis produit P0 = inscription self-service + facturation Stripe abonnements, KPIs, risques).
+
+## SaaS : inscription autonome + abonnements Stripe (2026-08 fork #3)
+- AUTH: POST /api/auth/register (nom/email/mdp≥8, bcrypt via hash_password, 409 générique doublons users+members) crée un OWNER avec billing essai 14j sans carte (new_trial_billing dans core.py). POST /api/auth/login vérifie d'abord les owners à mot de passe puis les membres. Nouveaux comptes Google/Apple reçoivent aussi le billing trial.
+- BILLING (routers/billing.py): PLANS starter 39€/3, essentiel 79€/10, pro 149€/25, scale 249€/50 (mensuel EUR, price_data inline). GET /billing/plans (public), GET /billing/status (état: exempt/trial/active/locked + limites + refresh Stripe si pending_session ou stale 6h), POST /billing/checkout (Stripe Checkout mode subscription, client_reference_id, success → {origin}/subscription-success?session_id=), POST /billing/confirm (vérifie ownership), POST /billing/portal.
+- GATE: core.py get_current_user(request, ...) → _billing_gate : 402 si essai expiré sans abonnement, SAUF chemins /api/auth|billing|privacy|public|assets. Comptes SANS champ billing = exemptés (historiques: owner réel + démo). Membres → billing du compte parent.
+- LIMITE: POST /api/properties → 402 si property_count >= property_limit de la formule.
+- FRONT: register.tsx (fond bleu nuit), login lien "Créer un compte", settings/subscription.tsx (statut + 4 formules + portail), subscription-success.tsx (confirm avec retries), PaywallScreen dans (tabs)/_layout (gate /billing/status entitled).
+- TESTS: backend 12/12 auto-testés (register/login/lock 402/limite logements/checkout live URL/exemptions) + testing_agent iteration_33 frontend 8/8 PASS (inscription→dashboard, essai 13j, redirection checkout.stripe.com SANS payer, paywall après expiration simulée, régression compte historique OK).
+- ⚠️ Clé Stripe LIVE en preview : sessions checkout créées côté Stripe live (jamais payées). Portail client Stripe: à configurer dans Dashboard → Billing → Customer portal si pas déjà actif.
+- Prod: dispo après redéploiement.

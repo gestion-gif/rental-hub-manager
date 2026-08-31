@@ -33,6 +33,7 @@ type AuthState = {
   loginWithApple: (identityToken: string, name: string, email: string) => Promise<void>;
   signOut: () => Promise<void>;
   loginWithPassword: (email: string, password: string) => Promise<void>;
+  registerOwner: (name: string, email: string, password: string) => Promise<void>;
   acceptInvite: (token: string, password: string) => Promise<void>;
 };
 
@@ -178,6 +179,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function registerOwner(name: string, email: string, password: string) {
+    const data = await api.post("/auth/register", { name, email, password });
+    setToken(data.session_token);
+    await storage.secureSet(TOKEN_KEY, data.session_token);
+    try {
+      setUser(await api.get("/auth/me"));
+    } catch {
+      setUser(data.user);
+    }
+  }
+
   async function acceptInvite(token: string, password: string) {
     const data = await api.post("/auth/accept-invite", { token, password });
     setToken(data.session_token);
@@ -191,7 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, signingIn, signIn, signOut, loginWithPassword, loginWithApple, acceptInvite }}
+      value={{ user, loading, signingIn, signIn, signOut, loginWithPassword, loginWithApple, acceptInvite, registerOwner }}
     >
       {children}
     </AuthContext.Provider>

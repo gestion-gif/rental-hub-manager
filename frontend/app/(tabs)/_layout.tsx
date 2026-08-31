@@ -145,9 +145,48 @@ function CustomDrawer(props: any) {
   );
 }
 
+function PaywallScreen({ onSubscribed }: { onSubscribed: () => void }) {
+  const router = useRouter();
+  const { signOut } = useAuth();
+  return (
+    <View style={pw.container}>
+      <Ionicons name="lock-closed" size={56} color="#fff" />
+      <Text style={pw.title}>Votre essai gratuit est terminé</Text>
+      <Text style={pw.sub}>Vos données sont conservées en sécurité. Choisissez une formule pour continuer à utiliser Casanéo.</Text>
+      <Pressable testID="paywall-subscribe" onPress={() => router.push("/settings/subscription")} style={pw.cta}>
+        <Text style={pw.ctaText}>Voir les formules</Text>
+      </Pressable>
+      <Pressable testID="paywall-refresh" onPress={() => api.get("/billing/status").then((s) => { if (s.entitled) onSubscribed(); }).catch(() => {})} style={pw.linkBtn}>
+        <Text style={pw.link}>J'ai souscrit — actualiser</Text>
+      </Pressable>
+      <Pressable testID="paywall-logout" onPress={signOut} style={pw.linkBtn}>
+        <Text style={pw.link}>Se déconnecter</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const pw = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#020830", alignItems: "center", justifyContent: "center", padding: spacing.xl },
+  title: { fontFamily: font.bold, fontSize: 24, color: "#fff", marginTop: spacing.md, textAlign: "center" },
+  sub: { fontFamily: font.regular, fontSize: fontSize.base, color: "rgba(255,255,255,0.7)", marginTop: spacing.sm, textAlign: "center", lineHeight: 21 },
+  cta: { backgroundColor: "#fff", borderRadius: radius.lg, paddingVertical: 14, paddingHorizontal: spacing.xl, marginTop: spacing.xl },
+  ctaText: { fontFamily: font.bold, fontSize: fontSize.lg, color: "#020830" },
+  linkBtn: { marginTop: spacing.md },
+  link: { fontFamily: font.medium, fontSize: fontSize.base, color: "rgba(255,255,255,0.75)", textDecorationLine: "underline" },
+});
+
 export default function DrawerLayout() {
   const { user, loading } = useAuth();
+  const [locked, setLocked] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    api.get("/billing/status").then((s) => setLocked(!s.entitled)).catch((e: any) => {
+      if (String(e?.message || "").includes("essai gratuit est terminé")) setLocked(true);
+    });
+  }, [user]);
   if (!loading && !user) return <Redirect href="/login" />;
+  if (locked) return <PaywallScreen onSubscribed={() => setLocked(false)} />;
   return (
     <Drawer
       drawerContent={(p) => <CustomDrawer {...p} />}

@@ -1,0 +1,44 @@
+{
+  "summary": "Iteration 33 — SaaS self-signup + Stripe subscription + paywall frontend sweep (mobile viewport 390x844). ALL 8 requested flows PASS. (1) /login shows 'Nouveau ? Créer un compte — essai gratuit 14 jours' testID=go-register, redirects to /register (fond bleu nuit #020830, champs Nom/E-mail/Mot de passe with proper testIDs). (2) Signup with qa.signup.1788178233@example.com / MotDePasse123! succeeds → redirect to home (/) — dashboard is empty as expected (0% occupation, 0 €, 0 logements, 0 à venir). (3) /settings/subscription shows '🎁 Essai gratuit en cours — 13 jours restants (jusqu'au 14/09/2026)' (14 - fractional first day ~ 13 correct) and the 4 plans: Starter 39€/mois (jusqu'à 3), Essentiel 79€/mois (jusqu'à 10) with brand border highlight and ⭐, Pro 149€/mois (jusqu'à 25), Scale 249€/mois (jusqu'à 50), each with 'Choisir' testID=sub-plan-{id}. (4) Clicking 'Choisir' on Starter redirects to https://checkout.stripe.com/c/pay/cs_live_... showing 'Subscribe to Casanéo Starter — jusqu'à 3 logements €39.00 per month' with merchant 'MHP IMMOBILIER' and Stripe payment methods (Card / Apple Pay / Amazon Pay / Klarna / Satispay). NO payment attempted, went back safely. (5) PAYWALL: mutated billing.trial_ends_at='2020-01-01T00:00:00+00:00' + billing.pending_session_id=null via pymongo, re-login → GET /api/billing/status returns 402 (verified via console) and the blue-night PaywallScreen renders correctly: lock icon, 'Votre essai gratuit est terminé', sub-text, 3 buttons ('Voir les formules', 'J'ai souscrit — actualiser', 'Se déconnecter') with testIDs paywall-subscribe/paywall-refresh/paywall-logout. Clicking 'Voir les formules' opens /settings/subscription which now shows '⏳ Essai terminé' status card in error red with plans still selectable. (6) 'Se déconnecter' returns to /login. (7) REGRESSION: qa.admin@casaneo.test / CasaneoQA2026! (historical exempt account) logs in with FULL access — dashboard shows 61% occupation, 65374 €, 23 logements, 53 à venir (NO paywall); navigated to /calendar → Réservations list loads normally with tabs Toutes/Demande/Confirmée/Arrivées and reservation cards. (8) CLEANUP done: db.users.deleteOne({email:qa.signup.1788178233@example.com}) removed 1 doc, db.user_sessions.deleteMany removed 1 session. SAFETY: no Stripe card entered, no payment attempted, no Channex message/review sent, no .env modified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/00_login.png (login with 'Nouveau ? Créer un compte' link visible)",
+    "/tmp/02_register_form.png (blue-night register screen)",
+    "/tmp/03_register_filled.png (form filled with test creds)",
+    "/tmp/04_after_signup.png (home dashboard empty state after signup)",
+    "/tmp/06_sub_authed.png (subscription screen with trial card + 4 plans, Essentiel highlighted)",
+    "/tmp/07_stripe.png (Stripe Checkout — Casanéo Starter €39/month, MHP IMMOBILIER merchant)",
+    "/tmp/09_paywall.png (blue-night paywall screen after trial expired via Mongo)",
+    "/tmp/10_locked_sub.png (subscription screen showing ⏳ Essai terminé card)",
+    "/tmp/12_after_logout.png (login screen after paywall-logout)",
+    "/tmp/13_qaadmin_home.png (regression: QA admin full dashboard 23 logements)",
+    "/tmp/17_calendar.png (regression: Réservations tab loads for QA admin)"
+  ],
+  "action_items": [
+    "No blocking issues. Feature ready to ship. Optional: consider adding testID on the header hamburger/menu icon in _layout to make drawer-based navigation deterministic in Playwright (drawer-{key} testIDs already exist inside the drawer, but the toggle relies on generic Ionicon svg — not a bug, just a testability polish)."
+  ],
+  "critical_code_review_comments": [
+    "app/(tabs)/_layout.tsx PaywallScreen (lines 148-167): styles are inline-fixed #020830 background + white text — good, does NOT depend on theme colors so it renders correctly whether or not applyThemePref has run. testIDs paywall-subscribe/paywall-refresh/paywall-logout wired correctly.",
+    "app/(tabs)/_layout.tsx DrawerLayout (lines 179-204): gate 'if (locked) return <PaywallScreen>' runs after user is loaded and before Drawer renders — correct order; 402 from GET /billing/status flips locked=true through both the .then(s => !s.entitled) branch AND the catch that matches 'essai gratuit est terminé' — belt-and-braces, safe.",
+    "app/settings/subscription.tsx (lines 74-100): status card correctly branches on status.status ('exempt' | 'trial' | 'active' | 'locked'); the {st !== 'exempt' && ...} guard hides plans for founder accounts — correct product behavior.",
+    "app/register.tsx: password validation is client-side (length>=8) — matches backend rule; blue-night theme is hard-coded (#020830) so signup screen looks identical in light/dark preview — good for the SaaS onboarding brand consistency.",
+    "Trial 'X jours restants' rendering (subscription.tsx line 83) uses status.trial_days_left from backend — displayed 13 when trial_ends_at was ~13.99 days in the future, i.e. floor(seconds/86400). Product-consistent. Confirmed on-screen '13 jours restants (jusqu'au 14/09/2026)'.",
+    "Note: current server time in preview environment is Aug 2026 (test env clock ahead of the Jan 2026 stated in the system prompt) — trial dates reflect server clock, not a bug."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request — main agent already validated 12 curl tests)", "frontend": "100% — 8/8 requested flows pass, no UI regressions"},
+  "seed_data_creation": "Created ephemeral test user qa.signup.1788178233@example.com in db.users (test_database) then DELETED as final step. Its associated user_sessions row (1 doc) was also deleted. No properties, reservations, or Channex payloads were created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "SaaS onboarding + paywall + Stripe checkout is fully working end-to-end. Register testIDs: go-register (login), register-name/-email/-password/-submit (register). Subscription testIDs: sub-back, sub-plan-{starter|essentiel|pro|scale}, sub-portal (only for active). Paywall testIDs: paywall-subscribe / paywall-refresh / paywall-logout. To reproduce paywall in QA: signup a fresh account, then run in mongo `db.users.updateOne({email:'<x>'}, {$set:{'billing.trial_ends_at':'2020-01-01T00:00:00+00:00','billing.pending_session_id':null}})` and reload. To reproduce exempt: use qa.admin@casaneo.test / CasaneoQA2026! — this member is attached to a historical owner whose users doc has no billing field (or billing.exempt=true). WARNING: Stripe key is LIVE (sk_live_...) — never fill card details on the checkout page during automated tests.",
+  "rca_of_issue": "N/A — no bug found. All 8 scenarios of the SaaS onboarding + paywall + Stripe Checkout flow behave exactly as specified."
+}

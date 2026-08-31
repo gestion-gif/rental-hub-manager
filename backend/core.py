@@ -191,7 +191,31 @@ class GuestReplyRequest(BaseModel):
 class PricingRequest(BaseModel):
     property_id: str
     period: str = ""
-async def get_current_user(authorization: Optional[str] = Header(None)):
+_BILLING_OPEN_PREFIXES = ("/api/auth", "/api/billing", "/api/privacy", "/api/public", "/api/assets")
+async def _billing_gate(request, user):
+    """Verrouille l'API (402) quand l'essai est terminé sans abonnement actif.
+    Les comptes historiques (sans champ billing) et exemptés passent toujours."""
+    try:
+        path = request.url.path if request is not None else ""
+    except Exception:
+        path = ""
+    if path.startswith(_BILLING_OPEN_PREFIXES):
+        return
+    b = user.get("billing")
+    if b is None and user.get("role") == "member":
+        owner = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "billing": 1})
+        b = (owner or {}).get("billing")
+    if not b or b.get("exempt"):
+        return
+    if b.get("status") in ("active", "trialing"):
+        return
+    te = b.get("trial_ends_at") or ""
+    if te and str(te) > now_utc().isoformat():
+        return
+    raise HTTPException(
+        status_code=402,
+        detail="Votre essai gratuit est terminé. Choisissez une formule pour continuer à utiliser Casanéo.")
+async def get_current_user(request: Request, authorization: Optional[str] = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = authorization.split(" ", 1)[1]
@@ -209,6 +233,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
         user["role"] = "owner"
         user["allowed_property_ids"] = None
         user["auth_type"] = "api_key"
+        await _billing_gate(request, user)
         return user
     session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
     if not session:
@@ -227,7 +252,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
         mrole = member.get("role", "member")
         # Un administrateur voit tout le compte parrain ; sinon accès limité aux logements attribués
         allowed = None if mrole == "admin" else (member.get("property_ids") or [])
-        return {
+        muser = {
             "user_id": member["user_id"],  # data owner (the account that owns the properties)
             "email": member.get("email", ""),
             "name": name or member.get("email", ""),
@@ -237,12 +262,25 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
             "permissions": member.get("permissions", []),
             "allowed_property_ids": allowed,
         }
+        await _billing_gate(request, muser)
+        return muser
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     user["role"] = "owner"
     user["allowed_property_ids"] = None  # None => all properties
+    await _billing_gate(request, user)
     return user
+def new_trial_billing() -> dict:
+    """Billing initial d'un nouveau compte : essai 14 jours sans carte."""
+    return {
+        "plan": None,
+        "status": "trial",
+        "trial_ends_at": (now_utc() + timedelta(days=14)).isoformat(),
+        "exempt": False,
+        "stripe_customer_id": None,
+        "stripe_subscription_id": None,
+    }
 def _prop_scope(user, field="id"):
     """Return a Mongo clause fragment restricting to the user's allowed properties.
     Owners (allowed_property_ids is None) get no restriction (empty dict)."""
@@ -2769,6 +2807,8 @@ __all__ = [
     'hash_password',
     'verify_password',
     'norm_email',
+    '_billing_gate',
+    'new_trial_billing',
     'hash_token',
     'DEFAULT_STATUSES',
     'DEFAULT_STATUS_COLORS',

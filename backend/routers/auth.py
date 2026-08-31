@@ -25,6 +25,7 @@ async def create_session(payload: SessionRequest):
             "email": email,
             "name": name,
             "picture": picture,
+            "billing": new_trial_billing(),
             "created_at": now_utc().isoformat(),
         })
 
@@ -72,6 +73,7 @@ async def auth_apple(payload: AppleAuthIn):
         await db.users.insert_one({
             "user_id": user_id, "apple_sub": sub, "email": email,
             "name": payload.name or "Utilisateur Apple", "picture": "",
+            "billing": new_trial_billing(),
             "created_at": now_utc().isoformat(),
         })
 
@@ -124,8 +126,62 @@ async def accept_invite(payload: AcceptInviteIn):
     return await _create_member_session(member)
 
 
+class RegisterIn(BaseModel):
+    name: str = ""
+    email: str
+    password: str
+
+
+async def _create_owner_session(user_doc: dict) -> dict:
+    token = secrets.token_urlsafe(32)
+    await db.user_sessions.insert_one({
+        "session_token": token, "user_id": user_doc["user_id"],
+        "created_at": now_utc(), "expires_at": now_utc() + timedelta(days=7),
+    })
+    return {
+        "session_token": token,
+        "user": {
+            "user_id": user_doc["user_id"], "email": user_doc.get("email", ""),
+            "name": user_doc.get("name", ""), "picture": user_doc.get("picture", ""),
+        },
+    }
+
+
+@api_router.post("/auth/register")
+async def register(payload: RegisterIn):
+    """Inscription autonome d'un compte propriétaire (essai gratuit 14 jours)."""
+    email = norm_email(payload.email)
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(status_code=400, detail="Adresse e-mail invalide")
+    if len(payload.password or "") < 8:
+        raise HTTPException(status_code=400, detail="Mot de passe : 8 caractères minimum")
+    exists = await db.users.find_one({"email": email}, {"_id": 0, "user_id": 1})
+    exists_member = await db.members.find_one({"email_normalized": email}, {"_id": 0, "id": 1})
+    if exists or exists_member:
+        raise HTTPException(status_code=409, detail="Impossible de créer un compte avec ces identifiants")
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    doc = {
+        "user_id": user_id, "email": email,
+        "name": (payload.name or "").strip() or email.split("@")[0],
+        "picture": "", "password_hash": hash_password(payload.password),
+        "billing": new_trial_billing(),
+        "created_at": now_utc().isoformat(),
+    }
+    try:
+        await db.users.insert_one(doc)
+    except Exception:
+        raise HTTPException(status_code=409, detail="Impossible de créer un compte avec ces identifiants")
+    return await _create_owner_session(doc)
+
+
 @api_router.post("/auth/login")
 async def member_login(payload: LoginIn):
+    email = norm_email(payload.email)
+    # 1) Compte propriétaire avec mot de passe (inscription autonome)
+    owner = await db.users.find_one({"email": email, "password_hash": {"$nin": [None, ""]}}, {"_id": 0})
+    if owner and verify_password(payload.password, owner["password_hash"]):
+        return await _create_owner_session(owner)
+    # 2) Membre d'équipe (invitation)
     email = norm_email(payload.email)
     member = await db.members.find_one(
         {"email_normalized": email, "password_hash": {"$exists": True}}, {"_id": 0})

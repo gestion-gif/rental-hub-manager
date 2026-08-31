@@ -12,6 +12,13 @@ async def list_properties(user=Depends(get_current_user)):
 
 @api_router.post("/properties")
 async def create_property(payload: PropertyIn, user=Depends(get_current_user)):
+    from routers.billing import billing_state_for
+    state = await billing_state_for(user["user_id"])
+    limit = state.get("property_limit")
+    if limit is not None and state.get("property_count", 0) >= limit:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Limite de votre formule atteinte ({limit} logements). Passez à la formule supérieure pour en ajouter.")
     doc = payload.dict()
     doc["id"] = str(uuid.uuid4())
     doc["user_id"] = user["user_id"]

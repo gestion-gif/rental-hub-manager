@@ -475,3 +475,15 @@ backend_iteration_31:
         -working: true
         -agent: "testing"
         -comment: "10/10 pass (tests/test_iter31_channex_inbox_reviews.py). Bug trouvé: Channex attributes.reply = objet {reply} pour avis répondus → crash React. Corrigé par main agent (coercition str + migration 14 docs + garde String() frontend), vérifié par screenshots (modal réponse + suggestion IA OK, rien publié)."
+
+backend_iteration_33:
+  - task: "SaaS: register owner + login owner, billing Stripe Checkout subscriptions, 402 gate essai expiré, limite logements par formule, paywall frontend"
+    implemented: true
+    working: true
+    file: "backend/routers/billing.py, backend/routers/auth.py, backend/core.py, frontend register/subscription/paywall"
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "testing"
+        -comment: "Backend auto-testé par main agent (12/12). Frontend testing_agent 8/8 PASS (iteration_33). Stripe LIVE: ne jamais payer en test."

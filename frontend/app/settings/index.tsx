@@ -9,6 +9,7 @@ import { HelpButton } from "@/src/components/HelpButton";
 
 const SECTIONS = [
   { title: "Entreprise", items: [
+    { path: "/settings/subscription", icon: "card-outline", title: "Abonnement", sub: "Formule, essai gratuit, factures" },
     { path: "/settings/company", icon: "business-outline", title: "Ma société", sub: "Coordonnées sur les relevés (PDF & email)" },
     { path: "/settings/members", icon: "people-circle-outline", title: "Utilisateurs", sub: "Équipe, rôles & autorisations" },
     { path: "/settings/staff", icon: "people-outline", title: "Intervenants", sub: "Équipe ménage & technique" },

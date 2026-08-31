@@ -9,7 +9,7 @@ from routers import (  # noqa: F401
     auth, properties, reservations, public_site, interventions, ical, dashboard,
     analytics, ai, preferences, channex, policies, push, sync, inbox, team, owners,
     statements, reviews, promotions, templates, automations, files, messaging,
-    accounting, supplements, api_keys,
+    accounting, supplements, api_keys, billing,
 )
 
 # Route handlers referenced by the background loops below
