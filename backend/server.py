@@ -63,6 +63,55 @@ async def _ai_draft_loop():
         await asyncio.sleep(1800)  # toutes les 30 min
 
 
+async def _trial_reminder_loop():
+    """Quotidien : email de rappel aux comptes en essai à ~4 jours de la fin (J+10)."""
+    await asyncio.sleep(240)
+    while True:
+        try:
+            now_iso = now_utc().isoformat()
+            limit_iso = (now_utc() + timedelta(days=4)).isoformat()
+            users = await db.users.find({
+                "billing.exempt": {"$ne": True},
+                "billing.status": {"$nin": ["active", "trialing"]},
+                "billing.trial_reminder_sent": {"$ne": True},
+                "billing.trial_ends_at": {"$gt": now_iso, "$lt": limit_iso},
+                "email": {"$nin": [None, ""]},
+            }, {"_id": 0, "user_id": 1, "email": 1, "name": 1, "billing": 1}).to_list(200)
+            for u in users:
+                try:
+                    ends = u["billing"].get("trial_ends_at", "")[:10]
+                    days = max(1, (datetime.fromisoformat(u["billing"]["trial_ends_at"]) - now_utc()).days)
+                    html = f"""
+                    <div style="font-family:sans-serif;max-width:560px;margin:0 auto">
+                      <h2 style="color:#020830">Votre essai Casanéo se termine bientôt</h2>
+                      <p>Bonjour {u.get('name') or ''},</p>
+                      <p>Votre essai gratuit se termine dans <strong>{days} jour{'s' if days > 1 else ''}</strong>
+                      (le {ends}). Pour continuer à gérer vos réservations, calendriers et messages voyageurs
+                      sans interruption, choisissez une formule dès maintenant :</p>
+                      <ul>
+                        <li><strong>Starter</strong> — 39 €/mois · jusqu'à 3 logements</li>
+                        <li><strong>Essentiel</strong> — 79 €/mois · jusqu'à 10 logements</li>
+                        <li><strong>Pro</strong> — 149 €/mois · jusqu'à 25 logements</li>
+                        <li><strong>Scale</strong> — 249 €/mois · jusqu'à 50 logements</li>
+                      </ul>
+                      <p>Rendez-vous dans l'app : <strong>Réglages → Abonnement</strong>.</p>
+                      <p>Vos données sont conservées en sécurité, même si l'essai expire.</p>
+                      <p style="color:#888">L'équipe Casanéo</p>
+                    </div>"""
+                    await send_email(to=u["email"],
+                                     subject=f"⏳ Plus que {days} jour{'s' if days > 1 else ''} d'essai Casanéo",
+                                     html=html)
+                    await db.users.update_one(
+                        {"user_id": u["user_id"]},
+                        {"$set": {"billing.trial_reminder_sent": True}})
+                    logger.info("trial reminder sent to %s", u["email"])
+                except Exception:
+                    logger.exception("trial reminder failed for %s", u.get("email"))
+        except Exception:
+            logger.exception("trial reminder loop error")
+        await asyncio.sleep(86400)
+
+
 async def _channex_msg_review_loop():
     """Toutes les ~10 min : synchronise les fils de discussion (app Messages)
     et les avis OTA (app Reviews) Channex de chaque utilisateur."""
@@ -149,6 +198,7 @@ async def startup():
     asyncio.create_task(_channex_outbox_loop())
     asyncio.create_task(_channex_bookings_loop())
     asyncio.create_task(_channex_msg_review_loop())
+    asyncio.create_task(_trial_reminder_loop())
     asyncio.create_task(_payment_reminder_loop())
     asyncio.create_task(_auto_charge_loop())
 

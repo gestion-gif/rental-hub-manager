@@ -732,3 +732,10 @@
 - TESTS: backend 12/12 auto-testés (register/login/lock 402/limite logements/checkout live URL/exemptions) + testing_agent iteration_33 frontend 8/8 PASS (inscription→dashboard, essai 13j, redirection checkout.stripe.com SANS payer, paywall après expiration simulée, régression compte historique OK).
 - ⚠️ Clé Stripe LIVE en preview : sessions checkout créées côté Stripe live (jamais payées). Portail client Stripe: à configurer dans Dashboard → Billing → Customer portal si pas déjà actif.
 - Prod: dispo après redéploiement.
+
+## Onboarding guidé + email rappel essai J+10 (2026-08 fork #3)
+- app/onboarding.tsx : après inscription (register → replace /onboarding), 3 étapes avec progression (créer logement → /property-form, connecter Channex → /channel-manager via GET /channex/status, inviter équipe → /settings/members), boutons "Accéder au tableau de bord"/"Passer".
+- FIX login.tsx: le redirect user→/(tabs) ne s'applique que si pathname==='/login' (sinon il volait la navigation vers /register/onboarding).
+- server.py _trial_reminder_loop (quotidien): users non exempts, sans abonnement actif, trial_ends_at entre now et now+4j, trial_reminder_sent≠true → email FR (formules+prix) via send_email (Resend), flag trial_reminder_sent. Testé: requête match OK + email envoyé à delivered@resend.dev.
+- Vérifié par screenshots: inscription → onboarding (3 étapes), étape 1 → formulaire logement, login normal → dashboard OK.
+- Question user "Connect dans Stripe": il s'agit du Customer PORTAL (Réglages → Billing → Customer portal), pas de Stripe Connect — URL directe https://dashboard.stripe.com/settings/billing/portal

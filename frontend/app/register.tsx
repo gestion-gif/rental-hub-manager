@@ -26,7 +26,7 @@ export default function RegisterScreen() {
     setBusy(true);
     try {
       await registerOwner(name.trim(), email.trim(), password);
-      router.replace("/");
+      router.replace("/onboarding");
     } catch (e: any) {
       const msg = e?.message || "Inscription impossible.";
       if (Platform.OS === "web") window.alert(msg); else Alert.alert("Erreur", msg);

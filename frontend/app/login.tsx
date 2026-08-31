@@ -5,7 +5,7 @@ import * as AppleAuthentication from "expo-apple-authentication";
 import { LinearGradient } from "expo-linear-gradient";
 import { AntDesign } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
@@ -17,6 +17,7 @@ export default function Login() {
   const { signIn, signingIn, user, loginWithPassword, loginWithApple } = useAuth();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const pathname = usePathname();
   const [showEmail, setShowEmail] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -24,8 +25,9 @@ export default function Login() {
   const [appleAvailable, setAppleAvailable] = useState(false);
 
   useEffect(() => {
-    if (user) router.replace("/(tabs)");
-  }, [user]);
+    // Ne redirige que si l'écran login est réellement affiché (pas si /register est au-dessus)
+    if (user && pathname === "/login") router.replace("/(tabs)");
+  }, [user, pathname]);
 
   useEffect(() => {
     if (Platform.OS === "ios") {
