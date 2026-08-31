@@ -92,6 +92,7 @@ multi-propriétaires qui veulent gagner du temps au quotidien.
 
 - `/app/store_assets/ios/` — 6 captures **1290 × 2796** (iPhone 6,7", format requis)
 - `/app/store_assets/android/` — 6 captures **1080 × 2340** (téléphone Android)
+- `/app/store_assets/android/feature_graphic_1024x500.png` — **Image de présentation Play Store (1024 × 500)**, à téléverser dans Play Console → Présence sur le Play Store → Fiche principale → « Image de présentation »
 
 Ordre conseillé :
 1. `store_01_accueil` — Tableau de bord (occupation, revenus, paiements à suivre)
