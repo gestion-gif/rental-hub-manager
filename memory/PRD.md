@@ -690,3 +690,7 @@
 - Assets régénérés via PIL depuis /tmp/newlogo.png: frontend/assets/images/casaneo-logo.png (badge arrondi 1040x328 fond bleu), icon.png + adaptive-icon.png (emblème C sur carré dégradé bleu 1024), favicon.png, splash-image.png (+ splash backgroundColor #020830 dans app.json). Backend assets/casaneo-logo.png remplacé (servi via /api/assets/casaneo-logo.png → emails, relevés, PDF).
 - login.tsx: logoWrap carte blanche supprimée (badge autonome, 232x73). (tabs)/_layout.tsx: brandLogo 170x54.
 - Vérifié par screenshots (login + drawer). ⚠️ Icône d'app/splash: visibles seulement après regénération des builds iOS/Android (pas dans Expo Go).
+
+## Thème bleu nuit assorti au logo (2026-08 fork #3)
+- theme.ts (source unique des couleurs): brand #020830 (fond logo), brandPrimary #0E2364 (boutons/actions, texte blanc OK), surfaceInverse #020830, info #1EB8E0 (cyan flèche du logo). onSurface/success/warning/error inchangés. STATUS colors inchangées.
+- Aucun hex brand hardcodé ailleurs (vérifié) → propagation automatique app entière. Vérifié par screenshots (dashboard + avis).
