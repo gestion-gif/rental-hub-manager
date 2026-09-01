@@ -17,13 +17,18 @@ export default function Analytics() {
   const [metric, setMetric] = useState<"revenue" | "occupancy">("revenue");
   const [selectedProp, setSelectedProp] = useState("all");
   const [data, setData] = useState<any>(null);
+  const [prevData, setPrevData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get(`/analytics/revenue?year=${year}`);
+      const [res, prev] = await Promise.all([
+        api.get(`/analytics/revenue?year=${year}`),
+        api.get(`/analytics/revenue?year=${year - 1}`),
+      ]);
       setData(res);
+      setPrevData(prev);
     } catch {}
     setLoading(false);
   }, [year]);
@@ -39,8 +44,30 @@ export default function Analytics() {
     return p ? { monthly: p.monthly, total_revenue: p.total_revenue, avg_occupancy: p.avg_occupancy } : null;
   }, [data, selectedProp]);
 
+  const previous = useMemo(() => {
+    if (!prevData) return null;
+    if (selectedProp === "all") {
+      return { monthly: prevData.totals.monthly, total_revenue: prevData.totals.total_revenue, avg_occupancy: prevData.totals.avg_occupancy };
+    }
+    const p = prevData.properties.find((x: any) => x.id === selectedProp);
+    return p ? { monthly: p.monthly, total_revenue: p.total_revenue, avg_occupancy: p.avg_occupancy } : null;
+  }, [prevData, selectedProp]);
+
+  const revDelta = useMemo(() => {
+    const prev = previous?.total_revenue || 0;
+    const cur = current?.total_revenue || 0;
+    if (prev <= 0) return null;
+    return Math.round(((cur - prev) / prev) * 100);
+  }, [current, previous]);
+  const occDelta = useMemo(() => {
+    if (!previous || !current) return null;
+    if (!previous.avg_occupancy && !previous.total_revenue) return null;
+    return Math.round((current.avg_occupancy || 0) - (previous.avg_occupancy || 0));
+  }, [current, previous]);
+
   const values: number[] = current ? current.monthly.map((m: any) => (metric === "revenue" ? m.revenue : m.occupancy)) : [];
-  const maxVal = Math.max(1, ...values);
+  const prevValues: number[] = previous ? previous.monthly.map((m: any) => (metric === "revenue" ? m.revenue : m.occupancy)) : [];
+  const maxVal = Math.max(1, ...values, ...prevValues);
   const suffix = metric === "revenue" ? "€" : "%";
 
   return (
@@ -95,10 +122,23 @@ export default function Analytics() {
               <View style={styles.summaryCard}>
                 <Text style={styles.summaryLabel}>Revenus {year}</Text>
                 <Text style={styles.summaryVal}>{current?.total_revenue?.toLocaleString("fr-FR")} €</Text>
+                {revDelta !== null && (
+                  <Text style={[styles.deltaText, { color: revDelta >= 0 ? "#2FB350" : "#E5484D" }]} testID="rev-delta">
+                    {revDelta >= 0 ? "▲" : "▼"} {Math.abs(revDelta)}% vs {year - 1}
+                  </Text>
+                )}
+                {revDelta === null && previous !== null && (
+                  <Text style={styles.deltaMuted}>Pas de données {year - 1}</Text>
+                )}
               </View>
               <View style={styles.summaryCard}>
                 <Text style={styles.summaryLabel}>Occupation moy.</Text>
                 <Text style={styles.summaryVal}>{current?.avg_occupancy}%</Text>
+                {occDelta !== null && (
+                  <Text style={[styles.deltaText, { color: occDelta >= 0 ? "#2FB350" : "#E5484D" }]}>
+                    {occDelta >= 0 ? "▲" : "▼"} {Math.abs(occDelta)} pts vs {year - 1}
+                  </Text>
+                )}
               </View>
             </View>
 
@@ -108,17 +148,26 @@ export default function Analytics() {
               <View style={styles.chart}>
                 {current?.monthly.map((m: any, i: number) => {
                   const v = values[i];
+                  const pv = prevValues[i] || 0;
                   const h = Math.round((v / maxVal) * 140);
+                  const ph = Math.round((pv / maxVal) * 140);
                   return (
                     <View key={i} style={styles.barCol}>
                       <Text style={styles.barValue}>{v > 0 ? (metric === "revenue" ? (v >= 1000 ? `${Math.round(v / 100) / 10}k` : v) : `${v}`) : ""}</Text>
-                      <View style={styles.barTrack}>
+                      <View style={[styles.barTrack, styles.barPair]}>
+                        <View style={[styles.bar, styles.barPrev, { height: Math.max(ph, pv > 0 ? 3 : 0) }]} />
                         <View style={[styles.bar, { height: Math.max(h, v > 0 ? 4 : 0), backgroundColor: metric === "revenue" ? colors.brandPrimary : "#32ADE6" }]} />
                       </View>
                       <Text style={styles.barLabel}>{MONTHS[i]}</Text>
                     </View>
                   );
                 })}
+              </View>
+              <View style={styles.legendRow}>
+                <View style={[styles.legendDot, { backgroundColor: metric === "revenue" ? colors.brandPrimary : "#32ADE6" }]} />
+                <Text style={styles.legendText}>{year}</Text>
+                <View style={[styles.legendDot, { backgroundColor: colors.onSurfaceTertiary, opacity: 0.45 }]} />
+                <Text style={styles.legendText}>{year - 1}</Text>
               </View>
               <Text style={styles.chartHint}>Unité : {suffix === "€" ? "euros" : "pourcentage"}</Text>
             </View>
@@ -152,6 +201,13 @@ const styles = StyleSheet.create({
   summaryCard: { flex: 1, backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.lg },
   summaryLabel: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
   summaryVal: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface, marginTop: 4 },
+  deltaText: { fontFamily: font.semibold, fontSize: fontSize.sm, marginTop: 4 },
+  deltaMuted: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: 4 },
+  legendRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: spacing.md },
+  legendDot: { width: 10, height: 10, borderRadius: 5, marginLeft: 10 },
+  legendText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  barPair: { flexDirection: "row", alignItems: "flex-end", gap: 2 },
+  barPrev: { width: 8, backgroundColor: colors.onSurfaceTertiary, opacity: 0.45 },
   chartCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg },
   chartTitle: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.lg },
   chart: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", height: 190 },

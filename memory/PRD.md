@@ -771,3 +771,21 @@
   - Secrets requis (sinon skip gracieux): APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY_B64 (.p8 en base64) — placeholders ajoutés à backend/.env, À AJOUTER AUX SECRETS DE PRODUCTION quand l'utilisateur fournira sa clé .p8.
 - Testé: skip gracieux sans config, client_secret ES256 validé (iss/sub/aud/kid), endpoint accepte le nouveau champ.
 - Endpoint public GET /api/store-assets/{filename} ajouté (téléchargement direct des captures stores depuis /app/store_assets/{ipad,ios,android}).
+
+## Fork #4 — suite (2026-09)
+### Clé Apple SIWA configurée
+- APPLE_TEAM_ID=Q5M8Z6V74B, APPLE_KEY_ID=3DTTV49322, APPLE_PRIVATE_KEY_B64 renseignés dans backend/.env (preview). Signature ES256 validée avec la vraie clé. L'UTILISATEUR DOIT AUSSI LES AJOUTER AUX SECRETS DE PRODUCTION (valeurs déjà communiquées dans le chat).
+
+### Refactoring backend (core.py 3004 → 2510 lignes)
+- infra.py: env/Mongo(db,client)/app/api_router/logger + _sync_log + get_channel_adapter + get_channex_adapter.
+- pricing.py: compute_supplement_amount, real_tourist_tax, _match_promo, DEFAULT_DYNAMIC_PRICING, _price_for_day, _is_high_season, _date_ranges (fonctions pures).
+- auth_helpers.py: _billing_gate, get_current_user, new_trial_billing, _prop_scope, _can, _can_inbox, _BILLING_OPEN_PREFIXES.
+- payments.py: stripe_client, _apply_stripe_payment, _record_auto_charge_error, auto_charge_reservation, run_auto_charge_for_user (imports paresseux de core pour get_templates/_set_property_rooms_availability/_send_booking_confirmation/_build_auto_charge → pas de cycle).
+- core.py réimporte et ré-exporte tout (routers inchangés, `from core import *` fonctionne toujours, __all__ conservé).
+- Validation: 28 routers importés, 301 tests pytest OK. Les 9 échecs/18 erreurs restants sont PRÉ-EXISTANTS et ENVIRONNEMENTAUX (compte Channex en "production" vs tests attendant "staging", données live, BASE_URL public) — pas liés au refactor.
+
+### Page vitrine publique
+- GET /api/site (routers/site.py): landing HTML Casanéo (hero bleu nuit, 6 features, 4 tarifs 39/79/149/249 €, CTA mailto, liens privacy). Sert de site officiel pour la validation d'organisation Google/Apple (domaine casaneo.pro).
+
+### Rapport revenus N vs N-1
+- analytics.tsx: charge year et year-1 en parallèle, cartes résumé avec delta % revenus et delta points d'occupation (vert/rouge, testID rev-delta), graphe à doubles barres (N-1 grisée) + légende. Aucun changement backend (endpoint /analytics/revenue?year= existant).
