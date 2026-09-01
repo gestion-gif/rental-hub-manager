@@ -754,3 +754,9 @@
 - routers/channex.py full-sync: si pricelabs_managed → rest_values vide (dispo seule poussée), résultat expose pricelabs_managed + log adapté.
 - UI: property-form.tsx section "Tarification externe" → Switch "Tarifs gérés par PriceLabs" (testID prop-pricelabs), chargé/sauvé avec le formulaire.
 - Testé: PUT ON/OFF + préservation si champ omis (API), unit test enqueue (0 outbox si ON, 1 si OFF, log OK), screenshot UI OK.
+
+## Revue App Store #2 (2026-08 fork #4)
+- Re-run skill expo-appstore-readiness-review (iOS): 0 blocker, 2 warnings, 4 manual.
+- W1: Sign in with Apple offert mais DELETE /api/auth/account ne révoque pas les tokens SIWA via l'API REST Apple (nécessite clé .p8 Apple Developer) — Apple 5.1.1(v).
+- W2: Paywall iOS ((tabs)/_layout.tsx L155) dit "Réactivez votre compte depuis la version web" = incitation achat externe (Apple 3.1.1) — suggérer formulation neutre.
+- Manuels: compte démo dans App Store Connect, test TestFlight, /api/privacy en prod, privacy manifest auto (Expo SDK 54).
