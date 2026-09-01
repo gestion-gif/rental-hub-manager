@@ -36,18 +36,24 @@ from helpers import (
     _unfold_ical, _parse_ical_date, parse_ical, _BLOCK_SUMMARIES,
     _ics_date, _ics_escape, _build_ics,
 )
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
-STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY')
-EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
-app = FastAPI()
-api_router = APIRouter(prefix="/api")
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from infra import (  # noqa: F401
+    ROOT_DIR, mongo_url, client, db,
+    EMERGENT_LLM_KEY, STRIPE_API_KEY, EMERGENT_AUTH_URL,
+    app, api_router, logger,
+    _sync_log, get_channel_adapter, get_channex_adapter,
+)
+from pricing import (  # noqa: F401
+    compute_supplement_amount, real_tourist_tax, _match_promo,
+    DEFAULT_DYNAMIC_PRICING, _price_for_day, _is_high_season, _date_ranges,
+)
+from auth_helpers import (  # noqa: F401
+    _BILLING_OPEN_PREFIXES, _billing_gate, get_current_user,
+    new_trial_billing, _prop_scope, _can, _NO_INBOX_ROLES, _can_inbox,
+)
+from payments import (  # noqa: F401
+    stripe_client, _apply_stripe_payment, _record_auto_charge_error,
+    auto_charge_reservation, run_auto_charge_for_user,
+)
 class SessionRequest(BaseModel):
     session_id: str
 class Season(BaseModel):
@@ -109,25 +115,6 @@ class SupplementIn(BaseModel):
     price_includes_vat: bool = True    # prix saisi TTC ou HT
     property_ids: List[str] = []       # vide = tous les logements
     active: bool = True
-
-
-def compute_supplement_amount(sup: dict, *, nights: int, nights_total: float, cleaning: float,
-                              guests: int, bedrooms: int, quantity: int = 1) -> float:
-    """Montant TTC d'un supplément selon son paramétrage."""
-    amount = float(sup.get("amount") or 0)
-    if (sup.get("calc_model") or "fixed") == "percent":
-        base = float(nights_total or 0) + (float(cleaning or 0) if sup.get("percent_base") == "total" else 0.0)
-        raw = base * amount / 100.0
-    else:
-        basis = sup.get("charge_basis") or "unique"
-        mult = {"unique": 1, "per_quantity": max(1, int(quantity or 1)),
-                "per_guest": max(1, int(guests or 1)), "per_room": max(1, int(bedrooms or 1))}.get(basis, 1)
-        if (sup.get("period") or "per_stay") == "per_night":
-            mult *= max(1, int(nights or 1))
-        raw = amount * mult
-    if not sup.get("price_includes_vat", True):
-        raw *= 1 + float(sup.get("vat_rate") or 0) / 100.0
-    return round(raw, 2)
 
 
 async def compute_supplement_lines(uid: str, prop: dict, selections, *, nights: int,
@@ -192,113 +179,6 @@ class GuestReplyRequest(BaseModel):
 class PricingRequest(BaseModel):
     property_id: str
     period: str = ""
-_BILLING_OPEN_PREFIXES = ("/api/auth", "/api/billing", "/api/privacy", "/api/public", "/api/assets")
-async def _billing_gate(request, user):
-    """Verrouille l'API (402) quand l'essai est terminé sans abonnement actif.
-    Les comptes historiques (sans champ billing) et exemptés passent toujours."""
-    try:
-        path = request.url.path if request is not None else ""
-    except Exception:
-        path = ""
-    if path.startswith(_BILLING_OPEN_PREFIXES):
-        return
-    b = user.get("billing")
-    if b is None and user.get("role") == "member":
-        owner = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "billing": 1})
-        b = (owner or {}).get("billing")
-    if not b or b.get("exempt"):
-        return
-    if b.get("status") in ("active", "trialing"):
-        return
-    te = b.get("trial_ends_at") or ""
-    if te and str(te) > now_utc().isoformat():
-        return
-    raise HTTPException(
-        status_code=402,
-        detail="Votre essai gratuit est terminé. Choisissez une formule pour continuer à utiliser Casanéo.")
-async def get_current_user(request: Request, authorization: Optional[str] = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    token = authorization.split(" ", 1)[1]
-    if token.startswith("csk_"):
-        # Clé API permanente (accès externe, ex. version web PC)
-        rec = await db.api_keys.find_one(
-            {"key_hash": sha256(token.encode()).hexdigest(), "revoked_at": None}, {"_id": 0})
-        if not rec:
-            raise HTTPException(status_code=401, detail="Invalid API key")
-        user = await db.users.find_one({"user_id": rec["user_id"]}, {"_id": 0})
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        asyncio.ensure_future(db.api_keys.update_one(
-            {"id": rec["id"]}, {"$set": {"last_used_at": now_utc().isoformat()}}))
-        user["role"] = "owner"
-        user["allowed_property_ids"] = None
-        user["auth_type"] = "api_key"
-        await _billing_gate(request, user)
-        return user
-    session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
-    if not session:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    expires_at = session.get("expires_at")
-    if isinstance(expires_at, datetime):
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at < now_utc():
-            raise HTTPException(status_code=401, detail="Session expired")
-    if session.get("kind") == "member":
-        member = await db.members.find_one({"id": session.get("member_id")}, {"_id": 0})
-        if not member or member.get("active") is False:
-            raise HTTPException(status_code=401, detail="Member not found")
-        name = f'{member.get("first_name", "")} {member.get("last_name", "")}'.strip()
-        mrole = member.get("role", "member")
-        # Un administrateur voit tout le compte parrain ; sinon accès limité aux logements attribués
-        allowed = None if mrole == "admin" else (member.get("property_ids") or [])
-        muser = {
-            "user_id": member["user_id"],  # data owner (the account that owns the properties)
-            "email": member.get("email", ""),
-            "name": name or member.get("email", ""),
-            "role": "member",
-            "member_role": mrole,
-            "member_id": member["id"],
-            "permissions": member.get("permissions", []),
-            "allowed_property_ids": allowed,
-        }
-        await _billing_gate(request, muser)
-        return muser
-    user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    user["role"] = "owner"
-    user["allowed_property_ids"] = None  # None => all properties
-    await _billing_gate(request, user)
-    return user
-def new_trial_billing() -> dict:
-    """Billing initial d'un nouveau compte : essai 14 jours sans carte."""
-    return {
-        "plan": None,
-        "status": "trial",
-        "trial_ends_at": (now_utc() + timedelta(days=14)).isoformat(),
-        "exempt": False,
-        "stripe_customer_id": None,
-        "stripe_subscription_id": None,
-    }
-def _prop_scope(user, field="id"):
-    """Return a Mongo clause fragment restricting to the user's allowed properties.
-    Owners (allowed_property_ids is None) get no restriction (empty dict)."""
-    ids = user.get("allowed_property_ids")
-    if ids is None:
-        return {}
-    return {field: {"$in": ids}}
-def _can(user, perm: str) -> bool:
-    """Owners can do everything; members are gated by their granted permissions."""
-    if user.get("role") != "member":
-        return True
-    return perm in (user.get("permissions") or [])
-_NO_INBOX_ROLES = {"cleaning", "intervenant", "owner"}
-def _can_inbox(user) -> bool:
-    if user.get("role") != "member":
-        return True
-    return user.get("member_role") not in _NO_INBOX_ROLES
 import jwt as _jwt
 from jwt import PyJWKClient as _PyJWKClient
 APPLE_AUDIENCES = [a.strip() for a in os.environ.get("APPLE_AUDIENCES", "").split(",") if a.strip()]
@@ -421,10 +301,6 @@ class CheckoutIn(BaseModel):
     kind: str = "payment"          # "payment" (acompte/solde) | "deposit" (caution)
     amount: Optional[float] = None
     origin_url: str
-def stripe_client() -> StripeCheckout:
-    if not STRIPE_API_KEY:
-        raise HTTPException(status_code=500, detail="Stripe non configuré")
-    return StripeCheckout(api_key=STRIPE_API_KEY)
 async def _send_booking_confirmation(uid: str, r: dict, tx: dict):
     """Email de confirmation au voyageur après paiement en ligne (récap + lien check-in)."""
     email = (r.get("guest_email") or "").strip()
@@ -482,93 +358,6 @@ async def _send_booking_confirmation(uid: str, r: dict, tx: dict):
                             f"Confirmation de réservation envoyée ({r.get('property_name') or ''}, "
                             f"{r.get('check_in')} → {r.get('check_out')}).",
                             to=email, subject=f"{brand} — Réservation confirmée")
-async def _apply_stripe_payment(tx: dict):
-    """Enregistre l'effet d'un paiement Stripe réussi sur la réservation (idempotent)."""
-    if tx.get("processed"):
-        return
-    uid = tx["user_id"]
-    rid = tx["reservation_id"]
-    r = await db.reservations.find_one({"id": rid, "user_id": uid}, {"_id": 0})
-    if not r:
-        return
-    if tx["kind"] == "public_balance":
-        # Paiement du solde d'une réservation issue du site
-        payments = r.get("payments") or []
-        payments.append({
-            "id": str(uuid.uuid4()), "amount": round(float(tx["amount"]), 2),
-            "date": date.today().isoformat(), "note": "Solde payé en ligne (site)",
-            "stripe_session": tx["session_id"],
-        })
-        r["payments"] = payments
-        recompute_payment(r)
-        markers = set(r.get("markers") or [])
-        if float(r["finance"].get("due", 0)) <= 0.01:
-            markers.add("paid")
-        tmap = {t["marker_key"]: t for t in await get_templates(uid)}
-        await db.reservations.update_one(
-            {"id": rid, "user_id": uid},
-            {"$set": {"payments": payments, "finance": r["finance"],
-                      "markers": list(markers), "marker_color": marker_color_for(list(markers), tmap)}})
-        await db.payment_transactions.update_one(
-            {"session_id": tx["session_id"]},
-            {"$set": {"processed": True, "payment_status": "paid", "status": "complete"}})
-        return
-    if tx["kind"] == "public_booking":
-        # Réservation issue du site public : confirmer + payer + bloquer le calendrier
-        payments = r.get("payments") or []
-        payments.append({
-            "id": str(uuid.uuid4()), "amount": round(float(tx["amount"]), 2),
-            "date": date.today().isoformat(), "note": tx.get("label") or "Paiement en ligne (site)",
-            "stripe_session": tx["session_id"],
-        })
-        r["payments"] = payments
-        recompute_payment(r)
-        markers = set(r.get("markers") or [])
-        if not tx.get("is_deposit"):
-            markers.add("paid")
-        tmap = {t["marker_key"]: t for t in await get_templates(uid)}
-        await db.reservations.update_one(
-            {"id": rid, "user_id": uid},
-            {"$set": {"status": "confirmee", "payments": payments, "finance": r["finance"],
-                      "markers": list(markers), "marker_color": marker_color_for(list(markers), tmap),
-                      "pending_payment": False}})
-        await _set_property_rooms_availability(uid, r["property_id"], r.get("check_in"), r.get("check_out"), True)
-        await db.payment_transactions.update_one(
-            {"session_id": tx["session_id"]},
-            {"$set": {"processed": True, "payment_status": "paid", "status": "complete"}})
-        try:
-            r2 = await db.reservations.find_one({"id": rid, "user_id": uid}, {"_id": 0})
-            await _send_booking_confirmation(uid, r2, tx)
-        except Exception as e:
-            logger.warning("email confirmation client échoué: %s", e)
-        return
-    if tx["kind"] == "deposit":
-        fin = dict(r.get("finance") or {})
-        fin["deposit_collected"] = True
-        fin["deposit_amount"] = tx["amount"]
-        await db.reservations.update_one({"id": rid, "user_id": uid}, {"$set": {"finance": fin}})
-    else:
-        payments = r.get("payments") or []
-        payments.append({
-            "id": str(uuid.uuid4()),
-            "amount": round(float(tx["amount"]), 2),
-            "date": date.today().isoformat(),
-            "note": "Paiement Stripe",
-            "stripe_session": tx["session_id"],
-        })
-        r["payments"] = payments
-        fully = recompute_payment(r)
-        markers = set(r.get("markers") or [])
-        if fully or r.get("paid_manual"):
-            markers.add("paid")
-        tmap = {t["marker_key"]: t for t in await get_templates(uid)}
-        await db.reservations.update_one(
-            {"id": rid, "user_id": uid},
-            {"$set": {"payments": payments, "finance": r["finance"], "markers": list(markers),
-                      "marker_color": marker_color_for(list(markers), tmap)}})
-    await db.payment_transactions.update_one(
-        {"session_id": tx["session_id"]},
-        {"$set": {"processed": True, "payment_status": "paid", "status": "complete"}})
 async def _resolve_public_site(slug: str):
     prefs = await db.preferences.find_one(
         {"public_site.slug": slug, "public_site.enabled": True}, {"_id": 0})
@@ -597,42 +386,6 @@ async def _booked_dates(uid: str, property_id: str, frm: str, to: str):
         while cur < end:
             dates.add(cur.isoformat()); cur += timedelta(days=1)
     return dates
-def _match_promo(promos: list, code: str, property_id: str, check_in: str) -> Optional[dict]:
-    code = (code or "").strip().upper()
-    for p in promos:
-        if not p.get("enabled", True):
-            continue
-        if p.get("require_code"):
-            if not code or (p.get("code") or "").strip().upper() != code:
-                continue
-        pids = p.get("property_ids") or []
-        if pids and property_id not in pids:
-            continue
-        if p.get("period_enabled"):
-            if p.get("start_date") and check_in < p["start_date"]:
-                continue
-            if p.get("end_date") and check_in > p["end_date"]:
-                continue
-        return p
-    return None
-def real_tourist_tax(prop: dict, night_prices: list, occupants: int, taxable: int = 0) -> float:
-    """Barème réel français : taux % du (prix de la nuit / occupants), plafonné par pers/nuit,
-    + taxes additionnelles départementale et régionale (% de la taxe), × nuits × assujettis."""
-    rate = float(prop.get("tourist_tax_pct") or 0) / 100.0
-    cap = float(prop.get("tax_cap") or 0)
-    dept = float(prop.get("tax_dept_pct") or 0) / 100.0
-    reg = float(prop.get("regional_tax_pct") or 0) / 100.0
-    occ = max(1, int(occupants or 1))
-    tx = int(taxable or 0) or occ
-    total = 0.0
-    for p in night_prices:
-        base = (float(p or 0) / occ) * rate
-        if cap > 0:
-            base = min(base, cap)
-        total += base * (1 + dept + reg) * tx
-    return round(total, 2)
-
-
 async def _public_quote(uid: str, property_id: str, check_in: str, check_out: str,
                         guests: int, promo_code: str = "", supplements: list = None):
     prop = await db.properties.find_one({"id": property_id, "user_id": uid}, {"_id": 0})
@@ -906,31 +659,6 @@ class DoneIn(BaseModel):
 class CautionActionIn(BaseModel):
     debited: bool
     done: bool = True
-DEFAULT_DYNAMIC_PRICING = {
-    "enabled": False,
-    "weekend_pct": 15,        # majoration vendredi/samedi
-    "high_season_pct": 20,    # majoration si la date tombe dans une saison "haute"
-    "lead_long_days": 45,     # au-delà → anticipation longue
-    "lead_long_pct": 8,       # majoration anticipation longue
-    "lead_last_days": 7,      # en deçà → dernière minute
-    "lead_last_pct": -10,     # remise dernière minute
-    "occ_high_pct": 12,       # majoration si occupation forte
-    "occ_low_pct": -10,       # remise si occupation faible
-    "market_weight": 40,      # % de poids du marché (comparables) vs prix de base
-    "min_price": 0,
-    "max_price": 0,
-}
-def _price_for_day(prop: dict, day_str: str):
-    for s in (prop.get("seasons") or []):
-        if s.get("start_date") and s.get("end_date") and s["start_date"] <= day_str <= s["end_date"]:
-            return float(s.get("price") or 0)
-    return float(prop.get("base_price") or 0)
-def _is_high_season(prop: dict, day_str: str) -> bool:
-    base = float(prop.get("base_price") or 0)
-    for s in (prop.get("seasons") or []):
-        if s.get("start_date") and s.get("end_date") and s["start_date"] <= day_str <= s["end_date"]:
-            return float(s.get("price") or 0) > base
-    return False
 def make_chat(system_message: str, session_id: str) -> LlmChat:
     return LlmChat(
         api_key=EMERGENT_LLM_KEY,
@@ -1094,50 +822,6 @@ class PreferencesIn(BaseModel):
 async def _ai_auto_draft_enabled(uid: str) -> bool:
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     return bool((doc or {}).get("ai_auto_draft", True))
-async def get_channel_adapter(user_id: str):
-    doc = await db.channel_settings.find_one({"user_id": user_id}, {"_id": 0})
-    if not doc or not doc.get("api_key"):
-        return None, None
-    return LodgifyAdapter(doc["api_key"]), doc
-async def _sync_log(user_id: str, kind: str, status: str, message: str = "", provider: str = "channex"):
-    """Persist a synchronization log entry (SyncLog data-model)."""
-    await db.sync_logs.insert_one({
-        "id": str(uuid.uuid4()), "user_id": user_id, "provider": provider,
-        "type": kind, "status": status, "message": message[:1000],
-        "date": now_utc().isoformat(),
-    })
-async def get_channex_adapter(user_id: str):
-    doc = await db.channex_settings.find_one({"user_id": user_id}, {"_id": 0})
-    if not doc or not doc.get("api_key"):
-        return None, None
-    return ChannexAdapter(doc["api_key"], doc.get("environment", "staging")), doc
-
-
-def _date_ranges(start, end, value_fn, build_fn):
-    """Regroupe les jours consécutifs de même valeur en plages (payload ARI compact)."""
-    out = []
-    cur = start
-    run_start = None
-    run_val = None
-    while cur <= end:
-        v = value_fn(cur)
-        if run_val is None:
-            run_start, run_val = cur, v
-        elif v != run_val:
-            e = build_fn(run_val)
-            e["date_from"] = run_start.isoformat()
-            e["date_to"] = (cur - timedelta(days=1)).isoformat()
-            out.append(e)
-            run_start, run_val = cur, v
-        cur += timedelta(days=1)
-    if run_val is not None:
-        e = build_fn(run_val)
-        e["date_from"] = run_start.isoformat()
-        e["date_to"] = end.isoformat()
-        out.append(e)
-    return out
-
-
 async def _channex_linked_prop(uid: str, property_id: str):
     """Retourne le logement si l'utilisateur est connecté à Channex ET le logement est lié."""
     s = await db.channex_settings.find_one({"user_id": uid}, {"_id": 0})
@@ -1330,183 +1014,6 @@ async def process_channex_bookings(uid: str) -> dict:
                             f"{ota} · {gname} · {ci}→{co} ({status})")
             processed += 1
     return {"processed": processed}
-
-
-# ---------------------------------------------------------------------------
-# Encaissement automatique des cartes OTA (Booking.com via Channex → Stripe)
-# ---------------------------------------------------------------------------
-async def _record_auto_charge_error(uid: str, r: dict, error: str):
-    prev = r.get("auto_charge") or {}
-    attempts = int(prev.get("attempts") or 0) + 1
-    await db.reservations.update_one(
-        {"id": r["id"], "user_id": uid},
-        {"$set": {"auto_charge": {"status": "error", "error": error[:300],
-                                  "attempts": attempts, "at": now_utc().isoformat()}}})
-    await _sync_log(uid, "auto_charge", "error", f"{r.get('guest_name', '')}: {error[:200]}")
-    # Alerte email au gestionnaire (1re tentative et abandon après la 3e)
-    if attempts not in (1, 3):
-        return
-    try:
-        u = await db.users.find_one({"user_id": uid}, {"_id": 0, "email": 1})
-        to = (u or {}).get("email")
-        if not to:
-            return
-        due = float((r.get("finance") or {}).get("due") or 0)
-        final = attempts >= 3
-        subject = ("⚠️ Encaissement Booking.com abandonné — action requise"
-                   if final else "Échec d'encaissement automatique Booking.com")
-        html = (
-            f"<p>L'encaissement automatique de la carte Booking.com a échoué"
-            f"{' définitivement (3 tentatives)' if final else f' (tentative {attempts}/3)'}.</p>"
-            f"<p><b>Réservation :</b> {r.get('guest_name', '')} · {r.get('property_name', '')}<br>"
-            f"<b>Séjour :</b> {r.get('check_in', '')} → {r.get('check_out', '')}<br>"
-            f"<b>Montant dû :</b> {due:.2f} €</p>"
-            f"<p><b>Motif :</b> {error[:300]}</p>"
-            + ("<p>Aucune nouvelle tentative ne sera faite : encaissez manuellement depuis la fiche réservation "
-               "(bouton « Encaisser la carte Booking.com ») ou contactez le voyageur.</p>" if final
-               else "<p>Une nouvelle tentative aura lieu automatiquement.</p>")
-        )
-        await send_email(to=to, subject=subject, html=html)
-    except Exception:
-        logger.exception("auto charge alert email failed")
-
-
-async def auto_charge_reservation(uid: str, r: dict) -> dict:
-    """Encaisse le dû d'une réservation Channex via la carte stockée chez Channex
-    (app Stripe Tokenization) + PaymentIntent Stripe off-session. Idempotent."""
-    if not STRIPE_API_KEY:
-        return {"ok": False, "error": "Stripe non configuré"}
-    bid = r.get("channex_booking_id")
-    if not bid:
-        return {"ok": False, "error": "Réservation sans identifiant Channex"}
-    fin = r.get("finance") or {}
-    due = round(float(fin.get("due") or 0), 2)
-    if due <= 0:
-        return {"ok": False, "error": "Aucun montant dû"}
-    if (r.get("auto_charge") or {}).get("status") == "done":
-        return {"ok": False, "error": "Déjà encaissé"}
-    currency = str(fin.get("currency") or "EUR").lower()
-    adapter, _ = await get_channex_adapter(uid)
-    if not adapter:
-        return {"ok": False, "error": "Channex non connecté"}
-    token = ""
-    token_err = ""
-    async with httpx.AsyncClient(timeout=60) as http:
-        try:
-            token = await adapter.stripe_payment_method(http, bid)
-        except HTTPException as e:
-            token_err = str(e.detail)
-        except Exception as e:
-            token_err = str(e)
-    if not token:
-        err = ("Carte indisponible via Channex — l'app « Stripe Tokenization » doit être installée "
-               "sur la propriété et un compte Stripe connecté à Channex (accès production requis). "
-               + (f"Détail : {token_err}" if token_err else ""))
-        await _record_auto_charge_error(uid, r, err)
-        return {"ok": False, "error": err}
-
-    import stripe as stripe_sdk
-
-    def _charge(use_moto: bool):
-        stripe_sdk.api_key = STRIPE_API_KEY
-        # Recommandation Stripe : attacher les billing_details (nom/email) au
-        # PaymentMethod pour réduire le scoring fraude Radar.
-        try:
-            billing = {"name": (r.get("guest_name") or "").strip() or None}
-            email = (r.get("guest_email") or "").strip()
-            if email:
-                billing["email"] = email
-            stripe_sdk.PaymentMethod.modify(token, billing_details={k: v for k, v in billing.items() if v})
-        except Exception:
-            pass  # non bloquant
-        kwargs = dict(
-            amount=int(round(due * 100)), currency=currency,
-            payment_method=token, payment_method_types=["card"],
-            confirm=True, off_session=True,
-            description=f"Réservation {r.get('platform', '')} · {r.get('guest_name', '')} · {r.get('check_in', '')}",
-            metadata={"reservation_id": r["id"], "channex_booking_id": str(bid)},
-            idempotency_key=f"autocharge-{r['id']}-{int(round(due * 100))}-{token[-8:]}{'-moto' if use_moto else ''}",
-        )
-        if use_moto:
-            # MOTO : encaissement initié par le commerçant (carte transmise par l'OTA).
-            # Exempte de SCA et réduit le scoring fraude. Nécessite l'option MOTO
-            # activée sur le compte Stripe (sinon erreur → fallback sans MOTO).
-            kwargs["payment_method_options"] = {"card": {"moto": True}}
-        return stripe_sdk.PaymentIntent.create(**kwargs)
-    try:
-        try:
-            intent = await asyncio.to_thread(_charge, True)
-        except Exception as e_moto:
-            if "moto" in str(e_moto).lower():
-                intent = await asyncio.to_thread(_charge, False)
-            else:
-                raise
-    except Exception as e:
-        err = f"Stripe : {e}"
-        await _record_auto_charge_error(uid, r, err)
-        return {"ok": False, "error": err}
-    if intent.status not in ("succeeded", "processing"):
-        err = f"Statut Stripe : {intent.status}"
-        await _record_auto_charge_error(uid, r, err)
-        return {"ok": False, "error": err}
-    payments = r.get("payments") or []
-    payments.append({
-        "id": str(uuid.uuid4()), "amount": due, "date": date.today().isoformat(),
-        "note": "Encaissement automatique carte Booking.com (Stripe)",
-        "payment_intent": intent.id,
-    })
-    r["payments"] = payments
-    recompute_payment(r)
-    markers = set(r.get("markers") or [])
-    if float(r["finance"].get("due", 0)) <= 0.01:
-        markers.add("paid")
-    tmap = {t["marker_key"]: t for t in await get_templates(uid)}
-    await db.reservations.update_one(
-        {"id": r["id"], "user_id": uid},
-        {"$set": {"payments": payments, "finance": r["finance"], "markers": list(markers),
-                  "marker_color": marker_color_for(list(markers), tmap),
-                  "auto_charge": {"status": "done", "payment_intent_id": intent.id,
-                                  "amount": due, "at": now_utc().isoformat()}}})
-    await _sync_log(uid, "auto_charge", "success",
-                    f"{r.get('guest_name', '')} · {due:.2f} {currency.upper()} encaissés (PI {intent.id})")
-    return {"ok": True, "amount": due, "payment_intent_id": intent.id, "status": intent.status}
-
-
-async def run_auto_charge_for_user(uid: str) -> dict:
-    """Encaisse les résas Booking.com (source Channex) dont l'arrivée est à ≤ N jours."""
-    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0, "auto_charge": 1})
-    cfg = _build_auto_charge(prefs)
-    if not cfg["enabled"]:
-        return {"charged": 0, "errors": 0}
-    today = date.today().isoformat()
-    horizon = (date.today() + timedelta(days=cfg["days_before"])).isoformat()
-    candidates = await db.reservations.find(
-        {"user_id": uid, "source": "channex",
-         "platform": {"$regex": "booking", "$options": "i"},
-         "status": {"$nin": ["annulee", "demande"]},
-         "check_in": {"$gte": today, "$lte": horizon},
-         "finance.due": {"$gt": 0},
-         "auto_charge.status": {"$ne": "done"}},
-        {"_id": 0}).to_list(500)
-    charged = errors = 0
-    for r in candidates:
-        ac = r.get("auto_charge") or {}
-        attempts = int(ac.get("attempts") or 0)
-        if attempts >= 3:
-            # Cartes virtuelles Booking : souvent activées le jour d'arrivée seulement.
-            # → une ultime tentative à partir du check-in si les échecs datent d'avant.
-            last_at = str(ac.get("at") or "")[:10]
-            ci = str(r.get("check_in") or "")
-            if not (ci and today >= ci and last_at < ci):
-                continue
-        res = await auto_charge_reservation(uid, r)
-        if res.get("ok"):
-            charged += 1
-        else:
-            errors += 1
-        await asyncio.sleep(1)
-    return {"charged": charged, "errors": errors}
-
 
 
 async def _drain_channex_outbox() -> int:
