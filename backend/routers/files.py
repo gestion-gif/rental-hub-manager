@@ -40,6 +40,23 @@ async def get_file(path: str, token: Optional[str] = None, authorization: Option
     return Response(content=content, media_type=ct)
 
 
+STORE_ASSETS_DIR = Path("/app/store_assets")
+
+
+@api_router.get("/store-assets/{filename}")
+async def get_store_asset(filename: str):
+    """Téléchargement direct des visuels stores (captures iPhone/iPad) — fichiers PNG exacts,
+    sans recompression, pour App Store Connect / Play Console."""
+    if "/" in filename or ".." in filename or not filename.endswith(".png"):
+        raise HTTPException(status_code=404, detail="Fichier introuvable")
+    for sub in ("ipad", "ios", "android"):
+        p = STORE_ASSETS_DIR / sub / filename
+        if p.is_file():
+            return Response(content=p.read_bytes(), media_type="image/png",
+                            headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    raise HTTPException(status_code=404, detail="Fichier introuvable")
+
+
 @api_router.get("/assets/casaneo-logo.png")
 async def get_casaneo_logo():
     """Logo Casanéo public (utilisé dans les emails de relevé)."""
