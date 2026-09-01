@@ -1,5 +1,69 @@
 # ruff: noqa: F403, F405
 from core import *  # noqa: F401
+import os as _os
+import base64 as _b64
+import time as _time
+
+# --- Sign in with Apple : révocation des tokens (exigence Apple 5.1.1(v)) ---
+# Nécessite les secrets APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY_B64 (clé .p8 en base64).
+# Sans ces secrets, la connexion Apple fonctionne normalement mais la révocation est ignorée.
+_APPLE_CLIENT_ID = (APPLE_AUDIENCES[0] if APPLE_AUDIENCES else "")
+
+
+def _apple_revocation_config():
+    team = _os.environ.get("APPLE_TEAM_ID", "").strip()
+    kid = _os.environ.get("APPLE_KEY_ID", "").strip()
+    key_b64 = _os.environ.get("APPLE_PRIVATE_KEY_B64", "").strip()
+    if not (team and kid and key_b64 and _APPLE_CLIENT_ID):
+        return None
+    try:
+        pk = _b64.b64decode(key_b64).decode()
+    except Exception:
+        return None
+    return {"team": team, "kid": kid, "private_key": pk}
+
+
+def _apple_client_secret(cfg: dict) -> str:
+    now = int(_time.time())
+    return _jwt.encode(
+        {"iss": cfg["team"], "iat": now, "exp": now + 3600,
+         "aud": "https://appleid.apple.com", "sub": _APPLE_CLIENT_ID},
+        cfg["private_key"], algorithm="ES256", headers={"kid": cfg["kid"]})
+
+
+async def _apple_exchange_code(code: str) -> Optional[str]:
+    """Échange l'authorization code contre un refresh token Apple (best effort)."""
+    cfg = _apple_revocation_config()
+    if not cfg or not code:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            r = await http.post("https://appleid.apple.com/auth/token", data={
+                "client_id": _APPLE_CLIENT_ID, "client_secret": _apple_client_secret(cfg),
+                "code": code, "grant_type": "authorization_code",
+            })
+        if r.status_code == 200:
+            return r.json().get("refresh_token")
+        logger.warning("apple token exchange failed: %s %s", r.status_code, r.text[:200])
+    except Exception:
+        logger.exception("apple token exchange error")
+    return None
+
+
+async def _apple_revoke_refresh_token(refresh_token: str) -> None:
+    """Révoque le refresh token Apple lors de la suppression de compte (best effort)."""
+    cfg = _apple_revocation_config()
+    if not cfg or not refresh_token:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            r = await http.post("https://appleid.apple.com/auth/revoke", data={
+                "client_id": _APPLE_CLIENT_ID, "client_secret": _apple_client_secret(cfg),
+                "token": refresh_token, "token_type_hint": "refresh_token",
+            })
+        logger.info("apple token revoke: %s", r.status_code)
+    except Exception:
+        logger.exception("apple token revoke error")
 
 
 @api_router.post("/auth/session")
@@ -82,6 +146,11 @@ async def auth_apple(payload: AppleAuthIn):
         "session_token": session_token, "user_id": user_id,
         "created_at": now_utc(), "expires_at": now_utc() + timedelta(days=7),
     })
+    # Stocke le refresh token Apple pour pouvoir le révoquer à la suppression du compte (5.1.1(v))
+    if payload.authorization_code:
+        rt = await _apple_exchange_code(payload.authorization_code)
+        if rt:
+            await db.users.update_one({"user_id": user_id}, {"$set": {"apple_refresh_token": rt}})
     user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     return {"session_token": session_token, "user": user}
 
@@ -143,10 +212,13 @@ async def delete_account(user=Depends(get_current_user)):
     uid = user["user_id"]
     if uid == "demo_store_review":
         raise HTTPException(status_code=403, detail="Le compte de démonstration ne peut pas être supprimé")
+    doc = await db.users.find_one({"user_id": uid}, {"_id": 0, "billing": 1, "apple_refresh_token": 1}) or {}
+    # Révoque les tokens Sign in with Apple (exigence Apple 5.1.1(v), best effort)
+    if doc.get("apple_refresh_token"):
+        await _apple_revoke_refresh_token(doc["apple_refresh_token"])
     # Résilie l'abonnement Stripe s'il existe (best effort)
     try:
-        doc = await db.users.find_one({"user_id": uid}, {"_id": 0, "billing": 1})
-        sub_id = ((doc or {}).get("billing") or {}).get("stripe_subscription_id")
+        sub_id = (doc.get("billing") or {}).get("stripe_subscription_id")
         if sub_id and STRIPE_API_KEY:
             import stripe as _stripe
             _stripe.api_key = STRIPE_API_KEY

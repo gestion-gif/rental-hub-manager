@@ -307,6 +307,7 @@ class AppleAuthIn(BaseModel):
     identity_token: str
     name: str = ""
     email: str = ""
+    authorization_code: str = ""
 async def status_color_map(uid: str):
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     m = {s["key"]: s["color"] for s in _build_statuses(doc)}

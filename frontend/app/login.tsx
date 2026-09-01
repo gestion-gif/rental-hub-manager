@@ -44,7 +44,7 @@ export default function Login() {
         ],
       });
       const name = [cred.fullName?.givenName, cred.fullName?.familyName].filter(Boolean).join(" ");
-      await loginWithApple(cred.identityToken || "", name, cred.email || "");
+      await loginWithApple(cred.identityToken || "", name, cred.email || "", cred.authorizationCode || "");
     } catch (e: any) {
       if (e?.code === "ERR_REQUEST_CANCELED") return;
       Alert.alert("Connexion Apple", "Échec de la connexion avec Apple. Réessayez.");

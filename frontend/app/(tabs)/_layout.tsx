@@ -152,7 +152,7 @@ function PaywallScreen({ onSubscribed }: { onSubscribed: () => void }) {
     <View style={pw.container}>
       <Ionicons name="lock-closed" size={56} color="#fff" />
       <Text style={pw.title}>Votre essai gratuit est terminé</Text>
-      <Text style={pw.sub}>Vos données sont conservées en sécurité. {Platform.OS === "ios" ? "Réactivez votre compte depuis la version web de Casanéo." : "Choisissez une formule pour continuer à utiliser Casanéo."}</Text>
+      <Text style={pw.sub}>Vos données sont conservées en sécurité. {Platform.OS === "ios" ? "Votre abonnement n'est pas actif. Contactez le support pour le réactiver." : "Choisissez une formule pour continuer à utiliser Casanéo."}</Text>
       {Platform.OS !== "ios" && (
         <Pressable testID="paywall-subscribe" onPress={() => router.push("/settings/subscription")} style={pw.cta}>
           <Text style={pw.ctaText}>Voir les formules</Text>

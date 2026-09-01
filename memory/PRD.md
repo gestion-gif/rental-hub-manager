@@ -760,3 +760,14 @@
 - W1: Sign in with Apple offert mais DELETE /api/auth/account ne révoque pas les tokens SIWA via l'API REST Apple (nécessite clé .p8 Apple Developer) — Apple 5.1.1(v).
 - W2: Paywall iOS ((tabs)/_layout.tsx L155) dit "Réactivez votre compte depuis la version web" = incitation achat externe (Apple 3.1.1) — suggérer formulation neutre.
 - Manuels: compte démo dans App Store Connect, test TestFlight, /api/privacy en prod, privacy manifest auto (Expo SDK 54).
+
+## Corrections warnings App Store (2026-09 fork #4)
+- W2 corrigé: paywall iOS ((tabs)/_layout.tsx) → texte neutre "Contactez le support" (plus d'incitation achat web, Apple 3.1.1).
+- W1 corrigé: révocation tokens Sign in with Apple à la suppression de compte (Apple 5.1.1(v)):
+  - routers/auth.py: helpers _apple_revocation_config/_apple_client_secret (ES256 pyjwt)/_apple_exchange_code/_apple_revoke_refresh_token.
+  - /auth/apple accepte authorization_code (AppleAuthIn) → échange contre refresh_token stocké dans users.apple_refresh_token.
+  - DELETE /auth/account révoque le refresh token Apple (best effort) avant purge.
+  - Frontend: login.tsx envoie cred.authorizationCode, AuthContext.loginWithApple param optionnel.
+  - Secrets requis (sinon skip gracieux): APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY_B64 (.p8 en base64) — placeholders ajoutés à backend/.env, À AJOUTER AUX SECRETS DE PRODUCTION quand l'utilisateur fournira sa clé .p8.
+- Testé: skip gracieux sans config, client_secret ES256 validé (iss/sub/aud/kid), endpoint accepte le nouveau champ.
+- Endpoint public GET /api/store-assets/{filename} ajouté (téléchargement direct des captures stores depuis /app/store_assets/{ipad,ios,android}).

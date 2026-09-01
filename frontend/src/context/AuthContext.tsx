@@ -30,7 +30,7 @@ type AuthState = {
   loading: boolean;
   signingIn: boolean;
   signIn: () => Promise<void>;
-  loginWithApple: (identityToken: string, name: string, email: string) => Promise<void>;
+  loginWithApple: (identityToken: string, name: string, email: string, authorizationCode?: string) => Promise<void>;
   signOut: () => Promise<void>;
   loginWithPassword: (email: string, password: string) => Promise<void>;
   registerOwner: (name: string, email: string, password: string) => Promise<void>;
@@ -168,8 +168,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function loginWithApple(identityToken: string, name: string, email: string) {
-    const data = await api.post("/auth/apple", { identity_token: identityToken, name, email });
+  async function loginWithApple(identityToken: string, name: string, email: string, authorizationCode = "") {
+    const data = await api.post("/auth/apple", { identity_token: identityToken, name, email, authorization_code: authorizationCode });
     setToken(data.session_token);
     await storage.secureSet(TOKEN_KEY, data.session_token);
     try {
