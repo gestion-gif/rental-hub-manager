@@ -796,3 +796,10 @@
 - Nouveau helper src/utils/photoAccess.ts (ensurePhotoAccess): Android/web → true (Photo Picker système sans permission) ; iOS → requestMediaLibraryPermissionsAsync + Alert "Ouvrir les réglages" si canAskAgain=false.
 - 7 écrans migrés: property-form (x2), supplement-form, intervention-form, accounting-form, settings/promotion-form, settings/company, settings/booking-site.
 - Le PROCHAIN build Android (108) n'aura plus la permission → dans Play Console, déclarer "n'utilise pas ces autorisations". Page /api/account-deletion créée pour les URLs de suppression Play Console (404 en prod tant que pas redéployé).
+
+## Fix Android 15 — expo-audio retiré (2026-09 fork #4)
+- Play Console (build 109) signalait: services de premier plan restreints (expo.modules.audio AudioRecordingService/AudioControlsService via BOOT_COMPLETED, crash Android 15+). Suspect n°1 aussi pour le crash testeur (app se ferme quelques secondes après le tableau de bord, connexion Google = nouveau compte).
+- expo-audio SUPPRIMÉ (yarn remove + plugin retiré d'app.json). CelebrationBanner: son cash-register remplacé par Haptics.notificationAsync(Success) (expo-haptics déjà installé). Asset /assets/sounds/cash-register.mp3 laissé (inutilisé).
+- Avertissements restants NON bloquants: edge-to-edge APIs obsolètes (React Native core, rien à faire côté app) + screenOrientation portrait (recommandation grands écrans, conservé volontairement).
+- AUSSI en attente côté user: crash Google login → correctif probable = ce retrait; sinon récupérer stack trace (Play Console → Qualité → Android vitals → Crashs et ANR).
+- ACTION USER: redéployer + build 110 + nouvelle release. NOTE: /auth/session (Google) renvoie un user minimal sans /auth/me côté frontend exchange() — amélioration possible si le crash persiste.

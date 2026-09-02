@@ -2,7 +2,7 @@ import React, { useEffect, useMemo } from "react";
 import { View, Text, StyleSheet, Pressable, Dimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useAudioPlayer, setAudioModeAsync } from "expo-audio";
+import * as Haptics from "expo-haptics";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -40,18 +40,13 @@ export default function CelebrationBanner({
   const width = Dimensions.get("window").width;
 
   const greeting = count === 0;
-  const player = useAudioPlayer(require("@/assets/sounds/cash-register.mp3"));
 
   const phrase = useMemo(() => PHRASES[Math.floor(Math.random() * PHRASES.length)], []);
 
   useEffect(() => {
-    // Son de caisse enregistreuse "cha-ching" uniquement pour une nouvelle réservation.
+    // Retour haptique "succès" uniquement pour une nouvelle réservation.
     if (!greeting) {
-      setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
-      try {
-        player.seekTo(0);
-        player.play();
-      } catch {}
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
     if (greeting) {
       // Mode "Bonjour !" : bandeau statique, aucune animation.
