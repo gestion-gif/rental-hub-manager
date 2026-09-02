@@ -100,3 +100,81 @@ footer a{color:#B9C3E4;text-decoration:none;margin:0 10px}
 async def public_showcase_site():
     """Page vitrine publique Casanéo."""
     return HTMLResponse(content=_SITE_HTML)
+
+
+_DELETION_HTML = """<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Casanéo — Suppression de compte et des données</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#1A2340;background:#F6F8FC;margin:0}
+.wrap{max-width:720px;margin:0 auto;padding:40px 24px 64px}
+h1{color:#020830;font-size:26px;margin-bottom:6px}
+.sub{color:#5A6684;margin-bottom:28px}
+h2{color:#020830;font-size:19px;margin:28px 0 10px}
+p,li{font-size:15.5px;line-height:1.65;color:#333C58}
+ol,ul{padding-left:22px}
+li{margin-bottom:6px}
+.card{background:#fff;border-radius:14px;padding:22px 24px;box-shadow:0 2px 10px rgba(2,8,48,.06);margin-bottom:18px}
+.note{background:#EEF2FC;border-left:4px solid #4468F0;padding:12px 16px;border-radius:8px;font-size:14.5px}
+a{color:#2A4BD7}
+footer{text-align:center;color:#8E97B8;font-size:13px;padding:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Suppression de compte et des données — Casanéo</h1>
+<p class="sub">Application <b>Casanéo</b> (Casanéo Terrain), éditée par MHP Immo.</p>
+
+<div class="card">
+<h2>1. Supprimer votre compte depuis l'application (recommandé)</h2>
+<ol>
+<li>Ouvrez l'application <b>Casanéo</b> et connectez-vous ;</li>
+<li>Allez dans <b>Réglages</b> (onglet en bas à droite) ;</li>
+<li>Touchez <b>« Supprimer mon compte »</b> en bas de la page ;</li>
+<li>Confirmez la suppression.</li>
+</ol>
+<p>La suppression est <b>immédiate et définitive</b>.</p>
+</div>
+
+<div class="card">
+<h2>2. Demander la suppression par e-mail</h2>
+<p>Si vous ne pouvez plus accéder à l'application, envoyez votre demande depuis l'adresse e-mail associée à votre compte à :
+<a href="mailto:gestion@mhpimmo.fr?subject=Suppression%20de%20mon%20compte%20Casan%C3%A9o">gestion@mhpimmo.fr</a>
+(objet : « Suppression de mon compte Casanéo »). Votre demande est traitée sous <b>30 jours maximum</b>.</p>
+<p>Vous pouvez également demander par ce même e-mail la <b>suppression de certaines données uniquement</b> (par exemple vos photos ou vos messages), sans supprimer votre compte.</p>
+</div>
+
+<div class="card">
+<h2>3. Données supprimées</h2>
+<ul>
+<li>Votre compte utilisateur (nom, adresse e-mail, mot de passe) et vos sessions ;</li>
+<li>Vos logements, réservations, calendriers, tarifs et documents ;</li>
+<li>Vos messages et avis synchronisés, modèles et automatisations ;</li>
+<li>Vos photos et fichiers importés ;</li>
+<li>Vos relevés propriétaires, écritures comptables et préférences ;</li>
+<li>Vos clés API et connexions aux services tiers ;</li>
+<li>Votre abonnement est résilié et votre jeton « Sign in with Apple » est révoqué le cas échéant.</li>
+</ul>
+</div>
+
+<div class="card">
+<h2>4. Données conservées</h2>
+<p>Aucune donnée personnelle n'est conservée après la suppression, à l'exception des
+<b>factures d'abonnement</b> émises via notre prestataire de paiement (Stripe), conservées
+<b>10 ans</b> conformément aux obligations comptables et fiscales françaises (art. L123-22 du Code de commerce).</p>
+</div>
+
+<p class="note">Pour en savoir plus sur le traitement de vos données : consultez notre <a href="/api/privacy">politique de confidentialité</a>.</p>
+</div>
+<footer>© 2026 MHP Immo — Casanéo · <a href="mailto:gestion@mhpimmo.fr">Contact</a></footer>
+</body>
+</html>"""
+
+
+@api_router.get("/account-deletion")
+async def account_deletion_page():
+    """Page publique de suppression de compte/données (exigence Google Play)."""
+    return HTMLResponse(content=_DELETION_HTML)
