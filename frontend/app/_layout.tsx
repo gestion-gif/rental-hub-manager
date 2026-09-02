@@ -16,6 +16,30 @@ import { PreferencesProvider } from "@/src/context/PreferencesContext";
 import PushRegistrar from "@/src/PushRegistrar";
 import { initTheme } from "@/src/theme";
 
+// --- Rapporteur de crash : envoie toute erreur JS fatale au backend (diagnostic production) ---
+if (Platform.OS !== "web") {
+  const eu = (global as any).ErrorUtils;
+  if (eu?.setGlobalHandler) {
+    const defaultHandler = eu.getGlobalHandler?.();
+    eu.setGlobalHandler((error: any, isFatal?: boolean) => {
+      try {
+        fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/client-errors`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: String(error?.message || error).slice(0, 500),
+            stack: String(error?.stack || "").slice(0, 4000),
+            fatal: !!isFatal,
+            platform: Platform.OS,
+            context: "global-handler",
+          }),
+        }).catch(() => {});
+      } catch {}
+      if (defaultHandler) defaultHandler(error, isFatal);
+    });
+  }
+}
+
 class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { error: Error | null }

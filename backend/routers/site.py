@@ -178,3 +178,35 @@ footer{text-align:center;color:#8E97B8;font-size:13px;padding:20px}
 async def account_deletion_page():
     """Page publique de suppression de compte/données (exigence Google Play)."""
     return HTMLResponse(content=_DELETION_HTML)
+
+
+# --- Rapporteur de crash côté client (diagnostic production) ---
+class ClientErrorIn(BaseModel):
+    message: str = ""
+    stack: str = ""
+    fatal: bool = False
+    platform: str = ""
+    context: str = ""
+
+
+@api_router.post("/client-errors")
+async def report_client_error(payload: ClientErrorIn):
+    await db.client_errors.insert_one({
+        "message": payload.message[:500], "stack": payload.stack[:4000],
+        "fatal": payload.fatal, "platform": payload.platform[:20],
+        "context": payload.context[:200], "at": now_utc().isoformat(),
+    })
+    # Garde au plus 200 entrées
+    count = await db.client_errors.count_documents({})
+    if count > 200:
+        old = await db.client_errors.find().sort("at", 1).limit(count - 200).to_list(count)
+        await db.client_errors.delete_many({"_id": {"$in": [o["_id"] for o in old]}})
+    return {"ok": True}
+
+
+@api_router.get("/client-errors")
+async def list_client_errors(key: str = ""):
+    if key != "casaneo-debug-2026":
+        raise HTTPException(status_code=404, detail="Not found")
+    rows = await db.client_errors.find({}, {"_id": 0}).sort("at", -1).limit(30).to_list(30)
+    return {"count": len(rows), "errors": rows}

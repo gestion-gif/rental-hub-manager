@@ -803,3 +803,9 @@
 - Avertissements restants NON bloquants: edge-to-edge APIs obsolètes (React Native core, rien à faire côté app) + screenOrientation portrait (recommandation grands écrans, conservé volontairement).
 - AUSSI en attente côté user: crash Google login → correctif probable = ce retrait; sinon récupérer stack trace (Play Console → Qualité → Android vitals → Crashs et ANR).
 - ACTION USER: redéployer + build 110 + nouvelle release. NOTE: /auth/session (Google) renvoie un user minimal sans /auth/me côté frontend exchange() — amélioration possible si le crash persiste.
+
+## Diagnostic crash Android Google login (2026-09 fork #4) — EN COURS
+- Crash persiste malgré retrait expo-audio (build utilisateur). Email+demo OK, Google (nouveau compte) → dashboard qq secondes → fermeture.
+- Mis en place: rapporteur de crash → frontend _layout.tsx ErrorUtils.setGlobalHandler envoie erreurs JS fatales à POST /api/client-errors (routers/site.py, garde 200 entrées). Lecture: GET /api/client-errors?key=casaneo-debug-2026 (⚠️ à lire sur PROD: https://rental-hub-manager.emergent.host/api/client-errors?key=casaneo-debug-2026).
+- Fix: AuthContext.exchange() récupère désormais /auth/me après /auth/session (le user Google était minimal: sans role/permissions/billing).
+- PROCHAINE ÉTAPE: user redéploie + build 111 + testeur reproduit → curl l'endpoint prod pour lire la stack. Vérifier AUSSI que l'utilisateur a bien déployé AVANT le build précédent (doute: son build 110 contenait peut-être encore expo-audio).

@@ -62,7 +62,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await api.post("/auth/session", { session_id: sessionId });
       setToken(data.session_token);
       await storage.secureSet(TOKEN_KEY, data.session_token);
-      setUser(data.user);
+      // Récupère le profil complet (role, permissions, billing…) comme les autres flux de connexion
+      try {
+        const me = await api.get("/auth/me");
+        setUser(me);
+      } catch {
+        setUser(data.user);
+      }
     } catch (e) {
       // silent — user stays on login
     } finally {
