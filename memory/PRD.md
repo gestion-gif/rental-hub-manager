@@ -809,3 +809,10 @@
 - Mis en place: rapporteur de crash → frontend _layout.tsx ErrorUtils.setGlobalHandler envoie erreurs JS fatales à POST /api/client-errors (routers/site.py, garde 200 entrées). Lecture: GET /api/client-errors?key=casaneo-debug-2026 (⚠️ à lire sur PROD: https://rental-hub-manager.emergent.host/api/client-errors?key=casaneo-debug-2026).
 - Fix: AuthContext.exchange() récupère désormais /auth/me après /auth/session (le user Google était minimal: sans role/permissions/billing).
 - PROCHAINE ÉTAPE: user redéploie + build 111 + testeur reproduit → curl l'endpoint prod pour lire la stack. Vérifier AUSSI que l'utilisateur a bien déployé AVANT le build précédent (doute: son build 110 contenait peut-être encore expo-audio).
+
+## Fil d'Ariane diagnostic crash Google Android (2026-09 fork #4)
+- Crash persiste (se ferme désormais DIRECTEMENT après connexion Google; refus des notifications ne change rien; email demo OK; 0 rapport reçu → crash natif ou rapport avorté).
+- Ajouts: src/utils/diag.ts crumb() → POST /api/client-errors avec keepalive. Jalons: google:open-browser, google:browser-result:<type>, exchange:start/session-ok/me-ok/me-fail/error, tabs:mount, tabs:billing:<état>, push:request-perm/perm-denied/token-ok/error.
+- _layout.tsx global handler: keepalive + délai 2s avant crash pour laisser partir le rapport.
+- LECTURE PROD: curl "https://rental-hub-manager.emergent.host/api/client-errors?key=casaneo-debug-2026" → le dernier jalon avant silence = étape fautive.
+- ACTIONS USER: Deploy → build → testeur reproduit → lire jalons. Toujours demander la stack Android vitals (Play Console → Qualité → Crashs et ANR).

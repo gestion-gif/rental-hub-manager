@@ -11,6 +11,7 @@ import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import { storage } from "@/src/utils/storage";
 import { api, setToken, TOKEN_KEY } from "@/src/api";
+import { crumb } from "@/src/utils/diag";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -58,18 +59,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function exchange(sessionId: string) {
     if (handledIds.current.has(sessionId)) return;
     handledIds.current.add(sessionId);
+    crumb("exchange:start");
     try {
       const data = await api.post("/auth/session", { session_id: sessionId });
+      crumb("exchange:session-ok");
       setToken(data.session_token);
       await storage.secureSet(TOKEN_KEY, data.session_token);
       // Récupère le profil complet (role, permissions, billing…) comme les autres flux de connexion
       try {
         const me = await api.get("/auth/me");
+        crumb("exchange:me-ok");
         setUser(me);
       } catch {
+        crumb("exchange:me-fail");
         setUser(data.user);
       }
     } catch (e) {
+      crumb("exchange:error", String((e as any)?.message || e).slice(0, 200));
       // silent — user stays on login
     } finally {
       setSigningIn(false);
@@ -134,7 +140,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const redirect = Linking.createURL("");
       const authUrl = `${AUTH_BASE}?redirect=${encodeURIComponent(redirect)}`;
+      crumb("google:open-browser");
       const result = await WebBrowser.openAuthSessionAsync(authUrl, redirect);
+      crumb(`google:browser-result:${result.type}`);
       let sid: string | null = null;
       if (result.type === "success" && result.url) {
         sid = extractSessionId(result.url);

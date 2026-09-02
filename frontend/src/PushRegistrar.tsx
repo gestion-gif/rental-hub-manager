@@ -3,19 +3,26 @@ import { Platform, AppState, AppStateStatus } from "react-native";
 import * as Notifications from "expo-notifications";
 
 import { useAuth } from "@/src/context/AuthContext";
+import { crumb } from "@/src/utils/diag";
 
 async function registerForPush(userId: string) {
   if (Platform.OS === "web" || !userId) return;
   try {
+    crumb("push:request-perm");
     const { status } = await Notifications.requestPermissionsAsync();
-    if (status !== "granted") return;
+    if (status !== "granted") {
+      crumb("push:perm-denied");
+      return;
+    }
     const tok = await Notifications.getDevicePushTokenAsync();
+    crumb("push:token-ok");
     await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/register-push`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, platform: Platform.OS, device_token: tok.data }),
     });
   } catch {
+    crumb("push:error");
     // Non-blocking: push registration must never break the app.
   }
 }

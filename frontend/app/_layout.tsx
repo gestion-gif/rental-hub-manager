@@ -33,9 +33,18 @@ if (Platform.OS !== "web") {
             platform: Platform.OS,
             context: "global-handler",
           }),
+          // @ts-ignore
+          keepalive: true,
         }).catch(() => {});
       } catch {}
-      if (defaultHandler) defaultHandler(error, isFatal);
+      if (isFatal) {
+        // Laisse 2 s au rapport d'erreur pour partir avant que l'app ne se ferme
+        setTimeout(() => {
+          if (defaultHandler) defaultHandler(error, isFatal);
+        }, 2000);
+      } else if (defaultHandler) {
+        defaultHandler(error, isFatal);
+      }
     });
   }
 }

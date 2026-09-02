@@ -11,6 +11,7 @@ import { api } from "@/src/api";
 import { useAuth } from "@/src/context/AuthContext";
 import { canSeeRevenue, canSeeInbox, canSeeSettings, canModify } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
+import { crumb } from "@/src/utils/diag";
 
 type NavItem = { key: string; label: string; icon: string; kind: "tab" | "stack"; path?: string; gate?: "revenue" | "admin" | "modify" | "inbox" | "settings" };
 const SECTIONS: { title: string | null; items: NavItem[] }[] = [
@@ -182,8 +183,15 @@ export default function DrawerLayout() {
   const { user, loading } = useAuth();
   const [locked, setLocked] = useState(false);
   useEffect(() => {
+    crumb("tabs:mount");
+  }, []);
+  useEffect(() => {
     if (!user) return;
-    api.get("/billing/status").then((s) => setLocked(!s.entitled)).catch((e: any) => {
+    api.get("/billing/status").then((s) => {
+      crumb(`tabs:billing:${s.entitled ? "entitled" : "locked"}`);
+      setLocked(!s.entitled);
+    }).catch((e: any) => {
+      crumb("tabs:billing-error", String(e?.message || e).slice(0, 150));
       if (String(e?.message || "").includes("essai gratuit est terminé")) setLocked(true);
     });
   }, [user]);
