@@ -13,6 +13,7 @@ import { canModify } from "@/src/permissions";
 import { Field, PrimaryButton } from "@/src/components/ui";
 import { PropertyPicker } from "@/src/components/PropertyPicker";
 import { ROOM_OPTIONS, AMENITY_OPTIONS } from "@/src/propertyOptions";
+import { ensurePhotoAccess } from "@/src/utils/photoAccess";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 export default function PropertyForm() {
@@ -106,8 +107,7 @@ export default function PropertyForm() {
   }, []);
 
   async function pickKeyPhotos() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!(await ensurePhotoAccess())) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsMultipleSelection: true,
@@ -127,8 +127,7 @@ export default function PropertyForm() {
 
   const MAX_PHOTOS = 30;
   async function pickPhotos() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!(await ensurePhotoAccess())) return;
     const remaining = MAX_PHOTOS - photos.length;
     if (remaining <= 0) return;
     const result = await ImagePicker.launchImageLibraryAsync({

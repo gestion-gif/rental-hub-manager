@@ -25,8 +25,10 @@
       "edgeToEdgeEnabled": true,
       "package": "com.casaneo.app",
       "googleServicesFile": "./google-services.json",
-      "permissions": [
-        "READ_MEDIA_IMAGES"
+      "permissions": [],
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
       ]
     },
     "web": {

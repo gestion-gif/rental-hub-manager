@@ -789,3 +789,10 @@
 
 ### Rapport revenus N vs N-1
 - analytics.tsx: charge year et year-1 en parallèle, cartes résumé avec delta % revenus et delta points d'occupation (vert/rouge, testID rev-delta), graphe à doubles barres (N-1 grisée) + légende. Aucun changement backend (endpoint /analytics/revenue?year= existant).
+
+## Conformité Google Play — permission photos (2026-09 fork #4)
+- Google Play a rejeté READ_MEDIA_IMAGES (bundle 107) : politique "Photo Picker obligatoire".
+- Fix: app.json → android.permissions=[] + blockedPermissions=[READ_MEDIA_IMAGES, READ_MEDIA_VIDEO].
+- Nouveau helper src/utils/photoAccess.ts (ensurePhotoAccess): Android/web → true (Photo Picker système sans permission) ; iOS → requestMediaLibraryPermissionsAsync + Alert "Ouvrir les réglages" si canAskAgain=false.
+- 7 écrans migrés: property-form (x2), supplement-form, intervention-form, accounting-form, settings/promotion-form, settings/company, settings/booking-site.
+- Le PROCHAIN build Android (108) n'aura plus la permission → dans Play Console, déclarer "n'utilise pas ces autorisations". Page /api/account-deletion créée pour les URLs de suppression Play Console (404 en prod tant que pas redéployé).

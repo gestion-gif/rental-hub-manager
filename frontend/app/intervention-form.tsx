@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, Switch } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import { ensurePhotoAccess } from "@/src/utils/photoAccess";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -80,8 +81,7 @@ export default function InterventionForm() {
   const valid = form.property_id && form.date;
 
   async function pickPhotos() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!(await ensurePhotoAccess())) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsMultipleSelection: true,

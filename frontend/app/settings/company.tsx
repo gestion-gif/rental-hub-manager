@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator, TextInput, Alert,
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import { ensurePhotoAccess } from "@/src/utils/photoAccess";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -57,11 +58,7 @@ export default function CompanySettings() {
   }
 
   async function pickLogo() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Autorisation requise", "Autorisez l'accès aux photos pour choisir votre logo.");
-      return;
-    }
+    if (!(await ensurePhotoAccess("Autorisez l'accès aux photos pour choisir votre logo."))) return;
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8 });
     if (result.canceled) return;
     const asset = result.assets[0];

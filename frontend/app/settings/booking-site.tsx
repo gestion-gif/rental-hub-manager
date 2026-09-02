@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ScrollView, Switch, ActivityIndicato
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import { ensurePhotoAccess } from "@/src/utils/photoAccess";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -78,8 +79,7 @@ export default function BookingSiteSettings() {
   }
 
   async function pickHero() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!(await ensurePhotoAccess())) return;
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.8 });
     if (result.canceled) return;
     const asset = result.assets[0];

@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import { ensurePhotoAccess } from "@/src/utils/photoAccess";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -104,11 +105,7 @@ export default function AccountingForm() {
   }, [id]);
 
   async function pickReceipt() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Autorisation requise", "Autorisez l'accès aux photos pour ajouter un justificatif.");
-      return;
-    }
+    if (!(await ensurePhotoAccess("Autorisez l'accès aux photos pour ajouter un justificatif."))) return;
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 0.6 });
     if (result.canceled) return;
     const asset = result.assets[0];
