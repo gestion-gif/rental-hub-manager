@@ -28,6 +28,7 @@ const SECTIONS = [
   ] },
   { title: "Communication", items: [
     { path: "/settings/messages", icon: "chatbubbles-outline", title: "Messages automatiques", sub: "Modèles, marqueurs & couleurs" },
+    { path: "/settings/arrival-email", icon: "mail-unread-outline", title: "Email avant l'arrivée", sub: "Instructions d'accès & codes envoyés automatiquement" },
     { path: "/settings/quick-replies", icon: "flash-outline", title: "Réponses types", sub: "Modèles réutilisables en un tap" },
     { path: "/settings/assistant", icon: "sparkles-outline", title: "Assistant IA", sub: "Brouillons automatiques des réponses" },
     { path: "/settings/reports", icon: "bar-chart-outline", title: "Rapports & avis", sub: "Rapport mensuel auto & demandes d'avis" },

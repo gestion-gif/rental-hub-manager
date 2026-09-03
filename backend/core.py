@@ -159,6 +159,7 @@ class ReservationIn(BaseModel):
     total_price: float = 0
     status: str = "demande"  # demande|confirmee|arrivee|depart|annulee
     notes: str = ""
+    internal_note: str = ""  # note privée (équipe ménage) — jamais envoyée au voyageur
 class InterventionIn(BaseModel):
     property_id: str
     kind: str = "menage"  # menage | intervention | remise_cles | caution
@@ -727,6 +728,20 @@ def _build_payment_reminders(doc: Optional[dict]) -> dict:
     }
 
 
+DEFAULT_ARRIVAL_EMAIL = {"enabled": False, "days_before": 2, "extra_message": ""}
+
+
+def _build_arrival_email(doc: Optional[dict]) -> dict:
+    c = (doc or {}).get("arrival_email") or {}
+    try:
+        days = int(c.get("days_before", 2))
+    except Exception:
+        days = 2
+    return {"enabled": bool(c.get("enabled", False)),
+            "days_before": max(0, min(14, days)),
+            "extra_message": str(c.get("extra_message") or "")[:1500]}
+
+
 async def log_guest_message(uid: str, reservation_id: str, channel: str, kind: str,
                             body: str, to: str = "", subject: str = ""):
     """Trace tout message sortant vers un voyageur (fiche réservation → Historique).
@@ -819,6 +834,7 @@ class PreferencesIn(BaseModel):
     getyourguide_url: Optional[str] = None
     public_site: Optional[dict] = None
     auto_charge: Optional[dict] = None
+    arrival_email: Optional[dict] = None
 async def _ai_auto_draft_enabled(uid: str) -> bool:
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     return bool((doc or {}).get("ai_auto_draft", True))
@@ -2118,6 +2134,93 @@ async def run_payment_reminders_for_user(uid: str) -> int:
     return sent
 
 
+async def run_arrival_emails_for_user(uid: str) -> int:
+    """Email automatique avant l'arrivée : instructions d'accès & codes du logement
+    (fiche logement → Instructions clés) + message personnalisé. Envoi unique par réservation."""
+    prefs = await db.preferences.find_one({"user_id": uid}, {"_id": 0}) or {}
+    cfg = _build_arrival_email(prefs)
+    if not cfg["enabled"]:
+        return 0
+    today = date.today()
+    horizon = (today + timedelta(days=cfg["days_before"])).isoformat()
+    reservations = await db.reservations.find(
+        {"user_id": uid, "check_in": {"$gte": today.isoformat(), "$lte": horizon},
+         "status": {"$nin": ["annulee", "bloque", "demande"]},
+         "arrival_email_sent_at": {"$in": [None, ""]},
+         "guest_email": {"$nin": [None, ""]}},
+        {"_id": 0}).to_list(2000)
+    if not reservations:
+        return 0
+    company = _build_company(prefs)
+    brand = company.get("name") or "Casanéo"
+    props = await db.properties.find({"user_id": uid}, {"_id": 0}).to_list(2000)
+    pmap = {p["id"]: p for p in props}
+    ch = await db.channel_settings.find_one({"user_id": uid}, {"_id": 0}) or {}
+    base = (ch.get("public_base_url") or "").rstrip("/")
+    extra = (cfg.get("extra_message") or "").strip()
+    sent = 0
+    for r in reservations:
+        email = (r.get("guest_email") or "").strip()
+        if not email:
+            continue
+        prop = pmap.get(r.get("property_id")) or {}
+        instr = (prop.get("key_instructions") or "").strip()
+        if not instr and not extra:
+            continue  # rien d'utile à transmettre pour ce logement
+        pname = r.get("property_name") or prop.get("name") or "votre logement"
+        ci, co = r.get("check_in", ""), r.get("check_out", "")
+        addr = " ".join(x for x in [prop.get("address"), prop.get("address_complement")] if x).strip()
+        origin = (r.get("public_origin") or "").rstrip("/") or base
+        photos = prop.get("key_photos") or []
+        photo_links = ""
+        if photos and origin:
+            links = "".join(
+                f'<li><a href="{origin}/api/kp/{p}" style="color:#2A6F9E">Photo accès {i + 1}</a></li>'
+                for i, p in enumerate(photos))
+            photo_links = ('<p style="font-size:14px;color:#3a3a3c;margin:12px 0 4px"><strong>Photos (accès aux clés)</strong></p>'
+                           f'<ul style="font-size:14px;color:#3a3a3c;margin:0 0 12px">{links}</ul>')
+        instr_block = ""
+        if instr:
+            instr_block = ('<div style="background:#f5f5f7;border-radius:10px;padding:14px 16px;margin:12px 0">'
+                           '<p style="font-size:13px;font-weight:bold;color:#1c1c1e;margin:0 0 6px">Instructions d\'accès &amp; codes</p>'
+                           f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0;white-space:pre-line">{escape(instr)}</p></div>')
+        extra_block = ""
+        if extra:
+            extra_block = f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px;white-space:pre-line">{escape(extra)}</p>'
+        addr_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>Adresse :</strong> {escape(addr)}</p>' if addr else ""
+        ci_time = (r.get("checkin_time") or "").strip()
+        time_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>Arrivée à partir de :</strong> {escape(ci_time)}</p>' if ci_time else ""
+        subject = f"{brand} — Votre arrivée à {pname} : informations d'accès"
+        html = (
+            '<table role="presentation" width="100%" style="background:#f5f5f7;padding:24px 0"><tr><td align="center">'
+            '<table role="presentation" width="480" style="background:#ffffff;border-radius:16px;'
+            'font-family:Arial,Helvetica,sans-serif;overflow:hidden">'
+            '<tr><td style="padding:28px 32px 8px">'
+            f'<p style="font-size:18px;font-weight:bold;color:#1c1c1e;margin:0">{escape(brand)}</p></td></tr>'
+            '<tr><td style="padding:8px 32px 26px">'
+            f'<p style="font-size:15px;color:#1c1c1e;margin:0 0 12px">Bonjour {escape(r.get("guest_name") or "")},</p>'
+            '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">'
+            f'Votre séjour à <strong>{escape(pname)}</strong> approche ({ci} → {co}). '
+            'Voici les informations pour votre arrivée :</p>'
+            f'{addr_line}{time_line}{instr_block}{photo_links}{extra_block}'
+            '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">Excellent séjour !</p>'
+            f'<p style="font-size:12px;color:#8e8e93;margin:0">Envoyé par {escape(brand)}.</p></td></tr>'
+            '</table></td></tr></table>'
+        )
+        try:
+            await send_email(to=email, subject=subject, html=html)
+        except Exception:
+            logger.warning("email instructions d'arrivée échoué pour %s", r.get("id"))
+            continue
+        await db.reservations.update_one({"user_id": uid, "id": r["id"]},
+                                         {"$set": {"arrival_email_sent_at": now_utc().isoformat()}})
+        await log_guest_message(uid, r["id"], "email", "cles",
+                                f"Instructions d'accès envoyées par email pour {pname} (arrivée le {ci}).",
+                                to=email, subject=subject)
+        sent += 1
+    return sent
+
+
 async def run_automations_for_user(uid: str):
     """Send due automatic messages via Lodgify and set the corresponding markers.
     Envoie aussi automatiquement les instructions de clés aux voyageurs Airbnb (sans caution)."""
@@ -2500,6 +2603,8 @@ __all__ = [
     'log_guest_message',
     '_build_payment_reminders',
     'run_payment_reminders_for_user',
+    '_build_arrival_email',
+    'run_arrival_emails_for_user',
     '_build_auto_charge',
     'auto_charge_reservation',
     'run_auto_charge_for_user',

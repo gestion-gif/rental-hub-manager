@@ -99,6 +99,12 @@ export default function CleaningSchedule() {
       <Text style={styles.sub} numberOfLines={2}>
         {item.done ? "Terminé — appuyez pour rouvrir" : "À faire — appuyez pour valider"}{item.description ? ` · ${item.description}` : ""}{item.intervenant ? ` · ${item.intervenant}` : ""}
       </Text>
+      {!!item.internal_note && (
+        <View style={styles.noteBox}>
+          <Ionicons name="document-text-outline" size={13} color="#B8860B" />
+          <Text style={styles.noteText}>{item.internal_note}</Text>
+        </View>
+      )}
     </Pressable>
   );
 
@@ -157,6 +163,12 @@ export default function CleaningSchedule() {
                 {!!d.checkout_time && <View style={styles.timeTag}><Text style={styles.timeTxt}>{d.checkout_time}</Text></View>}
               </View>
               <Text style={styles.sub}>Départ · {guestLabel(user, d.guest_name)}</Text>
+              {!!d.internal_note && (
+                <View style={styles.noteBox}>
+                  <Ionicons name="document-text-outline" size={13} color="#B8860B" />
+                  <Text style={styles.noteText}>{d.internal_note}</Text>
+                </View>
+              )}
             </View>
           )) : <Text style={styles.empty}>Aucun départ ce jour.</Text>}
 
@@ -178,6 +190,12 @@ export default function CleaningSchedule() {
                     : "Caution à vérifier (lien envoyé 2 j avant)"}
                 </Text>
               </View>
+              {!!a.internal_note && (
+                <View style={styles.noteBox}>
+                  <Ionicons name="document-text-outline" size={13} color="#B8860B" />
+                  <Text style={styles.noteText}>{a.internal_note}</Text>
+                </View>
+              )}
             </Pressable>
           )) : <Text style={styles.empty}>Aucune arrivée ce jour.</Text>}
 
@@ -302,6 +320,8 @@ const styles = StyleSheet.create({
   prop: { flex: 1, fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface },
   propDone: { textDecorationLine: "line-through", color: colors.onSurfaceTertiary },
   sub: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, marginTop: 4, marginLeft: 28 },
+  noteBox: { flexDirection: "row", alignItems: "flex-start", gap: 6, marginTop: 8, marginLeft: 28, backgroundColor: "#FFF8E1", borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 6 },
+  noteText: { flex: 1, fontFamily: font.medium, fontSize: fontSize.sm, color: "#8A6D1A", lineHeight: 17 },
   timeTag: { backgroundColor: colors.surfaceSecondary, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 3 },
   timeTxt: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
   depBadge: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, marginLeft: 28, alignSelf: "flex-start", borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 4 },

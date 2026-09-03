@@ -22,6 +22,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "getyourguide_url": (doc or {}).get("getyourguide_url", "") or "",
         "payment_reminders": _build_payment_reminders(doc),
         "auto_charge": _build_auto_charge(doc),
+        "arrival_email": _build_arrival_email(doc),
         "public_site": _build_public_site(doc),
     }
 
@@ -102,6 +103,18 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
             days = 60
         set_doc["auto_charge"] = {"enabled": bool(c.get("enabled", False)),
                                   "days_before": max(1, min(365, days))}
+
+    if payload.arrival_email is not None:
+        c = payload.arrival_email or {}
+        try:
+            days = int(c.get("days_before", 2))
+        except Exception:
+            days = 2
+        set_doc["arrival_email"] = {
+            "enabled": bool(c.get("enabled", False)),
+            "days_before": max(0, min(14, days)),
+            "extra_message": str(c.get("extra_message") or "").strip()[:1500],
+        }
 
     if payload.company is not None:
         set_doc["company"] = {k: str(payload.company.get(k) or "").strip() for k in _COMPANY_KEYS}
@@ -194,6 +207,7 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "cleaning_offset_days": int((doc or {}).get("cleaning_offset_days", 0)),
         "getyourguide_url": (doc or {}).get("getyourguide_url", "") or "",
         "payment_reminders": _build_payment_reminders(doc),
+        "arrival_email": _build_arrival_email(doc),
         "public_site": _build_public_site(doc),
     }
 

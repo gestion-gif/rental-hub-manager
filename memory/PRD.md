@@ -843,3 +843,8 @@
 ## Décaler un ménage — À faire aujourd'hui (2026-09 fork #4)
 - Backend: PATCH /interventions/{id}/reschedule {date} (routers/interventions.py). Règles: kind=menage uniquement, non fait, date ≥ aujourd'hui, et nouvelle date ≤ prochaine arrivée du logement (sinon 400 "Impossible : une arrivée est prévue le X"). Testé (400 après arrivée, 200 jour d'arrivée, 400 date passée).
 - Frontend cleaning.tsx: bouton "Décaler" (testID reschedule-{id}) sur les cartes ménage non faites → modale avec 7 prochaines dates (testID reschedule-date-YYYY-MM-DD) → succès: alerte + reload; refus: alerte avec le motif du backend. Testé via screenshot.
+
+## Session Juin 2026 — Rappels voyageurs, Notes internes, Optimisation Play Store
+- **Email avant l'arrivée (auto)** : prefs `arrival_email` {enabled, days_before (0-14, défaut 2), extra_message}. Fonction `run_arrival_emails_for_user` (core.py) + boucle `_arrival_email_loop` (server.py, 6h). Email au voyageur avec adresse, heure d'arrivée, instructions clés (`key_instructions` du logement, bloc code), liens photos clés, message perso. Dédup via `arrival_email_sent_at` sur la réservation, tracé dans message_logs (kind=cles). Réglage UI: /settings/arrival-email (section Communication).
+- **Note interne réservation** : champ `internal_note` sur ReservationIn (jamais envoyé au voyageur). Saisie dans reservation-form.tsx, affichée (encadré ambre) sur l'écran "À faire aujourd'hui" (départs, arrivées, ménages — via note_map dans cleaning-schedule).
+- **Play Store** : ajout plugin `expo-build-properties` avec `enableProguardInReleaseBuilds` + `enableShrinkResourcesInReleaseBuilds` (corrige "Obscurcissement 2%" du tableau de bord des releases, deadline fév. 2027). Nécessite un nouveau build Android.

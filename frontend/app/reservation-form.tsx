@@ -142,6 +142,7 @@ export default function ReservationForm() {
     tourist_tax: "",
     status: "demande",
     notes: "",
+    internal_note: "",
   });
 
   useEffect(() => {
@@ -175,6 +176,7 @@ export default function ReservationForm() {
               tourist_tax: String(r.tourist_tax || fin.taxes || ""),
               status: r.status,
               notes: r.notes || "",
+              internal_note: r.internal_note || "",
             });
             try {
               const inv = await api.get(`/reservations/${id}/invoice`);
@@ -304,6 +306,7 @@ export default function ReservationForm() {
       total_price: totalPrice,
       status: form.status,
       notes: form.notes,
+      internal_note: form.internal_note,
     };
     try {
       if (editing) await api.put(`/reservations/${id}`, payload);
@@ -910,6 +913,7 @@ export default function ReservationForm() {
 
           <View style={{ height: spacing.md }} />
           <Field label="Notes" testID="notes" value={form.notes} onChangeText={(v) => set("notes", v)} placeholder="Informations complémentaires" multiline />
+          <Field label="Note interne (équipe ménage)" testID="internal-note" value={form.internal_note} onChangeText={(v) => set("internal_note", v)} placeholder="Visible uniquement par votre équipe — jamais envoyée au voyageur" multiline />
 
           {editing && (
             <Modal visible={supModalOpen} animationType="slide" transparent onRequestClose={() => setSupModalOpen(false)}>

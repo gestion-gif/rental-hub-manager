@@ -201,6 +201,24 @@ async def startup():
     asyncio.create_task(_trial_reminder_loop())
     asyncio.create_task(_payment_reminder_loop())
     asyncio.create_task(_auto_charge_loop())
+    asyncio.create_task(_arrival_email_loop())
+
+
+async def _arrival_email_loop():
+    """Email automatique d'instructions d'accès avant l'arrivée (par utilisateur)."""
+    await asyncio.sleep(120)
+    while True:
+        try:
+            prefs_all = await db.preferences.find(
+                {"arrival_email.enabled": True}, {"_id": 0, "user_id": 1}).to_list(1000)
+            for p in prefs_all:
+                try:
+                    await run_arrival_emails_for_user(p["user_id"])
+                except Exception:
+                    logger.exception("arrival email error for %s", p.get("user_id"))
+        except Exception:
+            logger.exception("arrival email loop error")
+        await asyncio.sleep(6 * 3600)
 
 
 async def _auto_charge_loop():

@@ -75,6 +75,7 @@ async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_
         "property_name": pmap.get(r["property_id"], "Logement"),
         "guest_name": r.get("guest_name"), "checkout_time": r.get("checkout_time") or "",
         "platform": r.get("platform") or "",
+        "internal_note": r.get("internal_note") or "",
     } for r in deps if r["property_id"] in pmap]
 
     arr = await db.reservations.find(
@@ -87,11 +88,22 @@ async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_
         "deposit_collected": bool((r.get("finance") or {}).get("deposit_collected")),
         "deposit_amount": (r.get("finance") or {}).get("deposit_amount") or 0,
         "damage_deposit": r.get("damage_deposit") or "",
+        "internal_note": r.get("internal_note") or "",
     } for r in arr if r["property_id"] in pmap]
 
     # Toutes les interventions du jour, regroupées par type
     ivs = await db.interventions.find(
         {"user_id": uid, "date": tstr, **scope}, {"_id": 0}).to_list(1000)
+
+    # Note interne de la réservation associée (affichée sur les ménages du jour)
+    since = (target - timedelta(days=14)).isoformat()
+    past = await db.reservations.find(
+        {"user_id": uid, "check_out": {"$gte": since, "$lte": tstr},
+         "status": {"$ne": "annulee"}, "internal_note": {"$nin": [None, ""]}, **scope},
+        {"_id": 0, "property_id": 1, "check_out": 1, "internal_note": 1}).to_list(500)
+    note_map = {}
+    for r in sorted(past, key=lambda x: x.get("check_out") or ""):
+        note_map[r["property_id"]] = r.get("internal_note") or ""
 
     def _iv(iv):
         return {
@@ -110,6 +122,7 @@ async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_
         kind = iv.get("kind", "menage")
         item = _iv(iv)
         if kind == "menage":
+            item["internal_note"] = note_map.get(iv["property_id"], "")
             cleanings.append(item)
         elif kind == "remise_cles":
             key_handovers.append(item)
