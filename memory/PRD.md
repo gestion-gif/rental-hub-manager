@@ -839,3 +839,7 @@
 
 ## Filtre par logement — Réservations (2026-09 fork #4)
 - (tabs)/calendar.tsx: rangée de chips logements scrollable (testID prop-chip-all / prop-chip-{id}), visible seulement si ≥2 logements. Re-tap sur le chip actif = retour à "Tous". Combiné avec recherche + statut + tri. Testé (screenshot: filtre "Mas des Oliviers" → 2 résas).
+
+## Décaler un ménage — À faire aujourd'hui (2026-09 fork #4)
+- Backend: PATCH /interventions/{id}/reschedule {date} (routers/interventions.py). Règles: kind=menage uniquement, non fait, date ≥ aujourd'hui, et nouvelle date ≤ prochaine arrivée du logement (sinon 400 "Impossible : une arrivée est prévue le X"). Testé (400 après arrivée, 200 jour d'arrivée, 400 date passée).
+- Frontend cleaning.tsx: bouton "Décaler" (testID reschedule-{id}) sur les cartes ménage non faites → modale avec 7 prochaines dates (testID reschedule-date-YYYY-MM-DD) → succès: alerte + reload; refus: alerte avec le motif du backend. Testé via screenshot.

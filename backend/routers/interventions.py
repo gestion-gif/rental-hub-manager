@@ -134,6 +134,47 @@ async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_
     }
 
 
+class RescheduleIn(BaseModel):
+    date: str
+
+
+@api_router.patch("/interventions/{intervention_id}/reschedule")
+async def reschedule_cleaning(intervention_id: str, payload: RescheduleIn, user=Depends(get_current_user)):
+    """Décale la date d'un ménage non fait — uniquement si possible :
+    la nouvelle date doit rester avant (ou le jour de) la prochaine arrivée du logement."""
+    iv = await db.interventions.find_one(
+        {"id": intervention_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not iv or (user.get("allowed_property_ids") is not None
+                  and iv.get("property_id") not in user["allowed_property_ids"]):
+        raise HTTPException(status_code=404, detail="Ménage introuvable")
+    if iv.get("kind") != "menage":
+        raise HTTPException(status_code=400, detail="Seuls les ménages peuvent être décalés ici")
+    if iv.get("done"):
+        raise HTTPException(status_code=400, detail="Ce ménage est déjà fait")
+    try:
+        new_date = date.fromisoformat(payload.date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Date invalide")
+    if new_date < date.today():
+        raise HTTPException(status_code=400, detail="La date doit être aujourd'hui ou plus tard")
+    # « Si possible » : le ménage doit être terminé avant la prochaine arrivée
+    cur = str(iv.get("date") or "")
+    nxt = await db.reservations.find(
+        {"user_id": user["user_id"], "property_id": iv["property_id"],
+         "status": {"$nin": ["annulee"]}, "check_in": {"$gte": cur or date.today().isoformat()}},
+        {"_id": 0, "check_in": 1, "guest_name": 1}).sort("check_in", 1).limit(1).to_list(1)
+    if nxt and new_date.isoformat() > nxt[0]["check_in"]:
+        d = date.fromisoformat(nxt[0]["check_in"]).strftime("%d/%m")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Impossible : une arrivée est prévue le {d}. Le ménage doit être fait au plus tard ce jour-là.")
+    await db.interventions.update_one(
+        {"id": intervention_id, "user_id": user["user_id"]},
+        {"$set": {"date": new_date.isoformat()}})
+    return {"id": intervention_id, "date": new_date.isoformat(),
+            "limit": (nxt[0]["check_in"] if nxt else None)}
+
+
 @api_router.patch("/interventions/{intervention_id}/done")
 async def set_intervention_done(intervention_id: str, payload: DoneIn, user=Depends(get_current_user)):
     """Marquer une tâche (ménage, intervention, remise de clés) comme faite.

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, RefreshControl, Alert } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, RefreshControl, Alert, Modal } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -21,6 +21,22 @@ export default function CleaningSchedule() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<string>("");
+  const [rescheduleItem, setRescheduleItem] = useState<any>(null);
+
+  async function rescheduleTo(dateStr: string) {
+    const item = rescheduleItem;
+    if (!item) return;
+    setRescheduleItem(null);
+    setBusy(item.id);
+    try {
+      await api.patch(`/interventions/${item.id}/reschedule`, { date: dateStr });
+      Alert.alert("Ménage décalé", `${item.property_name} → ${dayjs(dateStr).format("dddd D MMMM")}`);
+      load();
+    } catch (e: any) {
+      Alert.alert("Impossible de décaler", String(e?.message || "Erreur"));
+    }
+    setBusy("");
+  }
 
   const load = useCallback(async () => {
     try {
@@ -68,6 +84,17 @@ export default function CleaningSchedule() {
       <View style={styles.cardRow}>
         <Ionicons name={item.done ? "checkmark-circle" : "ellipse-outline"} size={22} color={item.done ? colors.success : colors.onSurfaceTertiary} />
         <Text style={[styles.prop, item.done && styles.propDone]} numberOfLines={1}>{item.property_name}</Text>
+        {kind === "cleaning" && !item.done && (
+          <Pressable
+            testID={`reschedule-${item.id}`}
+            onPress={(e: any) => { e?.stopPropagation?.(); setRescheduleItem(item); }}
+            hitSlop={8}
+            style={styles.shiftBtn}
+          >
+            <Ionicons name="calendar-outline" size={14} color={colors.brandPrimary} />
+            <Text style={styles.shiftBtnText}>Décaler</Text>
+          </Pressable>
+        )}
       </View>
       <Text style={styles.sub} numberOfLines={2}>
         {item.done ? "Terminé — appuyez pour rouvrir" : "À faire — appuyez pour valider"}{item.description ? ` · ${item.description}` : ""}{item.intervenant ? ` · ${item.intervenant}` : ""}
@@ -208,12 +235,56 @@ export default function CleaningSchedule() {
           )) : <Text style={styles.empty}>Aucune caution à encaisser ce jour.</Text>}
         </ScrollView>
       )}
+
+      {/* Choix de la nouvelle date de ménage */}
+      <Modal visible={!!rescheduleItem} transparent animationType="fade" onRequestClose={() => setRescheduleItem(null)}>
+        <Pressable style={styles.modalBg} onPress={() => setRescheduleItem(null)}>
+          <Pressable style={styles.modalCard} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Décaler le ménage</Text>
+            <Text style={styles.modalSub}>{rescheduleItem?.property_name} — choisissez la nouvelle date. Le décalage n'est possible que si aucune arrivée n'est prévue avant.</Text>
+            {Array.from({ length: 7 }).map((_, i) => {
+              const d = anchor.add(i + 1, "day");
+              return (
+                <Pressable
+                  key={i}
+                  testID={`reschedule-date-${d.format("YYYY-MM-DD")}`}
+                  onPress={() => rescheduleTo(d.format("YYYY-MM-DD"))}
+                  style={styles.dateOption}
+                >
+                  <Ionicons name="calendar-outline" size={16} color={colors.brandPrimary} />
+                  <Text style={styles.dateOptionText}>{d.format("dddd D MMMM")}{i === 0 ? " (demain)" : ""}</Text>
+                </Pressable>
+              );
+            })}
+            <Pressable testID="reschedule-cancel" onPress={() => setRescheduleItem(null)} style={styles.modalCancel}>
+              <Text style={styles.modalCancelText}>Annuler</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.surface },
+  shiftBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4, marginLeft: "auto",
+    paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: colors.brandPrimary + "55", backgroundColor: colors.brandPrimary + "12",
+  },
+  shiftBtnText: { fontFamily: font.semibold, fontSize: fontSize.xs, color: colors.brandPrimary },
+  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: spacing.xl },
+  modalCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg },
+  modalTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface },
+  modalSub: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceSecondary, marginTop: 4, marginBottom: spacing.md },
+  dateOption: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  dateOptionText: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurface, textTransform: "capitalize" },
+  modalCancel: { alignItems: "center", paddingVertical: 12, marginTop: spacing.sm },
+  modalCancelText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.lg, paddingBottom: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   backBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" },
   title: { fontFamily: font.bold, fontSize: fontSize.xl, color: colors.onSurface },
