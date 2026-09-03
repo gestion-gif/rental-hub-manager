@@ -40,6 +40,8 @@ export default function CalendarScreen() {
   const [props, setProps] = useState<Record<string, any>>({});
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
+  const [sortKey, setSortKey] = useState<"check_in" | "amount" | "property">("check_in");
+  const [sortAsc, setSortAsc] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -93,6 +95,39 @@ export default function CalendarScreen() {
     },
     [items, filter, query, props],
   );
+
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === "amount") {
+        cmp = (Number(a.total_price) || 0) - (Number(b.total_price) || 0);
+      } else if (sortKey === "property") {
+        cmp = String(props[a.property_id]?.name || "").localeCompare(
+          String(props[b.property_id]?.name || ""), "fr");
+        if (cmp === 0) cmp = String(a.check_in || "").localeCompare(String(b.check_in || ""));
+      } else {
+        cmp = String(a.check_in || "").localeCompare(String(b.check_in || ""));
+      }
+      return sortAsc ? cmp : -cmp;
+    });
+    return arr;
+  }, [filtered, sortKey, sortAsc, props]);
+
+  function onSort(key: "check_in" | "amount" | "property") {
+    if (sortKey === key) {
+      setSortAsc((v) => !v);
+    } else {
+      setSortKey(key);
+      setSortAsc(key !== "amount"); // montant : décroissant par défaut
+    }
+  }
+
+  const SORTS: { key: "check_in" | "amount" | "property"; label: string }[] = [
+    { key: "check_in", label: "Arrivée" },
+    { key: "amount", label: "Montant" },
+    { key: "property", label: "Logement" },
+  ];
 
   return (
     <View style={styles.container}>
@@ -150,6 +185,24 @@ export default function CalendarScreen() {
             })}
           </ScrollView>
         </View>
+        <View style={styles.sortRow}>
+          <Text style={styles.sortLabel}>Trier :</Text>
+          {SORTS.filter((s) => s.key !== "amount" || canSeePrices(user)).map((s) => {
+            const active = sortKey === s.key;
+            return (
+              <Pressable
+                key={s.key}
+                testID={`sort-chip-${s.key}`}
+                onPress={() => onSort(s.key)}
+                style={[styles.sortChip, active && styles.sortChipActive]}
+              >
+                <Text style={[styles.sortChipText, active && styles.sortChipTextActive]}>
+                  {s.label}{active ? (sortAsc ? " ↑" : " ↓") : ""}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
       {loading ? (
@@ -157,7 +210,7 @@ export default function CalendarScreen() {
       ) : (
         <FlatList
           testID="reservation-list"
-          data={filtered}
+          data={sorted}
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 }}
           refreshControl={
@@ -237,6 +290,15 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurface, paddingVertical: 0 },
   searchCount: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: spacing.sm },
+  sortRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm },
+  sortLabel: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceTertiary },
+  sortChip: {
+    paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  sortChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  sortChipText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  sortChipTextActive: { color: colors.onBrandPrimary },
   chipRow: { height: 56, justifyContent: "center" },
   chipContent: { gap: spacing.sm, paddingRight: spacing.lg, alignItems: "center" },
   chip: {

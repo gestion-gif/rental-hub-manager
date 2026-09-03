@@ -832,3 +832,7 @@
 - Recherche insensible aux accents/casse sur: nom voyageur, nom logement, plateforme, email/tél voyageur, dates (ISO + format "05 septembre 2026").
 - Pendant une recherche: porte sur TOUT l'historique (inclut les statuts "départ" normalement masqués) + compteur de résultats. Combinable avec les chips de statut.
 - Testé via screenshot (recherche "villa" → 3 résultats incluant départs).
+
+## Tri Réservations (2026-09 fork #4)
+- (tabs)/calendar.tsx: rangée "Trier :" avec chips Arrivée / Montant / Logement (testID sort-chip-{check_in,amount,property}). Re-tap = inverse le sens (flèche ↑/↓). Montant = décroissant par défaut; chip Montant masquée si !canSeePrices(user). Tri combiné avec recherche + filtres statut. Testé (screenshot: tri montant desc OK).
+- Télémétrie prod: crash Android CONFIRMÉ RÉSOLU (push:token-ok sans boucle, tabs:mount, aucune erreur fatale) — en attente de confirmation formelle du testeur.
