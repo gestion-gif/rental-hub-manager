@@ -125,7 +125,9 @@ export default function CleaningSchedule() {
           <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
         </Pressable>
         <Text style={styles.title}>À faire aujourd'hui</Text>
-        <View style={{ width: 34 }} />
+        <Pressable testID="cleaning-history-btn" onPress={() => router.push("/cleaning-history")} style={styles.backBtn}>
+          <Ionicons name="time-outline" size={20} color={colors.onSurface} />
+        </Pressable>
       </View>
 
       {/* Date nav */}

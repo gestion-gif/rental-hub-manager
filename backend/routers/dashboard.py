@@ -15,10 +15,11 @@ async def dashboard(user=Depends(get_current_user)):
     props = await db.properties.find({"user_id": uid, **_prop_scope(user)}, {"_id": 0}).to_list(500)
     reservations = await db.reservations.find(
         {"user_id": uid, **_prop_scope(user, "property_id")}, {"_id": 0}).to_list(2000)
-    await db.interventions.delete_many(
-        {"user_id": uid, "kind": "menage", "date": {"$lt": today_str}})
+    # Les ménages passés sont conservés (historique) mais exclus du tableau de bord
     interventions = await db.interventions.find(
-        {"user_id": uid, **_prop_scope(user, "property_id")}, {"_id": 0}).sort("date", 1).to_list(1000)
+        {"user_id": uid, **_prop_scope(user, "property_id"),
+         "$or": [{"kind": {"$ne": "menage"}}, {"date": {"$gte": today_str}}]},
+        {"_id": 0}).sort("date", 1).to_list(1000)
 
     prop_map = {p["id"]: p for p in props}
     cmap = await status_color_map(uid)

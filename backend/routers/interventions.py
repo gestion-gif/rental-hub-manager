@@ -7,12 +7,34 @@ async def list_interventions(property_id: Optional[str] = None, user=Depends(get
     query = {"user_id": user["user_id"], **_prop_scope(user, "property_id")}
     if property_id:
         query["property_id"] = property_id
-    # Purge past ménages (cleaning tasks before today) and exclude them from results
+    # Les ménages passés sont conservés (historique) mais exclus de la liste courante
     today_iso = date.today().isoformat()
-    await db.interventions.delete_many(
-        {"user_id": user["user_id"], "kind": "menage", "date": {"$lt": today_iso}})
+    query["$or"] = [{"kind": {"$ne": "menage"}}, {"date": {"$gte": today_iso}}]
     items = await db.interventions.find(query, {"_id": 0}).sort("date", 1).to_list(1000)
     return items
+
+
+@api_router.get("/cleaning-history")
+async def cleaning_history(property_id: Optional[str] = None, user=Depends(get_current_user)):
+    """Historique des ménages : passés + ceux du jour déjà faits, avec intervenant et statut."""
+    uid = user["user_id"]
+    today_iso = date.today().isoformat()
+    q = {"user_id": uid, "kind": "menage", **_prop_scope(user, "property_id"),
+         "$or": [{"date": {"$lt": today_iso}}, {"done": True}]}
+    if property_id:
+        q["property_id"] = property_id
+    items = await db.interventions.find(q, {"_id": 0}).sort("date", -1).to_list(500)
+    props = await db.properties.find(
+        {"user_id": uid, **_prop_scope(user)}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    pmap = {p["id"]: p.get("name", "Logement") for p in props}
+    out = [{
+        "id": iv["id"], "date": iv.get("date"), "property_id": iv["property_id"],
+        "property_name": pmap.get(iv["property_id"], "Logement"),
+        "intervenant": iv.get("intervenant") or "", "done": bool(iv.get("done")),
+        "not_done_reason": iv.get("not_done_reason") or "",
+        "description": iv.get("description") or "",
+    } for iv in items if iv["property_id"] in pmap]
+    return {"items": out, "total": len(out)}
 
 
 @api_router.post("/interventions")
