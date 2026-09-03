@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import Constants from "expo-constants";
 
 import { useAuth } from "@/src/context/AuthContext";
 import { PrimaryButton, Field } from "@/src/components/ui";
@@ -153,6 +154,10 @@ export default function Login() {
             Politique de confidentialité
           </Text>
         </Text>
+        <Text style={styles.versionText}>
+          Version {Constants.expoConfig?.version || "?"}
+          {Platform.OS !== "web" ? ` (build ${Constants.expoConfig?.android?.versionCode || Constants.nativeBuildVersion || "?"})` : ""}
+        </Text>
       </KeyboardAwareScrollView>
     </View>
   );
@@ -211,5 +216,12 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.9)",
     fontFamily: font.semibold,
     textDecorationLine: "underline",
+  },
+  versionText: {
+    color: "rgba(255,255,255,0.45)",
+    fontFamily: font.regular,
+    fontSize: fontSize.xs,
+    textAlign: "center",
+    marginTop: spacing.md,
   },
 });

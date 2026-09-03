@@ -816,3 +816,7 @@
 - _layout.tsx global handler: keepalive + délai 2s avant crash pour laisser partir le rapport.
 - LECTURE PROD: curl "https://rental-hub-manager.emergent.host/api/client-errors?key=casaneo-debug-2026" → le dernier jalon avant silence = étape fautive.
 - ACTIONS USER: Deploy → build → testeur reproduit → lire jalons. Toujours demander la stack Android vitals (Play Console → Qualité → Crashs et ANR).
+
+## Marqueur de version visible (2026-09 fork #4)
+- login.tsx: affiche "Version X.Y.Z (build N)" en bas de l'écran de connexion (expo-constants) pour vérifier quelle version le testeur utilise réellement.
+- Constat: 0 crash Android vitals + 0 breadcrumb reçu → quasi certain que le testeur utilise un build SANS le code diag (deploy+build pas refaits après ajout du fil d'Ariane).
