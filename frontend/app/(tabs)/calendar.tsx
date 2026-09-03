@@ -6,6 +6,7 @@ import {
   ScrollView,
   Pressable,
   FlatList,
+  TextInput,
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
@@ -38,6 +39,7 @@ export default function CalendarScreen() {
   const [items, setItems] = useState<any[]>([]);
   const [props, setProps] = useState<Record<string, any>>({});
   const [filter, setFilter] = useState("all");
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -64,11 +66,32 @@ export default function CalendarScreen() {
 
   const filtered = useMemo(
     () => {
+      const norm = (s: any) =>
+        String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const q = norm(query.trim());
       // Masquer les réservations dont le séjour est terminé (statut « Départ »)
-      const active = items.filter((i) => (i.display_status || i.status) !== "depart");
-      return filter === "all" ? active : active.filter((i) => i.status === filter);
+      // sauf pendant une recherche, qui porte sur TOUTES les réservations.
+      let base = q ? items : items.filter((i) => (i.display_status || i.status) !== "depart");
+      if (filter !== "all") base = base.filter((i) => i.status === filter);
+      if (!q) return base;
+      return base.filter((i) => {
+        const hay = norm(
+          [
+            i.guest_name,
+            props[i.property_id]?.name,
+            i.platform,
+            i.guest_email,
+            i.guest_phone,
+            i.check_in,
+            i.check_out,
+            i.check_in && dayjs(i.check_in).format("DD MMMM YYYY"),
+            i.check_out && dayjs(i.check_out).format("DD MMMM YYYY"),
+          ].filter(Boolean).join(" "),
+        );
+        return hay.includes(q);
+      });
     },
-    [items, filter],
+    [items, filter, query, props],
   );
 
   return (
@@ -81,6 +104,29 @@ export default function CalendarScreen() {
           </View>
           <HelpButton screen="calendar" />
         </View>
+        <View style={styles.searchWrap}>
+          <Ionicons name="search" size={16} color={colors.onSurfaceTertiary} />
+          <TextInput
+            testID="reservation-search"
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Rechercher (voyageur, logement, date…)"
+            placeholderTextColor={colors.onSurfaceTertiary}
+            style={styles.searchInput}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {query.length > 0 && (
+            <Pressable testID="reservation-search-clear" onPress={() => setQuery("")} hitSlop={8}>
+              <Ionicons name="close-circle" size={18} color={colors.onSurfaceTertiary} />
+            </Pressable>
+          )}
+        </View>
+        {query.trim().length > 0 && (
+          <Text style={styles.searchCount}>
+            {filtered.length} résultat{filtered.length > 1 ? "s" : ""} (recherche sur tout l'historique)
+          </Text>
+        )}
         <View style={styles.chipRow}>
           <ScrollView
             horizontal
@@ -184,6 +230,13 @@ const styles = StyleSheet.create({
   },
   title: { fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface, marginBottom: spacing.md },
   titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  searchWrap: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    backgroundColor: colors.surfaceSecondary, borderRadius: radius.md,
+    paddingHorizontal: spacing.md, marginTop: spacing.md, height: 42,
+  },
+  searchInput: { flex: 1, fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurface, paddingVertical: 0 },
+  searchCount: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: spacing.sm },
   chipRow: { height: 56, justifyContent: "center" },
   chipContent: { gap: spacing.sm, paddingRight: spacing.lg, alignItems: "center" },
   chip: {

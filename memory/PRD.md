@@ -826,3 +826,9 @@
 - Cause racine: PushRegistrar → requestPermissionsAsync() ouvre la popup → AppState passe inactive → retour "active" → le listener AppState rappelait registerForPush → nouvelle popup → boucle infinie → Android tue l'app. Le bug existait depuis l'implémentation push; déclenché quand la permission n'est pas accordée (refus). Connexion Google aggravait (retour navigateur = transition AppState).
 - Fix PushRegistrar.tsx: getPermissionsAsync d'abord (sans popup); prompt UNE seule fois par session (flag module askedThisSession) et jamais depuis le retour premier plan (allowPrompt=false); respect canAskAgain; garde anti-réentrance (registering).
 - ACTION USER: Deploy → build (≥1.1.6) → testeur reproduit. Attendu: plus de crash, y compris en refusant les notifications.
+
+## Recherche dans Réservations (2026-09 fork #4)
+- (tabs)/calendar.tsx (écran "Réservations"): barre de recherche (testID reservation-search, bouton clear) sous le titre.
+- Recherche insensible aux accents/casse sur: nom voyageur, nom logement, plateforme, email/tél voyageur, dates (ISO + format "05 septembre 2026").
+- Pendant une recherche: porte sur TOUT l'historique (inclut les statuts "départ" normalement masqués) + compteur de résultats. Combinable avec les chips de statut.
+- Testé via screenshot (recherche "villa" → 3 résultats incluant départs).
