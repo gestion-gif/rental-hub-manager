@@ -820,3 +820,9 @@
 ## Marqueur de version visible (2026-09 fork #4)
 - login.tsx: affiche "Version X.Y.Z (build N)" en bas de l'écran de connexion (expo-constants) pour vérifier quelle version le testeur utilise réellement.
 - Constat: 0 crash Android vitals + 0 breadcrumb reçu → quasi certain que le testeur utilise un build SANS le code diag (deploy+build pas refaits après ajout du fil d'Ariane).
+
+## ✅ CRASH ANDROID RÉSOLU — boucle infinie permission push (2026-09 fork #4)
+- Fil d'Ariane (build 1.1.5 testeur): des DIZAINES de push:request-perm → push:perm-denied PAR SECONDE.
+- Cause racine: PushRegistrar → requestPermissionsAsync() ouvre la popup → AppState passe inactive → retour "active" → le listener AppState rappelait registerForPush → nouvelle popup → boucle infinie → Android tue l'app. Le bug existait depuis l'implémentation push; déclenché quand la permission n'est pas accordée (refus). Connexion Google aggravait (retour navigateur = transition AppState).
+- Fix PushRegistrar.tsx: getPermissionsAsync d'abord (sans popup); prompt UNE seule fois par session (flag module askedThisSession) et jamais depuis le retour premier plan (allowPrompt=false); respect canAskAgain; garde anti-réentrance (registering).
+- ACTION USER: Deploy → build (≥1.1.6) → testeur reproduit. Attendu: plus de crash, y compris en refusant les notifications.

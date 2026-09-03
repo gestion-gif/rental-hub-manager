@@ -5,14 +5,26 @@ import * as Notifications from "expo-notifications";
 import { useAuth } from "@/src/context/AuthContext";
 import { crumb } from "@/src/utils/diag";
 
-async function registerForPush(userId: string) {
-  if (Platform.OS === "web" || !userId) return;
+let askedThisSession = false;
+let registering = false;
+
+async function registerForPush(userId: string, { allowPrompt }: { allowPrompt: boolean }) {
+  if (Platform.OS === "web" || !userId || registering) return;
+  registering = true;
   try {
-    crumb("push:request-perm");
-    const { status } = await Notifications.requestPermissionsAsync();
-    if (status !== "granted") {
-      crumb("push:perm-denied");
-      return;
+    // 1. Vérifie l'état actuel SANS déclencher de popup
+    let perm = await Notifications.getPermissionsAsync();
+    if (!perm.granted) {
+      // 2. Ne demande qu'UNE SEULE fois par session, et jamais depuis un retour au premier plan
+      //    (la popup elle-même fait passer l'app en arrière-plan → sinon boucle infinie)
+      if (!allowPrompt || askedThisSession || !perm.canAskAgain) return;
+      askedThisSession = true;
+      crumb("push:request-perm");
+      perm = await Notifications.requestPermissionsAsync();
+      if (!perm.granted) {
+        crumb("push:perm-denied");
+        return;
+      }
     }
     const tok = await Notifications.getDevicePushTokenAsync();
     crumb("push:token-ok");
@@ -24,6 +36,8 @@ async function registerForPush(userId: string) {
   } catch {
     crumb("push:error");
     // Non-blocking: push registration must never break the app.
+  } finally {
+    registering = false;
   }
 }
 
@@ -35,10 +49,11 @@ export default function PushRegistrar() {
 
   useEffect(() => {
     if (Platform.OS === "web" || !uid) return;
-    registerForPush(uid);
+    registerForPush(uid, { allowPrompt: true });
     const sub = AppState.addEventListener("change", (next: AppStateStatus) => {
       if (appState.current.match(/inactive|background/) && next === "active") {
-        registerForPush(uid);
+        // Au retour au premier plan : rafraîchit le token UNIQUEMENT si déjà autorisé (pas de popup)
+        registerForPush(uid, { allowPrompt: false });
       }
       appState.current = next;
     });
