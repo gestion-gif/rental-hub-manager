@@ -836,3 +836,6 @@
 ## Tri Réservations (2026-09 fork #4)
 - (tabs)/calendar.tsx: rangée "Trier :" avec chips Arrivée / Montant / Logement (testID sort-chip-{check_in,amount,property}). Re-tap = inverse le sens (flèche ↑/↓). Montant = décroissant par défaut; chip Montant masquée si !canSeePrices(user). Tri combiné avec recherche + filtres statut. Testé (screenshot: tri montant desc OK).
 - Télémétrie prod: crash Android CONFIRMÉ RÉSOLU (push:token-ok sans boucle, tabs:mount, aucune erreur fatale) — en attente de confirmation formelle du testeur.
+
+## Filtre par logement — Réservations (2026-09 fork #4)
+- (tabs)/calendar.tsx: rangée de chips logements scrollable (testID prop-chip-all / prop-chip-{id}), visible seulement si ≥2 logements. Re-tap sur le chip actif = retour à "Tous". Combiné avec recherche + statut + tri. Testé (screenshot: filtre "Mas des Oliviers" → 2 résas).

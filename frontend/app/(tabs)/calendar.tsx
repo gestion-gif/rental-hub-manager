@@ -42,6 +42,15 @@ export default function CalendarScreen() {
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<"check_in" | "amount" | "property">("check_in");
   const [sortAsc, setSortAsc] = useState(true);
+  const [propFilter, setPropFilter] = useState<string>("all");
+
+  const propertyList = useMemo(
+    () =>
+      Object.values(props as Record<string, any>)
+        .filter((p: any) => p && p.id && p.name)
+        .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name), "fr")),
+    [props],
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -74,6 +83,7 @@ export default function CalendarScreen() {
       // Masquer les réservations dont le séjour est terminé (statut « Départ »)
       // sauf pendant une recherche, qui porte sur TOUTES les réservations.
       let base = q ? items : items.filter((i) => (i.display_status || i.status) !== "depart");
+      if (propFilter !== "all") base = base.filter((i) => i.property_id === propFilter);
       if (filter !== "all") base = base.filter((i) => i.status === filter);
       if (!q) return base;
       return base.filter((i) => {
@@ -93,7 +103,7 @@ export default function CalendarScreen() {
         return hay.includes(q);
       });
     },
-    [items, filter, query, props],
+    [items, filter, query, props, propFilter],
   );
 
   const sorted = useMemo(() => {
@@ -185,6 +195,36 @@ export default function CalendarScreen() {
             })}
           </ScrollView>
         </View>
+        {propertyList.length > 1 && (
+          <View style={styles.propRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipContent}>
+              <Pressable
+                testID="prop-chip-all"
+                onPress={() => setPropFilter("all")}
+                style={[styles.propChip, propFilter === "all" && styles.propChipActive]}
+              >
+                <Text style={[styles.propChipText, propFilter === "all" && styles.propChipTextActive]}>
+                  🏠 Tous les logements
+                </Text>
+              </Pressable>
+              {propertyList.map((p: any) => {
+                const active = propFilter === p.id;
+                return (
+                  <Pressable
+                    key={p.id}
+                    testID={`prop-chip-${p.id}`}
+                    onPress={() => setPropFilter(active ? "all" : p.id)}
+                    style={[styles.propChip, active && styles.propChipActive]}
+                  >
+                    <Text style={[styles.propChipText, active && styles.propChipTextActive]} numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
         <View style={styles.sortRow}>
           <Text style={styles.sortLabel}>Trier :</Text>
           {SORTS.filter((s) => s.key !== "amount" || canSeePrices(user)).map((s) => {
@@ -299,6 +339,14 @@ const styles = StyleSheet.create({
   sortChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   sortChipText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
   sortChipTextActive: { color: colors.onBrandPrimary },
+  propRow: { marginTop: spacing.sm },
+  propChip: {
+    paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radius.pill,
+    borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, maxWidth: 220,
+  },
+  propChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  propChipText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  propChipTextActive: { color: colors.onBrandPrimary },
   chipRow: { height: 56, justifyContent: "center" },
   chipContent: { gap: spacing.sm, paddingRight: spacing.lg, alignItems: "center" },
   chip: {
