@@ -968,6 +968,21 @@ def _rev_guests(a: dict) -> int:
     return max(1, tot)
 
 
+_FR_COUNTRIES = {"fr", "mc", "re", "gp", "mq", "gf", "yt", "nc", "pf", "bl", "mf", "pm", "wf"}
+
+
+def _detect_guest_lang(cust: dict, a: dict) -> str:
+    """Détecte la langue du voyageur depuis la réservation OTA (Airbnb/Booking via Channex).
+    Priorité au champ language du client, sinon pays (France/DOM-TOM → fr). Retour '' si inconnu."""
+    lang = str((cust or {}).get("language") or (a or {}).get("language") or "").strip().lower()
+    if lang:
+        return "fr" if lang.startswith("fr") else "en"
+    country = str((cust or {}).get("country") or "").strip().lower()
+    if country:
+        return "fr" if country in _FR_COUNTRIES else "en"
+    return ""
+
+
 async def process_channex_bookings(uid: str) -> dict:
     """Récupère le feed des réservations Channex, crée/màj/annule dans Casanéo, puis acquitte.
     Source primaire (feed) + point d'entrée du webhook. N'entraîne PAS de re-push ARI (pas de boucle)."""
@@ -1018,11 +1033,18 @@ async def process_channex_bookings(uid: str) -> dict:
                             "stay": amount, "fees": 0.0, "taxes": 0.0},
             }
             if existing:
+                # Langue détectée : ne jamais écraser un choix déjà présent (manuel ou détecté)
+                detected = _detect_guest_lang(cust, a)
+                if detected and not (existing.get("guest_lang") or ""):
+                    base_doc["guest_lang"] = detected
                 await db.reservations.update_one(q, {"$set": base_doc})
             else:
                 base_doc["id"] = str(uuid.uuid4())
                 base_doc["created_at"] = now_utc().isoformat()
                 base_doc["payments"] = []
+                detected = _detect_guest_lang(cust, a)
+                if detected:
+                    base_doc["guest_lang"] = detected
                 await db.reservations.insert_one(base_doc)
             await _set_property_rooms_availability(uid, prop["id"], ci, co, status != "annulee")
             await ensure_cleaning(uid, prop["id"], co, status)
@@ -1304,6 +1326,10 @@ async def run_channel_sync(uid: str):
         }
         q = {"user_id": uid, "lodgify_id": lodgify_key}
         existing = await db.reservations.find_one(q)
+        # Langue du voyageur détectée (Airbnb/Booking via Lodgify) — sans écraser un choix existant
+        detected = _detect_guest_lang({"language": b.get("language")}, {})
+        if detected and not ((existing or {}).get("guest_lang") or ""):
+            payload["guest_lang"] = detected
         # Préserver une commission saisie manuellement d'une synchro à l'autre
         prev_fin = (existing or {}).get("finance") or {}
         if not finance.get("commission") and prev_fin.get("commission"):
