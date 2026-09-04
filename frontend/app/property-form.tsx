@@ -54,6 +54,7 @@ export default function PropertyForm() {
   const [owners, setOwners] = useState<any[]>([]);
   const [ownerId, setOwnerId] = useState("");
   const [keyInstructions, setKeyInstructions] = useState("");
+  const [arrivalMsg, setArrivalMsg] = useState("");
   const [keyPhotos, setKeyPhotos] = useState<string[]>([]);
   const [photos, setPhotos] = useState<string[]>([]);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
@@ -97,6 +98,7 @@ export default function PropertyForm() {
         setAmenities(p.amenities || []);
         setOwnerId(p.owner_id || "");
         setKeyInstructions(p.key_instructions || "");
+        setArrivalMsg(p.arrival_email_message || "");
         setKeyPhotos(p.key_photos || []);
         setPhotos(p.photos || []);
         setPublished(p.published !== false);
@@ -179,6 +181,7 @@ export default function PropertyForm() {
       tourist_tax_pct: parseFloat(form.tourist_tax_pct) || 0,
       regional_tax_pct: parseFloat(form.regional_tax_pct) || 0,
       key_instructions: keyInstructions.trim(),
+      arrival_email_message: arrivalMsg.trim(),
       key_photos: keyPhotos,
       photos,
       published,
@@ -408,6 +411,21 @@ export default function PropertyForm() {
             {uploadingKeys ? <ActivityIndicator color={colors.brandPrimary} /> : <Ionicons name="camera-outline" size={26} color={colors.onSurfaceSecondary} />}
           </Pressable>
         </View>
+
+        <SectionLabel text="Email avant l'arrivée" />
+        <Field
+          label="Message personnalisé pour ce logement (optionnel)"
+          testID="prop-arrival-message"
+          value={arrivalMsg}
+          onChangeText={setArrivalMsg}
+          placeholder="Ex : Le parking se trouve derrière la résidence, place n°12."
+          multiline
+          style={styles.textarea}
+        />
+        <Text style={styles.helper}>
+          Ajouté à l'email automatique envoyé avant l'arrivée (Réglages → Email avant l'arrivée).
+          S'il est renseigné, il remplace le message global pour ce logement.
+        </Text>
 
         <SectionLabel text="Pièces de l'hébergement" />
         <ChipSelect options={ROOM_OPTIONS} selected={rooms} onToggle={(v: string) => toggle(rooms, setRooms, v)} prefix="room" />

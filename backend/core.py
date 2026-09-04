@@ -96,6 +96,7 @@ class PropertyIn(BaseModel):
     tax_dept_pct: float = 0            # taxe additionnelle départementale (% de la taxe) — mode réel
     key_instructions: str = ""         # code boîte à clés / instructions de récupération
     key_photos: List[str] = []         # chemins des photos (boîte à clés, emplacement)
+    arrival_email_message: str = ""    # message personnalisé de l'email d'arrivée (remplace le texte global)
     photos: List[str] = []             # galerie photos du logement (jusqu'à 30)
     lodgify_id: Optional[str] = None
     owner_id: Optional[str] = None
@@ -2165,7 +2166,8 @@ async def run_arrival_emails_for_user(uid: str) -> int:
             continue
         prop = pmap.get(r.get("property_id")) or {}
         instr = (prop.get("key_instructions") or "").strip()
-        if not instr and not extra:
+        msg = (prop.get("arrival_email_message") or "").strip() or extra  # message du logement, sinon global
+        if not instr and not msg:
             continue  # rien d'utile à transmettre pour ce logement
         pname = r.get("property_name") or prop.get("name") or "votre logement"
         ci, co = r.get("check_in", ""), r.get("check_out", "")
@@ -2185,8 +2187,8 @@ async def run_arrival_emails_for_user(uid: str) -> int:
                            '<p style="font-size:13px;font-weight:bold;color:#1c1c1e;margin:0 0 6px">Instructions d\'accès &amp; codes</p>'
                            f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0;white-space:pre-line">{escape(instr)}</p></div>')
         extra_block = ""
-        if extra:
-            extra_block = f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px;white-space:pre-line">{escape(extra)}</p>'
+        if msg:
+            extra_block = f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px;white-space:pre-line">{escape(msg)}</p>'
         addr_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>Adresse :</strong> {escape(addr)}</p>' if addr else ""
         ci_time = (r.get("checkin_time") or "").strip()
         time_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>Arrivée à partir de :</strong> {escape(ci_time)}</p>' if ci_time else ""

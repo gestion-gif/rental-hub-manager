@@ -118,7 +118,7 @@ export default function ArrivalEmailSettings() {
             </View>
           </View>
 
-          <Text style={styles.group}>Message personnalisé (optionnel)</Text>
+          <Text style={styles.group}>Message global (optionnel)</Text>
           <View style={styles.card}>
             <TextInput
               testID="arrival-email-extra"
@@ -143,8 +143,10 @@ export default function ArrivalEmailSettings() {
             <Ionicons name="information-circle-outline" size={18} color={colors.brandPrimary} />
             <Text style={styles.infoText}>
               Les instructions d'accès et codes proviennent de la fiche de chaque logement
-              (champ « Instructions clés »). Si un logement n'a pas d'instructions et qu'aucun
-              message personnalisé n'est défini, aucun email n'est envoyé pour ce logement.
+              (champ « Instructions clés »). Chaque logement peut aussi définir son propre
+              message dans sa fiche (section « Email avant l'arrivée ») — il remplace alors
+              le message global ci-dessus. Si un logement n'a ni instructions ni message,
+              aucun email n'est envoyé pour ce logement.
             </Text>
           </View>
         </ScrollView>
