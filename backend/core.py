@@ -2135,6 +2135,62 @@ async def run_payment_reminders_for_user(uid: str) -> int:
     return sent
 
 
+def _compose_arrival_email(brand: str, r: dict, prop: dict, base: str, global_extra: str) -> Optional[dict]:
+    """Compose l'email d'arrivée (sujet, HTML et parties structurées pour l'aperçu).
+    Retourne None si rien d'utile à transmettre (ni instructions clés, ni message)."""
+    instr = (prop.get("key_instructions") or "").strip()
+    msg = (prop.get("arrival_email_message") or "").strip() or (global_extra or "").strip()
+    if not instr and not msg:
+        return None
+    pname = r.get("property_name") or prop.get("name") or "votre logement"
+    ci, co = r.get("check_in", ""), r.get("check_out", "")
+    addr = " ".join(x for x in [prop.get("address"), prop.get("address_complement")] if x).strip()
+    origin = (r.get("public_origin") or "").rstrip("/") or base
+    photos = prop.get("key_photos") or []
+    photo_urls = [f"{origin}/api/kp/{p}" for p in photos] if origin else []
+    photo_links = ""
+    if photo_urls:
+        links = "".join(
+            f'<li><a href="{u}" style="color:#2A6F9E">Photo accès {i + 1}</a></li>'
+            for i, u in enumerate(photo_urls))
+        photo_links = ('<p style="font-size:14px;color:#3a3a3c;margin:12px 0 4px"><strong>Photos (accès aux clés)</strong></p>'
+                       f'<ul style="font-size:14px;color:#3a3a3c;margin:0 0 12px">{links}</ul>')
+    instr_block = ""
+    if instr:
+        instr_block = ('<div style="background:#f5f5f7;border-radius:10px;padding:14px 16px;margin:12px 0">'
+                       '<p style="font-size:13px;font-weight:bold;color:#1c1c1e;margin:0 0 6px">Instructions d\'accès &amp; codes</p>'
+                       f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0;white-space:pre-line">{escape(instr)}</p></div>')
+    extra_block = ""
+    if msg:
+        extra_block = f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px;white-space:pre-line">{escape(msg)}</p>'
+    addr_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>Adresse :</strong> {escape(addr)}</p>' if addr else ""
+    ci_time = (r.get("checkin_time") or "").strip()
+    time_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>Arrivée à partir de :</strong> {escape(ci_time)}</p>' if ci_time else ""
+    subject = f"{brand} — Votre arrivée à {pname} : informations d'accès"
+    html = (
+        '<table role="presentation" width="100%" style="background:#f5f5f7;padding:24px 0"><tr><td align="center">'
+        '<table role="presentation" width="480" style="background:#ffffff;border-radius:16px;'
+        'font-family:Arial,Helvetica,sans-serif;overflow:hidden">'
+        '<tr><td style="padding:28px 32px 8px">'
+        f'<p style="font-size:18px;font-weight:bold;color:#1c1c1e;margin:0">{escape(brand)}</p></td></tr>'
+        '<tr><td style="padding:8px 32px 26px">'
+        f'<p style="font-size:15px;color:#1c1c1e;margin:0 0 12px">Bonjour {escape(r.get("guest_name") or "")},</p>'
+        '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">'
+        f'Votre séjour à <strong>{escape(pname)}</strong> approche ({ci} → {co}). '
+        'Voici les informations pour votre arrivée :</p>'
+        f'{addr_line}{time_line}{instr_block}{photo_links}{extra_block}'
+        '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">Excellent séjour !</p>'
+        f'<p style="font-size:12px;color:#8e8e93;margin:0">Envoyé par {escape(brand)}.</p></td></tr>'
+        '</table></td></tr></table>'
+    )
+    return {"subject": subject, "html": html, "parts": {
+        "brand": brand, "guest_name": r.get("guest_name") or "",
+        "property_name": pname, "check_in": ci, "check_out": co,
+        "address": addr, "checkin_time": ci_time,
+        "instructions": instr, "photos": photo_urls, "message": msg,
+    }}
+
+
 async def run_arrival_emails_for_user(uid: str) -> int:
     """Email automatique avant l'arrivée : instructions d'accès & codes du logement
     (fiche logement → Instructions clés) + message personnalisé. Envoi unique par réservation."""
@@ -2165,50 +2221,11 @@ async def run_arrival_emails_for_user(uid: str) -> int:
         if not email:
             continue
         prop = pmap.get(r.get("property_id")) or {}
-        instr = (prop.get("key_instructions") or "").strip()
-        msg = (prop.get("arrival_email_message") or "").strip() or extra  # message du logement, sinon global
-        if not instr and not msg:
+        content = _compose_arrival_email(brand, r, prop, base, extra)
+        if not content:
             continue  # rien d'utile à transmettre pour ce logement
-        pname = r.get("property_name") or prop.get("name") or "votre logement"
-        ci, co = r.get("check_in", ""), r.get("check_out", "")
-        addr = " ".join(x for x in [prop.get("address"), prop.get("address_complement")] if x).strip()
-        origin = (r.get("public_origin") or "").rstrip("/") or base
-        photos = prop.get("key_photos") or []
-        photo_links = ""
-        if photos and origin:
-            links = "".join(
-                f'<li><a href="{origin}/api/kp/{p}" style="color:#2A6F9E">Photo accès {i + 1}</a></li>'
-                for i, p in enumerate(photos))
-            photo_links = ('<p style="font-size:14px;color:#3a3a3c;margin:12px 0 4px"><strong>Photos (accès aux clés)</strong></p>'
-                           f'<ul style="font-size:14px;color:#3a3a3c;margin:0 0 12px">{links}</ul>')
-        instr_block = ""
-        if instr:
-            instr_block = ('<div style="background:#f5f5f7;border-radius:10px;padding:14px 16px;margin:12px 0">'
-                           '<p style="font-size:13px;font-weight:bold;color:#1c1c1e;margin:0 0 6px">Instructions d\'accès &amp; codes</p>'
-                           f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0;white-space:pre-line">{escape(instr)}</p></div>')
-        extra_block = ""
-        if msg:
-            extra_block = f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px;white-space:pre-line">{escape(msg)}</p>'
-        addr_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>Adresse :</strong> {escape(addr)}</p>' if addr else ""
-        ci_time = (r.get("checkin_time") or "").strip()
-        time_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>Arrivée à partir de :</strong> {escape(ci_time)}</p>' if ci_time else ""
-        subject = f"{brand} — Votre arrivée à {pname} : informations d'accès"
-        html = (
-            '<table role="presentation" width="100%" style="background:#f5f5f7;padding:24px 0"><tr><td align="center">'
-            '<table role="presentation" width="480" style="background:#ffffff;border-radius:16px;'
-            'font-family:Arial,Helvetica,sans-serif;overflow:hidden">'
-            '<tr><td style="padding:28px 32px 8px">'
-            f'<p style="font-size:18px;font-weight:bold;color:#1c1c1e;margin:0">{escape(brand)}</p></td></tr>'
-            '<tr><td style="padding:8px 32px 26px">'
-            f'<p style="font-size:15px;color:#1c1c1e;margin:0 0 12px">Bonjour {escape(r.get("guest_name") or "")},</p>'
-            '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">'
-            f'Votre séjour à <strong>{escape(pname)}</strong> approche ({ci} → {co}). '
-            'Voici les informations pour votre arrivée :</p>'
-            f'{addr_line}{time_line}{instr_block}{photo_links}{extra_block}'
-            '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">Excellent séjour !</p>'
-            f'<p style="font-size:12px;color:#8e8e93;margin:0">Envoyé par {escape(brand)}.</p></td></tr>'
-            '</table></td></tr></table>'
-        )
+        subject, html = content["subject"], content["html"]
+        pname, ci = content["parts"]["property_name"], content["parts"]["check_in"]
         try:
             await send_email(to=email, subject=subject, html=html)
         except Exception:
@@ -2606,6 +2623,7 @@ __all__ = [
     '_build_payment_reminders',
     'run_payment_reminders_for_user',
     '_build_arrival_email',
+    '_compose_arrival_email',
     'run_arrival_emails_for_user',
     '_build_auto_charge',
     'auto_charge_reservation',

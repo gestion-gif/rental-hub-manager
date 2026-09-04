@@ -21,10 +21,15 @@ export default function ArrivalEmailSettings() {
   const [days, setDays] = useState(2);
   const [extra, setExtra] = useState("");
   const [savedExtra, setSavedExtra] = useState("");
+  const [props, setProps] = useState<any[]>([]);
+  const [previewPid, setPreviewPid] = useState<string>("");
+  const [preview, setPreview] = useState<any>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const p = await api.get("/preferences");
+      const [p, pr] = await Promise.all([api.get("/preferences"), api.get("/properties")]);
+      setProps(pr || []);
       const c = p.arrival_email || {};
       setEnabled(!!c.enabled);
       setDays(c.days_before ?? 2);
@@ -55,6 +60,18 @@ export default function ArrivalEmailSettings() {
 
   const dayLabel = (d: number) => (d === 0 ? "Le jour même" : `J-${d}`);
   const extraDirty = extra !== savedExtra;
+
+  async function showPreview(pid: string) {
+    setPreviewPid(pid);
+    setLoadingPreview(true);
+    try {
+      const pv = await api.get(`/preferences/arrival-email-preview?property_id=${pid}`);
+      setPreview(pv);
+    } catch {
+      setPreview(null);
+    }
+    setLoadingPreview(false);
+  }
 
   if (loading) {
     return (
@@ -139,6 +156,68 @@ export default function ArrivalEmailSettings() {
             )}
           </View>
 
+          <Text style={styles.group}>Aperçu de l'email</Text>
+          <View style={styles.card}>
+            <Text style={styles.switchSub}>
+              Choisissez un logement pour voir l'email tel que le voyageur le recevra
+              (exemple avec « Jean Dupont »).
+            </Text>
+            <View style={[styles.chips, { marginTop: spacing.md }]}>
+              {props.map((p) => (
+                <Pressable key={p.id} testID={`preview-prop-${p.id}`} onPress={() => showPreview(p.id)}
+                  style={[styles.chip, previewPid === p.id && styles.chipOn]}>
+                  <Text style={[styles.chipText, previewPid === p.id && styles.chipTextOn]} numberOfLines={1}>{p.name}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {loadingPreview && <ActivityIndicator style={{ marginTop: spacing.md }} color={colors.brandPrimary} />}
+            {!loadingPreview && preview?.empty && (
+              <View style={styles.previewEmpty}>
+                <Ionicons name="alert-circle-outline" size={16} color="#FF9500" />
+                <Text style={styles.previewEmptyText}>
+                  Aucun email ne serait envoyé pour « {preview.property_name} » : ce logement n'a ni
+                  instructions clés ni message personnalisé, et aucun message global n'est défini.
+                </Text>
+              </View>
+            )}
+            {!loadingPreview && preview && !preview.empty && (
+              <View style={styles.mail} testID="email-preview">
+                <View style={styles.mailSubjectRow}>
+                  <Text style={styles.mailSubjectLabel}>Objet</Text>
+                  <Text style={styles.mailSubject} numberOfLines={2}>{preview.subject}</Text>
+                </View>
+                <View style={styles.mailBody}>
+                  <Text style={styles.mailBrand}>{preview.parts.brand}</Text>
+                  <Text style={styles.mailText}>Bonjour {preview.parts.guest_name},</Text>
+                  <Text style={styles.mailText}>
+                    Votre séjour à <Text style={styles.mailBold}>{preview.parts.property_name}</Text> approche
+                    {" "}({preview.parts.check_in} → {preview.parts.check_out}). Voici les informations pour votre arrivée :
+                  </Text>
+                  {!!preview.parts.address && (
+                    <Text style={styles.mailText}><Text style={styles.mailBold}>Adresse :</Text> {preview.parts.address}</Text>
+                  )}
+                  {!!preview.parts.checkin_time && (
+                    <Text style={styles.mailText}><Text style={styles.mailBold}>Arrivée à partir de :</Text> {preview.parts.checkin_time}</Text>
+                  )}
+                  {!!preview.parts.instructions && (
+                    <View style={styles.mailInstr}>
+                      <Text style={styles.mailInstrTitle}>Instructions d'accès & codes</Text>
+                      <Text style={styles.mailInstrText}>{preview.parts.instructions}</Text>
+                    </View>
+                  )}
+                  {preview.parts.photos?.length > 0 && (
+                    <Text style={styles.mailLink}>
+                      📎 {preview.parts.photos.length} photo{preview.parts.photos.length > 1 ? "s" : ""} (accès aux clés) en lien dans l'email
+                    </Text>
+                  )}
+                  {!!preview.parts.message && <Text style={styles.mailText}>{preview.parts.message}</Text>}
+                  <Text style={styles.mailText}>Excellent séjour !</Text>
+                  <Text style={styles.mailFooter}>Envoyé par {preview.parts.brand}.</Text>
+                </View>
+              </View>
+            )}
+          </View>
+
           <View style={styles.infoBox}>
             <Ionicons name="information-circle-outline" size={18} color={colors.brandPrimary} />
             <Text style={styles.infoText}>
@@ -193,4 +272,20 @@ const styles = StyleSheet.create({
   saveBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onBrandPrimary },
   infoBox: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg, backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, padding: spacing.lg, alignItems: "flex-start" },
   infoText: { flex: 1, fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceSecondary, lineHeight: 19 },
+  // Aperçu email : couleurs fixes (l'email est identique en thème clair et sombre)
+  previewEmpty: { flexDirection: "row", gap: 6, marginTop: spacing.md, alignItems: "flex-start" },
+  previewEmptyText: { flex: 1, fontFamily: font.regular, fontSize: fontSize.sm, color: "#FF9500", lineHeight: 18 },
+  mail: { marginTop: spacing.md, borderRadius: radius.lg, overflow: "hidden", borderWidth: 1, borderColor: "#E5E5EA", backgroundColor: "#FFFFFF" },
+  mailSubjectRow: { flexDirection: "row", gap: 8, padding: spacing.md, backgroundColor: "#F5F5F7", borderBottomWidth: 1, borderBottomColor: "#E5E5EA", alignItems: "center" },
+  mailSubjectLabel: { fontFamily: font.bold, fontSize: fontSize.xs, color: "#8E8E93", textTransform: "uppercase" },
+  mailSubject: { flex: 1, fontFamily: font.semibold, fontSize: fontSize.sm, color: "#1C1C1E" },
+  mailBody: { padding: spacing.lg, gap: spacing.sm },
+  mailBrand: { fontFamily: font.bold, fontSize: fontSize.lg, color: "#1C1C1E", marginBottom: 2 },
+  mailText: { fontFamily: font.regular, fontSize: fontSize.sm, color: "#3A3A3C", lineHeight: 20 },
+  mailBold: { fontFamily: font.bold, color: "#1C1C1E" },
+  mailInstr: { backgroundColor: "#F5F5F7", borderRadius: radius.md, padding: spacing.md },
+  mailInstrTitle: { fontFamily: font.bold, fontSize: fontSize.sm, color: "#1C1C1E", marginBottom: 4 },
+  mailInstrText: { fontFamily: font.regular, fontSize: fontSize.sm, color: "#3A3A3C", lineHeight: 20 },
+  mailLink: { fontFamily: font.medium, fontSize: fontSize.sm, color: "#2A6F9E" },
+  mailFooter: { fontFamily: font.regular, fontSize: fontSize.xs, color: "#8E8E93", marginTop: 4 },
 });

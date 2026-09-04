@@ -27,6 +27,32 @@ async def get_preferences(user=Depends(get_current_user)):
     }
 
 
+@api_router.get("/preferences/arrival-email-preview")
+async def arrival_email_preview(property_id: Optional[str] = None, user=Depends(get_current_user)):
+    """Aperçu de l'email d'arrivée tel que le voyageur le recevra, pour un logement donné."""
+    uid = user["user_id"]
+    doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0}) or {}
+    cfg = _build_arrival_email(doc)
+    q = {"user_id": uid}
+    if property_id:
+        q["id"] = property_id
+    prop = await db.properties.find_one(q, {"_id": 0})
+    if not prop:
+        raise HTTPException(status_code=404, detail="Logement introuvable")
+    brand = _build_company(doc).get("name") or "Casanéo"
+    ch = await db.channel_settings.find_one({"user_id": uid}, {"_id": 0}) or {}
+    base = (ch.get("public_base_url") or "").rstrip("/")
+    ci = date.today() + timedelta(days=max(cfg["days_before"], 1))
+    sample = {"guest_name": "Jean Dupont", "property_name": prop.get("name"),
+              "check_in": ci.isoformat(), "check_out": (ci + timedelta(days=3)).isoformat(),
+              "checkin_time": "16:00"}
+    content = _compose_arrival_email(brand, sample, prop, base, (cfg.get("extra_message") or "").strip())
+    if not content:
+        return {"empty": True, "property_name": prop.get("name")}
+    return {"empty": False, "subject": content["subject"], "parts": content["parts"],
+            "days_before": cfg["days_before"], "property_name": prop.get("name")}
+
+
 @api_router.put("/preferences")
 async def update_preferences(payload: PreferencesIn, user=Depends(get_current_user)):
     uid = user["user_id"]
