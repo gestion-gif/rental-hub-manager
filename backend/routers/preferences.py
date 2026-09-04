@@ -27,10 +27,8 @@ async def get_preferences(user=Depends(get_current_user)):
     }
 
 
-@api_router.get("/preferences/arrival-email-preview")
-async def arrival_email_preview(property_id: Optional[str] = None, user=Depends(get_current_user)):
-    """Aperçu de l'email d'arrivée tel que le voyageur le recevra, pour un logement donné."""
-    uid = user["user_id"]
+async def _arrival_preview_content(uid: str, property_id: Optional[str]):
+    """Contenu de l'email d'arrivée pour un logement donné, avec une réservation fictive."""
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0}) or {}
     cfg = _build_arrival_email(doc)
     q = {"user_id": uid}
@@ -47,10 +45,44 @@ async def arrival_email_preview(property_id: Optional[str] = None, user=Depends(
               "check_in": ci.isoformat(), "check_out": (ci + timedelta(days=3)).isoformat(),
               "checkin_time": "16:00"}
     content = _compose_arrival_email(brand, sample, prop, base, (cfg.get("extra_message") or "").strip())
+    return prop, content, cfg
+
+
+@api_router.get("/preferences/arrival-email-preview")
+async def arrival_email_preview(property_id: Optional[str] = None, user=Depends(get_current_user)):
+    """Aperçu de l'email d'arrivée tel que le voyageur le recevra, pour un logement donné."""
+    prop, content, cfg = await _arrival_preview_content(user["user_id"], property_id)
     if not content:
         return {"empty": True, "property_name": prop.get("name")}
     return {"empty": False, "subject": content["subject"], "parts": content["parts"],
             "days_before": cfg["days_before"], "property_name": prop.get("name")}
+
+
+class ArrivalEmailTestIn(BaseModel):
+    property_id: str
+    email: str = ""
+
+
+@api_router.post("/preferences/arrival-email-test")
+async def arrival_email_test(payload: ArrivalEmailTestIn, user=Depends(get_current_user)):
+    """Envoie l'email d'arrivée (exemple) sur l'adresse du gestionnaire pour vérification réelle."""
+    to = (payload.email or "").strip() or (user.get("email") or "")
+    if not to or "@" not in to or "." not in to.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Adresse email invalide")
+    _prop, content, _cfg = await _arrival_preview_content(user["user_id"], payload.property_id)
+    if not content:
+        raise HTTPException(status_code=400,
+                            detail="Rien à envoyer : ce logement n'a ni instructions clés ni message.")
+    try:
+        await send_email(to=to, subject=f"[TEST] {content['subject']}", html=content["html"])
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 422:
+            raise HTTPException(status_code=400,
+                                detail=f"L'adresse {to} semble injoignable — vérifiez l'orthographe ou essayez une autre adresse.")
+        raise HTTPException(status_code=400, detail="Échec de l'envoi de l'email de test")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Échec de l'envoi de l'email de test")
+    return {"ok": True, "to": to}
 
 
 @api_router.put("/preferences")

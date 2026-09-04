@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 
 import { api } from "@/src/api";
+import { useAuth } from "@/src/context/AuthContext";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const DAYS = [0, 1, 2, 3, 5, 7];
@@ -15,6 +16,7 @@ const DAYS = [0, 1, 2, 3, 5, 7];
 export default function ArrivalEmailSettings() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -25,6 +27,9 @@ export default function ArrivalEmailSettings() {
   const [previewPid, setPreviewPid] = useState<string>("");
   const [preview, setPreview] = useState<any>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
+  const [sendingTest, setSendingTest] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -64,6 +69,8 @@ export default function ArrivalEmailSettings() {
   async function showPreview(pid: string) {
     setPreviewPid(pid);
     setLoadingPreview(true);
+    setTestResult(null);
+    if (!testEmail) setTestEmail(user?.email || "");
     try {
       const pv = await api.get(`/preferences/arrival-email-preview?property_id=${pid}`);
       setPreview(pv);
@@ -71,6 +78,19 @@ export default function ArrivalEmailSettings() {
       setPreview(null);
     }
     setLoadingPreview(false);
+  }
+
+  async function sendTest() {
+    if (!previewPid || sendingTest) return;
+    setSendingTest(true);
+    setTestResult(null);
+    try {
+      const res = await api.post("/preferences/arrival-email-test", { property_id: previewPid, email: testEmail.trim() });
+      setTestResult({ ok: true, msg: `Email de test envoyé à ${res.to}. Vérifiez votre boîte de réception.` });
+    } catch (e: any) {
+      setTestResult({ ok: false, msg: e?.message || "Échec de l'envoi de l'email de test." });
+    }
+    setSendingTest(false);
   }
 
   if (loading) {
@@ -216,6 +236,44 @@ export default function ArrivalEmailSettings() {
                 </View>
               </View>
             )}
+            {!loadingPreview && preview && !preview.empty && (
+              <View style={styles.testBox}>
+                <Text style={styles.testLabel}>Recevoir cet email en conditions réelles</Text>
+                <TextInput
+                  testID="test-email-input"
+                  style={styles.testInput}
+                  value={testEmail}
+                  onChangeText={(v) => { setTestEmail(v); setTestResult(null); }}
+                  placeholder="votre@email.com"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <Pressable
+                  testID="send-test-email"
+                  onPress={sendTest}
+                  disabled={sendingTest || !testEmail.trim()}
+                  style={[styles.testBtn, (sendingTest || !testEmail.trim()) && { opacity: 0.5 }]}
+                >
+                  {sendingTest ? <ActivityIndicator size="small" color={colors.onBrandPrimary} /> : (
+                    <>
+                      <Ionicons name="paper-plane-outline" size={15} color={colors.onBrandPrimary} />
+                      <Text style={styles.testBtnText}>M'envoyer l'email de test</Text>
+                    </>
+                  )}
+                </Pressable>
+                {testResult && (
+                  <View style={styles.testResultRow}>
+                    <Ionicons name={testResult.ok ? "checkmark-circle" : "alert-circle"} size={15}
+                      color={testResult.ok ? colors.success : "#FF3B30"} />
+                    <Text style={[styles.testResultText, { color: testResult.ok ? colors.success : "#FF3B30" }]}>
+                      {testResult.msg}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
           <View style={styles.infoBox}>
@@ -288,4 +346,11 @@ const styles = StyleSheet.create({
   mailInstrText: { fontFamily: font.regular, fontSize: fontSize.sm, color: "#3A3A3C", lineHeight: 20 },
   mailLink: { fontFamily: font.medium, fontSize: fontSize.sm, color: "#2A6F9E" },
   mailFooter: { fontFamily: font.regular, fontSize: fontSize.xs, color: "#8E8E93", marginTop: 4 },
+  testBox: { marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  testLabel: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurface, marginBottom: spacing.sm },
+  testInput: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10, fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
+  testBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: spacing.sm, backgroundColor: colors.brandPrimary, borderRadius: radius.md, paddingVertical: 12 },
+  testBtnText: { fontFamily: font.semibold, fontSize: fontSize.base, color: colors.onBrandPrimary },
+  testResultRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, marginTop: spacing.sm },
+  testResultText: { flex: 1, fontFamily: font.medium, fontSize: fontSize.sm, lineHeight: 18 },
 });
