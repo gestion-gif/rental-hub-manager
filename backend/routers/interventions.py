@@ -111,6 +111,7 @@ async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_
         "deposit_amount": (r.get("finance") or {}).get("deposit_amount") or 0,
         "damage_deposit": r.get("damage_deposit") or "",
         "internal_note": r.get("internal_note") or "",
+        "guest_lang": r.get("guest_lang") or "",
     } for r in arr if r["property_id"] in pmap]
 
     # Toutes les interventions du jour, regroupées par type

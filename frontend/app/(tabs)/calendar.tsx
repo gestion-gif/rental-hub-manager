@@ -279,6 +279,9 @@ export default function CalendarScreen() {
                 <View style={styles.guestRow}>
                   <PlatformLogo platform={item.platform} size={20} />
                   <Text style={styles.guest} numberOfLines={1}>{guestLabel(user, item.guest_name)}</Text>
+                  {!!item.guest_lang && (
+                    <Text style={styles.langFlag}>{item.guest_lang === "en" ? "🇬🇧" : "🇫🇷"}</Text>
+                  )}
                 </View>
                 <StatusBadge status={item.display_status || item.status} />
               </View>
@@ -373,6 +376,7 @@ const styles = StyleSheet.create({
   },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.sm },
   guestRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flex: 1 },
+  langFlag: { fontSize: 13 },
   guest: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onSurface, flex: 1 },
   prop: { fontFamily: font.regular, fontSize: fontSize.base, color: colors.onSurfaceTertiary, marginTop: 2 },
   dateRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: spacing.md },

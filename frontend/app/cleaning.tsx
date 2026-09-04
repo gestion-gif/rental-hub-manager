@@ -183,7 +183,7 @@ export default function CleaningSchedule() {
                 <Text style={styles.prop} numberOfLines={1}>{a.property_name}</Text>
                 {!!a.checkin_time && <View style={styles.timeTag}><Text style={styles.timeTxt}>{a.checkin_time}</Text></View>}
               </View>
-              <Text style={styles.sub}>Arrivée · {guestLabel(user, a.guest_name)}</Text>
+              <Text style={styles.sub}>Arrivée · {guestLabel(user, a.guest_name)}{a.guest_lang ? (a.guest_lang === "en" ? " 🇬🇧" : " 🇫🇷") : ""}</Text>
               <View style={[styles.depBadge, a.deposit_collected ? styles.depOk : styles.depWarn]}>
                 <Ionicons name={a.deposit_collected ? "shield-checkmark" : "shield-outline"} size={13} color={a.deposit_collected ? "#2FB350" : "#FF9500"} />
                 <Text style={[styles.depText, { color: a.deposit_collected ? "#2FB350" : "#FF9500" }]}>
