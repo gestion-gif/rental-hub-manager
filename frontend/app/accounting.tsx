@@ -18,7 +18,7 @@ import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
 import dayjs from "dayjs";
 import "dayjs/locale/fr";
-dayjs.locale("fr");
+
 
 import { api } from "@/src/api";
 import { PropertyPicker } from "@/src/components/PropertyPicker";

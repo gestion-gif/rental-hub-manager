@@ -7,7 +7,7 @@ import * as Clipboard from "expo-clipboard";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import dayjs from "dayjs";
 import "dayjs/locale/fr";
-dayjs.locale("fr");
+
 
 import { api } from "@/src/api";
 import { Picker } from "@/src/components/Picker";

@@ -1,0 +1,48 @@
+{
+  "summary": "Iteration 34 — i18n FR→EN feature fully validated. Backend 8/8 pass (pytest_iter34_i18n.xml): login demo.stores@casaneo.app OK, /api/dashboard 200, /api/cleaning-schedule 200, POST /api/reservations with guest_lang='en' persists and is returned by GET /api/reservations, POST /api/public/site/mhpimmo/request with lang='en' → reservation stored with guest_lang='en' (verified via Mongo since public site owner ≠ demo). Frontend 5/5 pass on mobile viewport 390x844: (T1) Login screen renders in EN (\"Manage your vacation rentals\", \"Bookings, calendar, seasonal rates and AI assistant\", \"Continue with Google\", \"Log in with email and password\", \"New? Create an account — free 14-day trial\") because Playwright locale=en-US triggers auto→EN. Home dashboard EN: drawer items Home/Inbox/Bookings/Calendar/Properties/Due today/Settings/Help/Log out; KPI cards Occupancy rate / Monthly revenue / Properties / Upcoming; sections Payments to track, Statements to send, Due today with Checkouts/Arrivals/Cleanings to do/Interventions/Key handovers/Security deposits. Bookings screen EN tabs All/Request/Confirmed/Check-in/Checkout/Blocked/Cancelled. Cleaning screen EN with 'Friday 4 September'. Settings screen EN with section headers COMPANY/BOOKINGS & RATES/COMMUNICATION/OPERATIONS/SYNC & WEBSITE/DISPLAY. (T2) /settings/appearance shows section 'LANGUE / LANGUAGE' with 3 chips (testIDs lang-auto/lang-fr/lang-en). Clicking lang-fr reloads and switches everything to French (Apparence/THÈME/Automatique/Clair/Sombre, Accueil/Réservations/Calendrier/Logements/À faire aujourd'hui/Paramètres/Aide/Déconnexion, Taux d'occupation/Revenus du mois/Logements/À venir, Bonjour !/Par quoi commençons-nous aujourd'hui ?, Paiements à suivre, Relevés à envoyer). Clicking lang-en again reloads back to English — no crash. (T3) /reservation-form displays 'Guest language (automatic emails)' with chips Français/English (testIDs guest-lang-fr / guest-lang-en); clicking guest-lang-en toggles the active chip. Backend persistence of guest_lang='en' via POST /api/reservations verified in backend tests. (T4) /book/mhpimmo shows lang-toggle pill top-right; initial state EN (\"Book direct, no middleman / 24 accommodations availables / from 55€ / night / 1 bd / 2 guests\"), clicking reloads and switches to FR (\"Réservez en direct, sans intermédiaire / 24 hébergements disponibles / dès 55€ / nuit / 1 ch. / 2 pers.\"). (T5+T6 backend) POST /api/public/site/{slug}/request lang='en' persists guest_lang='en' in mongo (verified). All test-created reservations were deleted. No emails were sent to non-delivered addresses. No .env or metro.config.js modified.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/book/mhpimmo (public site EN)", "issues": ["Copy typo: '24 accommodations availables' should be '24 accommodations available' (extra 's'). Reference: en.json entry for '24 hébergements disponibles'."]},
+      {"screen": "/login (EN mode)", "issues": ["Footer legal line remains in French: 'En continuant, vous acceptez nos conditions d'utilisation.' — main agent noted some dynamic strings may stay FR as fallback; still a visible mix on the very first screen."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_i18n_guest_lang.py",
+    "/app/test_reports/pytest/pytest_iter34_i18n.xml",
+    "/tmp/i18n_01_login.png (EN login)",
+    "/tmp/i18n_02_home_en.png (EN dashboard)",
+    "/tmp/i18n_03_calendar_en.png (EN bookings tabs)",
+    "/tmp/i18n_04_cleaning_en.png (EN Due today)",
+    "/tmp/i18n_05_settings_en.png (EN Settings)",
+    "/tmp/i18n_06_appearance_en.png (Appearance EN with 3 lang chips)",
+    "/tmp/i18n_07_appearance_fr.png (Appearance FR after lang-fr click)",
+    "/tmp/i18n_08_home_fr.png (Home FR)",
+    "/tmp/i18n_09_appearance_back_en.png (Appearance EN after lang-en click)",
+    "/tmp/i18n_10_res_form_en.png (reservation-form with guest-lang chips)",
+    "/tmp/i18n_11_public_en.png (public site EN with lang-toggle)",
+    "/tmp/i18n_12_public_after_toggle.png (public site FR after toggle)"
+  ],
+  "action_items": [
+    "Nice-to-have: fix 'availables' → 'available' in en.json for the public site count string.",
+    "Nice-to-have: translate the /login footer legal line 'En continuant, vous acceptez nos conditions d'utilisation.' — currently visible in French even on EN login screen."
+  ],
+  "critical_code_review_comments": [
+    "src/i18n/patch.ts monkey-patches Text.render / TextInput.render / Alert.alert globally with a __i18n idempotency flag — clean approach, no per-screen edits needed and no memory leak.",
+    "src/i18n/index.ts normalizes strings with NFC + whitespace collapse before lookup — robust for accented FR keys. Regex RULES handle common dynamic patterns (n nuits / voyageurs / jours / logements / photos / J-N).",
+    "app/settings/appearance.tsx correctly persists langPref via AsyncStorage and triggers window.location.reload() on web — no state left behind. testIDs lang-auto/lang-fr/lang-en all present.",
+    "components/LangToggle.tsx uses fixed 'rgba(0,0,0,0.55)' pill background — good contrast independent of theme; testID='lang-toggle' present; reload on web after setLangPref.",
+    "reservation-form.tsx line 300 payload includes guest_lang: form.guest_lang → confirmed persisted end-to-end via backend test.",
+    "backend/core.py _guest_lang() safely defaults to 'fr' when missing; ReservationIn.guest_lang default='fr'; _public_request maps payload.lang → guest_lang. Good defensive coding."
+  ],
+  "updated_files": ["/app/backend/tests/test_i18n_guest_lang.py (created)"],
+  "success_rate": {"backend": "100% (8/8 pytest)", "frontend": "100% (5/5 flows)"},
+  "seed_data_creation": "Two ephemeral test reservations were created (one owner-authenticated via /api/reservations, one via public site POST) and both were DELETED (owner API + direct mongo cleanup). No properties or other data touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "i18n feature is production-ready. Key testIDs: appearance screen → lang-auto/lang-fr/lang-en; reservation-form → guest-lang-fr/guest-lang-en; public site → lang-toggle. Playwright locale=en-US → app starts in EN by default (auto pref). To restart in FR programmatically, set AsyncStorage 'app_lang_pref'='fr' or click lang-fr in /settings/appearance. Backend persistence: reservations collection has guest_lang field ('fr'|'en'); default is 'fr'; public POST /api/public/site/{slug}/request uses payload.lang → guest_lang. Cleanup: test reservations were removed but if any escape use mongo db.reservations.deleteMany({guest_name: /^TEST /}). Two minor copy issues to fix (see design_issues) — non-blocking. Backend test suite: /app/backend/tests/test_i18n_guest_lang.py is reusable for regression.",
+  "rca_of_issue": "N/A — no bugs found. All 6 requested test scenarios (T1-T6) plus regression pass. Two cosmetic copy issues flagged but not blocking."
+}

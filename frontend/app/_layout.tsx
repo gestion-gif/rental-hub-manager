@@ -15,6 +15,11 @@ import { AuthProvider } from "@/src/context/AuthContext";
 import { PreferencesProvider } from "@/src/context/PreferencesContext";
 import PushRegistrar from "@/src/PushRegistrar";
 import { initTheme } from "@/src/theme";
+import { initI18n } from "@/src/i18n";
+import { installI18nPatch } from "@/src/i18n/patch";
+
+// Traduction automatique des textes (FR → EN) selon la langue choisie
+installI18nPatch();
 
 // --- Rapporteur de crash : envoie toute erreur JS fatale au backend (diagnostic production) ---
 if (Platform.OS !== "web") {
@@ -120,8 +125,10 @@ export default function RootLayout() {
 
   const [themeReady, setThemeReady] = useState(false);
   useEffect(() => { initTheme().finally(() => setThemeReady(true)); }, []);
+  const [i18nReady, setI18nReady] = useState(false);
+  useEffect(() => { initI18n().finally(() => setI18nReady(true)); }, []);
 
-  const ready = (iconsLoaded || iconError) && (fontsLoaded || fontError) && themeReady;
+  const ready = (iconsLoaded || iconError) && (fontsLoaded || fontError) && themeReady && i18nReady;
 
   useEffect(() => {
     if (ready) {

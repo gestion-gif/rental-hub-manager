@@ -433,19 +433,30 @@ async def _public_site_loop():
                         email = (r.get("guest_email") or "").strip()
                         if email and origin and slug:
                             link = f"{origin}/book/{slug}/pay/{r['id']}"
+                            en = _guest_lang(r) == "en"
+                            if en:
+                                h2 = "Pay the balance of your stay"
+                                body = (f"Hello {escape(r.get('guest_name') or '')}, "
+                                        f"your arrival at <b>{escape(r.get('property_name') or '')}</b> is coming up "
+                                        f"(on {r.get('check_in')}). <b>{_money(due)}</b> remains due.")
+                                btn, subj = "Pay balance", f"{brand} — Balance for your stay"
+                            else:
+                                h2 = "Réglez le solde de votre séjour"
+                                body = (f"Bonjour {escape(r.get('guest_name') or '')}, "
+                                        f"votre arrivée à <b>{escape(r.get('property_name') or '')}</b> approche "
+                                        f"(le {r.get('check_in')}). Il reste <b>{_money(due)}</b> à régler.")
+                                btn, subj = "Payer le solde", f"{brand} — Solde de votre séjour"
                             html = (
                                 "<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:16px'>"
                                 f"{_company_header_html(company, logo_url)}"
-                                "<h2 style='color:#111'>Réglez le solde de votre séjour</h2>"
-                                f"<p style='color:#555;line-height:22px'>Bonjour {escape(r.get('guest_name') or '')}, "
-                                f"votre arrivée à <b>{escape(r.get('property_name') or '')}</b> approche "
-                                f"(le {r.get('check_in')}). Il reste <b>{_money(due)}</b> à régler.</p>"
+                                f"<h2 style='color:#111'>{h2}</h2>"
+                                f"<p style='color:#555;line-height:22px'>{body}</p>"
                                 f"<a href='{link}' style='display:inline-block;background:#17B0A6;color:#fff;"
-                                "text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:700'>Payer le solde</a>"
+                                f"text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:700'>{btn}</a>"
                                 f"<p style='color:#aaa;font-size:12px;margin-top:24px'>{escape(brand)}</p></div>"
                             )
                             try:
-                                await send_email(to=email, subject=f"{brand} — Solde de votre séjour", html=html)
+                                await send_email(to=email, subject=subj, html=html)
                                 await db.reservations.update_one({"user_id": uid, "id": r["id"]},
                                     {"$set": {"balance_link_sent_at": now_utc().isoformat()}})
                             except Exception as e:
@@ -457,19 +468,30 @@ async def _public_site_loop():
                         email = (r.get("guest_email") or "").strip()
                         if email and origin and slug:
                             link = f"{origin}/book/{slug}/checkin/{r['id']}"
+                            en = _guest_lang(r) == "en"
+                            if en:
+                                h2 = "Complete your check-in"
+                                body = (f"Hello {escape(r.get('guest_name') or '')}, "
+                                        f"your stay at <b>{escape(r.get('property_name') or '')}</b> starts soon "
+                                        f"(on {r.get('check_in')}). Please complete your arrival form.")
+                                btn, subj = "Complete my check-in", f"{brand} — Check-in form to complete"
+                            else:
+                                h2 = "Complétez votre enregistrement"
+                                body = (f"Bonjour {escape(r.get('guest_name') or '')}, "
+                                        f"votre séjour à <b>{escape(r.get('property_name') or '')}</b> commence bientôt "
+                                        f"(le {r.get('check_in')}). Merci de compléter votre formulaire d'arrivée.")
+                                btn, subj = "Compléter mon enregistrement", f"{brand} — Enregistrement à compléter"
                             html = (
                                 "<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:16px'>"
                                 f"{_company_header_html(company, logo_url)}"
-                                "<h2 style='color:#111'>Complétez votre enregistrement</h2>"
-                                f"<p style='color:#555;line-height:22px'>Bonjour {escape(r.get('guest_name') or '')}, "
-                                f"votre séjour à <b>{escape(r.get('property_name') or '')}</b> commence bientôt "
-                                f"(le {r.get('check_in')}). Merci de compléter votre formulaire d'arrivée.</p>"
+                                f"<h2 style='color:#111'>{h2}</h2>"
+                                f"<p style='color:#555;line-height:22px'>{body}</p>"
                                 f"<a href='{link}' style='display:inline-block;background:#2A6F9E;color:#fff;"
-                                "text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:700'>Compléter mon enregistrement</a>"
+                                f"text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:700'>{btn}</a>"
                                 f"<p style='color:#aaa;font-size:12px;margin-top:24px'>{escape(brand)}</p></div>"
                             )
                             try:
-                                await send_email(to=email, subject=f"{brand} — Enregistrement à compléter", html=html)
+                                await send_email(to=email, subject=subj, html=html)
                                 await db.reservations.update_one({"user_id": uid, "id": r["id"]},
                                     {"$set": {"checkin_reminder_sent_at": now_utc().isoformat()}})
                             except Exception as e:

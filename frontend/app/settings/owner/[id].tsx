@@ -7,7 +7,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import * as DocumentPicker from "expo-document-picker";
 import dayjs from "dayjs";
 import "dayjs/locale/fr";
-dayjs.locale("fr");
+
 
 import { api, uploadFile, fileUrl } from "@/src/api";
 import { Field, PrimaryButton } from "@/src/components/ui";

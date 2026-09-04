@@ -9,7 +9,7 @@ import "dayjs/locale/fr";
 import { api } from "@/src/api";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
-dayjs.locale("fr");
+
 
 function euro(n: number) {
   return `${Math.round(n || 0).toLocaleString("fr-FR")} €`;

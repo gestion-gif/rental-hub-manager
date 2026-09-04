@@ -17,7 +17,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import * as WebBrowser from "expo-web-browser";
 import dayjs from "dayjs";
 import "dayjs/locale/fr";
-dayjs.locale("fr");
+
 
 import { api } from "@/src/api";
 import { storage } from "@/src/utils/storage";
@@ -132,6 +132,7 @@ export default function ReservationForm() {
     guest_last_name: "",
     guest_email: "",
     guest_phone: "",
+    guest_lang: "fr",
     platform: "Direct",
     check_in: "",
     check_out: "",
@@ -166,6 +167,7 @@ export default function ReservationForm() {
               guest_last_name: ln,
               guest_email: r.guest_email || "",
               guest_phone: r.guest_phone || "",
+              guest_lang: r.guest_lang || "fr",
               platform: r.platform || "Direct",
               check_in: r.check_in,
               check_out: r.check_out,
@@ -295,6 +297,7 @@ export default function ReservationForm() {
       guest_name: gname,
       guest_email: form.guest_email.trim(),
       guest_phone: form.guest_phone.trim(),
+      guest_lang: form.guest_lang,
       platform: form.platform,
       check_in: form.check_in,
       check_out: form.check_out,
@@ -759,6 +762,19 @@ export default function ReservationForm() {
           </View>
           <Field label="Téléphone" testID="guest-phone" value={form.guest_phone} onChangeText={(v) => set("guest_phone", v)} placeholder="+33 6 12 34 56 78" keyboardType="phone-pad" />
           <Field label="Email" testID="guest-email" value={form.guest_email} onChangeText={(v) => set("guest_email", v)} placeholder="jean@email.com" keyboardType="email-address" autoCapitalize="none" />
+          <Text style={styles.label}>Langue du voyageur (emails automatiques)</Text>
+          <View style={styles.langRow}>
+            {[{ k: "fr", l: "Français" }, { k: "en", l: "English" }].map((o) => (
+              <Pressable
+                key={o.k}
+                testID={`guest-lang-${o.k}`}
+                onPress={() => set("guest_lang", o.k)}
+                style={[styles.langChip, form.guest_lang === o.k && styles.langChipOn]}
+              >
+                <Text style={[styles.langChipText, form.guest_lang === o.k && styles.langChipTextOn]}>{o.l}</Text>
+              </Pressable>
+            ))}
+          </View>
 
           {editing && (
             <Pressable testID="contact-guest-btn" onPress={() => setContactOpen(true)} style={styles.contactBtn}>
@@ -1345,6 +1361,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   label: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceSecondary, marginBottom: spacing.sm },
+  langRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.lg },
+  langChip: { paddingHorizontal: spacing.lg, paddingVertical: 9, borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
+  langChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  langChipText: { fontFamily: font.semibold, fontSize: fontSize.sm, color: colors.onSurfaceSecondary },
+  langChipTextOn: { color: colors.onBrandPrimary },
   sectionTitle: { fontFamily: font.bold, fontSize: fontSize.lg, color: colors.onSurface, marginBottom: spacing.md, marginTop: spacing.sm },
   priceHint: { fontFamily: font.regular, fontSize: fontSize.sm, color: colors.onSurfaceTertiary, marginTop: -4, marginBottom: spacing.sm, lineHeight: 17 },
   totalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.surfaceSecondary, borderRadius: radius.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.lg, marginTop: spacing.xs },

@@ -57,7 +57,8 @@
           "backgroundColor": "#020830"
         }
       ],
-      "expo-build-properties"
+      "expo-build-properties",
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true

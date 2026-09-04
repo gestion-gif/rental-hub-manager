@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { api, fileUrl } from "@/src/api";
+import LangToggle from "@/src/components/LangToggle";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 export default function PublicSiteHome() {
@@ -45,6 +46,7 @@ export default function PublicSiteHome() {
         <View style={styles.showcaseHero}>
           <Image source={{ uri: fileUrl(sc.hero_photo) }} style={styles.showcaseImg} contentFit="cover" />
           <View style={styles.showcaseOverlay} />
+          <LangToggle top={insets.top + 10} />
           <View style={[styles.showcaseContent, { paddingTop: insets.top + spacing.xl }]}>
             {company.logo_path ? <Image source={{ uri: fileUrl(company.logo_path) }} style={styles.logoLight} contentFit="contain" /> : null}
             <Text style={styles.showcaseTitle}>{sc.title || company.name || "Nos hébergements"}</Text>
@@ -53,6 +55,7 @@ export default function PublicSiteHome() {
         </View>
       ) : (
         <View style={[styles.hero, { paddingTop: insets.top + spacing.xl }]}>
+          <LangToggle top={insets.top + 10} />
           {company.logo_path ? <Image source={{ uri: fileUrl(company.logo_path) }} style={styles.logo} contentFit="contain" /> : null}
           <Text style={styles.brand}>{sc.title || company.name || "Nos hébergements"}</Text>
           <Text style={styles.tagline}>{sc.intro || "Réservez en direct, sans intermédiaire"}</Text>
@@ -60,7 +63,7 @@ export default function PublicSiteHome() {
       )}
 
       <View style={[styles.wrap, { maxWidth: 1100, alignSelf: "center", width: "100%" }]}>
-        <Text style={styles.sectionTitle}>{data.count} hébergement{data.count > 1 ? "s" : ""} disponible{data.count > 1 ? "s" : ""}</Text>
+        <Text style={styles.sectionTitle}>{`${data.count} hébergement${data.count > 1 ? "s" : ""} disponible${data.count > 1 ? "s" : ""}`}</Text>
         <View style={[styles.grid, { gap }]}>
           {data.properties.map((p: any) => {
             const cover = p.photos?.[0] ? fileUrl(p.photos[0]) : (p.image_url || null);

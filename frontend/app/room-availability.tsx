@@ -11,7 +11,7 @@ import { useAuth } from "@/src/context/AuthContext";
 import { canModify } from "@/src/permissions";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
-dayjs.locale("fr");
+
 
 export default function RoomAvailability() {
   const insets = useSafeAreaInsets();

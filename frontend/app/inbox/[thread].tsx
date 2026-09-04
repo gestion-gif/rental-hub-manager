@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import dayjs from "dayjs";
 import "dayjs/locale/fr";
-dayjs.locale("fr");
+
 
 import { api, ApiError } from "@/src/api";
 import { ContactGuestModal } from "@/src/components/ContactGuestModal";

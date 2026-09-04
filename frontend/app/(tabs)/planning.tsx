@@ -32,7 +32,7 @@ import { PropertyPicker } from "@/src/components/PropertyPicker";
 import { Picker } from "@/src/components/Picker";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
-dayjs.locale("fr");
+
 
 function priceForDay(prop: any, dayStr: string): number | null {
   if (!prop) return null;

@@ -161,6 +161,7 @@ class ReservationIn(BaseModel):
     status: str = "demande"  # demande|confirmee|arrivee|depart|annulee
     notes: str = ""
     internal_note: str = ""  # note privée (équipe ménage) — jamais envoyée au voyageur
+    guest_lang: str = "fr"   # langue des emails envoyés au voyageur (fr|en)
 class InterventionIn(BaseModel):
     property_id: str
     kind: str = "menage"  # menage | intervention | remise_cles | caution
@@ -487,6 +488,7 @@ class PublicBookingIn(BaseModel):
     guest_phone: str = ""
     notes: str = ""
     origin_url: str = ""
+    lang: str = "fr"  # langue du visiteur du site (fr|en)
 async def _create_public_reservation(uid: str, q: dict, payload: PublicBookingIn, status: str, slug: str = ""):
     rid = str(uuid.uuid4())
     doc = {
@@ -500,6 +502,7 @@ async def _create_public_reservation(uid: str, q: dict, payload: PublicBookingIn
         "tourist_tax": q["tourist_tax"], "total_price": q["total"],
         "supplements": q.get("supplements") or [],
         "status": status, "notes": payload.notes.strip(),
+        "guest_lang": "en" if str(getattr(payload, "lang", "fr")).lower().startswith("en") else "fr",
         "created_at": now_utc().isoformat(),
         "finance": {"total": q["total"], "paid": 0.0, "due": q["total"], "currency": "EUR",
                     "stay": q["nights_total"], "fees": q["cleaning_fee"], "taxes": q["tourist_tax"]},
@@ -517,22 +520,32 @@ async def _send_request_ack(uid: str, r: dict, slug: str, origin: str):
         company = _build_company(prefs)
         brand = company.get("name") or "Casanéo"
         logo_url = _logo_url_from_base(origin, company)
+        en = _guest_lang(r) == "en"
+        if en:
+            h2, subj = "Request received ✅", f"{brand} — Booking request received"
+            p1 = (f"Hello {escape(r.get('guest_name') or '')}, we have received your booking request for "
+                  f"<b>{escape(r.get('property_name') or 'your accommodation')}</b> "
+                  f"from <b>{r.get('check_in')}</b> to <b>{r.get('check_out')}</b> ({r.get('guests', 1)} guest(s)).")
+            p2 = "We will get back to you very shortly to confirm availability. Thank you for your trust!"
+        else:
+            h2, subj = "Demande bien reçue ✅", f"{brand} — Demande de réservation reçue"
+            p1 = (f"Bonjour {escape(r.get('guest_name') or '')}, nous avons bien reçu votre "
+                  f"demande de réservation pour <b>{escape(r.get('property_name') or 'votre logement')}</b> "
+                  f"du <b>{r.get('check_in')}</b> au <b>{r.get('check_out')}</b> ({r.get('guests', 1)} voyageur(s)).")
+            p2 = "Nous revenons vers vous très rapidement pour confirmer la disponibilité. Merci de votre confiance !"
         html = (
             "<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:16px'>"
             f"{_company_header_html(company, logo_url)}"
-            "<h2 style='color:#111;margin:0 0 4px'>Demande bien reçue ✅</h2>"
-            f"<p style='color:#555;line-height:22px'>Bonjour {escape(r.get('guest_name') or '')}, nous avons bien reçu votre "
-            f"demande de réservation pour <b>{escape(r.get('property_name') or 'votre logement')}</b> "
-            f"du <b>{r.get('check_in')}</b> au <b>{r.get('check_out')}</b> ({r.get('guests', 1)} voyageur(s)).</p>"
-            "<p style='color:#555;line-height:22px'>Nous revenons vers vous très rapidement pour confirmer la disponibilité. "
-            "Merci de votre confiance !</p>"
+            f"<h2 style='color:#111;margin:0 0 4px'>{h2}</h2>"
+            f"<p style='color:#555;line-height:22px'>{p1}</p>"
+            f"<p style='color:#555;line-height:22px'>{p2}</p>"
             f"<p style='color:#aaa;font-size:12px;margin-top:24px'>{escape(brand)}</p></div>"
         )
-        await send_email(to=email, subject=f"{brand} — Demande de réservation reçue", html=html)
+        await send_email(to=email, subject=subj, html=html)
         await log_guest_message(uid, r.get("id") or "", "email", "confirmation",
                                 f"Accusé de réception de la demande envoyé ({r.get('property_name') or ''}, "
                                 f"{r.get('check_in')} → {r.get('check_out')}).",
-                                to=email, subject=f"{brand} — Demande de réservation reçue")
+                                to=email, subject=subj)
     except Exception as e:
         logger.warning("email accusé demande échoué: %s", e)
 CHECKIN_QUESTION_LABELS = {
@@ -2092,14 +2105,28 @@ async def run_payment_reminders_for_user(uid: str) -> int:
             continue
         pname = r.get("property_name") or "votre logement"
         ci, co = r.get("check_in", ""), r.get("check_out", "")
+        en = _guest_lang(r) == "en"
         pay_link = f"{base}/book/{slug}/pay/{r['id']}" if (base and slug and ps.get("enabled")) else ""
         pay_block = (
             '<tr><td align="center" style="padding:8px 32px 20px">'
             f'<a href="{pay_link}" style="display:inline-block;background:#1c1c1e;color:#ffffff;'
             'text-decoration:none;font-size:15px;font-weight:bold;padding:13px 26px;border-radius:10px">'
-            'Régler mon solde</a></td></tr>'
+            f'{"Pay my balance" if en else "Régler mon solde"}</a></td></tr>'
         ) if pay_link else ""
-        subject = f"Rappel — solde de {due:.2f} € à régler pour votre séjour"
+        if en:
+            subject = f"Reminder — balance of €{due:.2f} due for your stay"
+            hello = "Hello"
+            body1 = (f'Your arrival at <strong>{escape(pname)}</strong> is coming up ({ci} → {co}). '
+                     f'A balance of <strong>€{due:.2f}</strong> remains due for your stay.')
+            body2 = "Please settle it before your arrival."
+            footer = f"Sent by {escape(brand)} — we will never ask for your bank details by email."
+        else:
+            subject = f"Rappel — solde de {due:.2f} € à régler pour votre séjour"
+            hello = "Bonjour"
+            body1 = (f'Votre arrivée à <strong>{escape(pname)}</strong> approche ({ci} → {co}). '
+                     f'Il reste un solde de <strong>{due:.2f} €</strong> à régler pour votre séjour.')
+            body2 = "Merci de procéder au règlement avant votre arrivée."
+            footer = f"Envoyé par {escape(brand)} — nous ne demandons jamais vos informations bancaires par email."
         html = (
             '<table role="presentation" width="100%" style="background:#f5f5f7;padding:24px 0"><tr><td align="center">'
             '<table role="presentation" width="480" style="background:#ffffff;border-radius:16px;'
@@ -2107,16 +2134,12 @@ async def run_payment_reminders_for_user(uid: str) -> int:
             '<tr><td style="padding:28px 32px 8px">'
             f'<p style="font-size:18px;font-weight:bold;color:#1c1c1e;margin:0">{escape(brand)}</p></td></tr>'
             '<tr><td style="padding:8px 32px 16px">'
-            f'<p style="font-size:15px;color:#1c1c1e;margin:0 0 12px">Bonjour {escape(r.get("guest_name") or "")},</p>'
-            '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">'
-            f'Votre arrivée à <strong>{escape(pname)}</strong> approche ({ci} → {co}). '
-            f'Il reste un solde de <strong>{due:.2f} €</strong> à régler pour votre séjour.</p>'
-            '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0">'
-            'Merci de procéder au règlement avant votre arrivée.</p></td></tr>'
+            f'<p style="font-size:15px;color:#1c1c1e;margin:0 0 12px">{hello} {escape(r.get("guest_name") or "")},</p>'
+            f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">{body1}</p>'
+            f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0">{body2}</p></td></tr>'
             f'{pay_block}'
             '<tr><td style="padding:0 32px 26px">'
-            f'<p style="font-size:12px;color:#8e8e93;margin:0">Envoyé par {escape(brand)} — '
-            'nous ne demandons jamais vos informations bancaires par email.</p></td></tr>'
+            f'<p style="font-size:12px;color:#8e8e93;margin:0">{footer}</p></td></tr>'
             '</table></td></tr></table>'
         )
         try:
@@ -2135,6 +2158,11 @@ async def run_payment_reminders_for_user(uid: str) -> int:
     return sent
 
 
+def _guest_lang(r: dict) -> str:
+    """Langue des emails voyageur pour une réservation : 'fr' (défaut) ou 'en'."""
+    return "en" if str((r or {}).get("guest_lang") or "fr").lower().startswith("en") else "fr"
+
+
 def _compose_arrival_email(brand: str, r: dict, prop: dict, base: str, global_extra: str) -> Optional[dict]:
     """Compose l'email d'arrivée (sujet, HTML et parties structurées pour l'aperçu).
     Retourne None si rien d'utile à transmettre (ni instructions clés, ni message)."""
@@ -2142,31 +2170,49 @@ def _compose_arrival_email(brand: str, r: dict, prop: dict, base: str, global_ex
     msg = (prop.get("arrival_email_message") or "").strip() or (global_extra or "").strip()
     if not instr and not msg:
         return None
-    pname = r.get("property_name") or prop.get("name") or "votre logement"
+    pname = r.get("property_name") or prop.get("name") or ("your accommodation" if _guest_lang(r) == "en" else "votre logement")
     ci, co = r.get("check_in", ""), r.get("check_out", "")
     addr = " ".join(x for x in [prop.get("address"), prop.get("address_complement")] if x).strip()
     origin = (r.get("public_origin") or "").rstrip("/") or base
     photos = prop.get("key_photos") or []
     photo_urls = [f"{origin}/api/kp/{p}" for p in photos] if origin else []
+    en = _guest_lang(r) == "en"
+    L = {
+        "photo": "Access photo" if en else "Photo accès",
+        "photos_title": "Photos (key access)" if en else "Photos (accès aux clés)",
+        "instr": "Access instructions &amp; codes" if en else "Instructions d'accès &amp; codes",
+        "addr": "Address:" if en else "Adresse :",
+        "time": "Check-in from:" if en else "Arrivée à partir de :",
+        "hello": "Hello" if en else "Bonjour",
+        "enjoy": "Enjoy your stay!" if en else "Excellent séjour !",
+        "sent": "Sent by" if en else "Envoyé par",
+    }
     photo_links = ""
     if photo_urls:
         links = "".join(
-            f'<li><a href="{u}" style="color:#2A6F9E">Photo accès {i + 1}</a></li>'
+            f'<li><a href="{u}" style="color:#2A6F9E">{L["photo"]} {i + 1}</a></li>'
             for i, u in enumerate(photo_urls))
-        photo_links = ('<p style="font-size:14px;color:#3a3a3c;margin:12px 0 4px"><strong>Photos (accès aux clés)</strong></p>'
+        photo_links = (f'<p style="font-size:14px;color:#3a3a3c;margin:12px 0 4px"><strong>{L["photos_title"]}</strong></p>'
                        f'<ul style="font-size:14px;color:#3a3a3c;margin:0 0 12px">{links}</ul>')
     instr_block = ""
     if instr:
         instr_block = ('<div style="background:#f5f5f7;border-radius:10px;padding:14px 16px;margin:12px 0">'
-                       '<p style="font-size:13px;font-weight:bold;color:#1c1c1e;margin:0 0 6px">Instructions d\'accès &amp; codes</p>'
+                       f'<p style="font-size:13px;font-weight:bold;color:#1c1c1e;margin:0 0 6px">{L["instr"]}</p>'
                        f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0;white-space:pre-line">{escape(instr)}</p></div>')
     extra_block = ""
     if msg:
         extra_block = f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px;white-space:pre-line">{escape(msg)}</p>'
-    addr_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>Adresse :</strong> {escape(addr)}</p>' if addr else ""
+    addr_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>{L["addr"]}</strong> {escape(addr)}</p>' if addr else ""
     ci_time = (r.get("checkin_time") or "").strip()
-    time_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>Arrivée à partir de :</strong> {escape(ci_time)}</p>' if ci_time else ""
-    subject = f"{brand} — Votre arrivée à {pname} : informations d'accès"
+    time_line = f'<p style="font-size:14px;color:#3a3a3c;margin:0 0 4px"><strong>{L["time"]}</strong> {escape(ci_time)}</p>' if ci_time else ""
+    if en:
+        subject = f"{brand} — Your arrival at {pname}: access information"
+        intro = (f'Your stay at <strong>{escape(pname)}</strong> is coming up ({ci} → {co}). '
+                 'Here is the information for your arrival:')
+    else:
+        subject = f"{brand} — Votre arrivée à {pname} : informations d'accès"
+        intro = (f'Votre séjour à <strong>{escape(pname)}</strong> approche ({ci} → {co}). '
+                 'Voici les informations pour votre arrivée :')
     html = (
         '<table role="presentation" width="100%" style="background:#f5f5f7;padding:24px 0"><tr><td align="center">'
         '<table role="presentation" width="480" style="background:#ffffff;border-radius:16px;'
@@ -2174,19 +2220,17 @@ def _compose_arrival_email(brand: str, r: dict, prop: dict, base: str, global_ex
         '<tr><td style="padding:28px 32px 8px">'
         f'<p style="font-size:18px;font-weight:bold;color:#1c1c1e;margin:0">{escape(brand)}</p></td></tr>'
         '<tr><td style="padding:8px 32px 26px">'
-        f'<p style="font-size:15px;color:#1c1c1e;margin:0 0 12px">Bonjour {escape(r.get("guest_name") or "")},</p>'
-        '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">'
-        f'Votre séjour à <strong>{escape(pname)}</strong> approche ({ci} → {co}). '
-        'Voici les informations pour votre arrivée :</p>'
+        f'<p style="font-size:15px;color:#1c1c1e;margin:0 0 12px">{L["hello"]} {escape(r.get("guest_name") or "")},</p>'
+        f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">{intro}</p>'
         f'{addr_line}{time_line}{instr_block}{photo_links}{extra_block}'
-        '<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">Excellent séjour !</p>'
-        f'<p style="font-size:12px;color:#8e8e93;margin:0">Envoyé par {escape(brand)}.</p></td></tr>'
+        f'<p style="font-size:14px;color:#3a3a3c;line-height:21px;margin:0 0 12px">{L["enjoy"]}</p>'
+        f'<p style="font-size:12px;color:#8e8e93;margin:0">{L["sent"]} {escape(brand)}.</p></td></tr>'
         '</table></td></tr></table>'
     )
     return {"subject": subject, "html": html, "parts": {
         "brand": brand, "guest_name": r.get("guest_name") or "",
         "property_name": pname, "check_in": ci, "check_out": co,
-        "address": addr, "checkin_time": ci_time,
+        "address": addr, "checkin_time": ci_time, "lang": "en" if en else "fr",
         "instructions": instr, "photos": photo_urls, "message": msg,
     }}
 
@@ -2624,6 +2668,7 @@ __all__ = [
     'run_payment_reminders_for_user',
     '_build_arrival_email',
     '_compose_arrival_email',
+    '_guest_lang',
     'run_arrival_emails_for_user',
     '_build_auto_charge',
     'auto_charge_reservation',

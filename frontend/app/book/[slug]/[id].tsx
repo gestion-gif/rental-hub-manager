@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import dayjs from "dayjs";
 
 import { api, fileUrl } from "@/src/api";
+import { getLang } from "@/src/i18n";
 import { colors, font, fontSize, radius, spacing } from "@/src/theme";
 
 const API_BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
@@ -124,7 +125,7 @@ export default function PublicPropertyDetail() {
     try {
       const res = await api.post(`/public/site/${slug}/checkout`, {
         property_id: id, check_in: ci, check_out: co, guests, promo_code: promo,
-        supplements: supsPayload,
+        supplements: supsPayload, lang: getLang(),
         guest_name: gName, guest_email: gEmail, guest_phone: gPhone, origin_url: origin,
       });
       if (res.url) {
@@ -141,7 +142,7 @@ export default function PublicPropertyDetail() {
     try {
       await api.post(`/public/site/${slug}/request`, {
         property_id: id, check_in: ci, check_out: co, guests, promo_code: promo,
-        supplements: supsPayload,
+        supplements: supsPayload, lang: getLang(),
         guest_name: gName, guest_email: gEmail, guest_phone: gPhone,
       });
       Alert.alert("Demande envoyée", "Votre demande de réservation a bien été transmise. Vous serez recontacté rapidement.", [
