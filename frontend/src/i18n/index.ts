@@ -61,6 +61,7 @@ const RULES: [RegExp, string | ((...m: string[]) => string)][] = [
   [/^(\d+) photos?$/, (_a, n) => `${n} photo${Number(n) > 1 ? "s" : ""}`],
   [/^(\d+) hébergements? disponibles?$/, (_a, n) => `${n} accommodation${Number(n) > 1 ? "s" : ""} available`],
   [/^J-(\d+)$/, "D-$1"],
+  [/^Du (.+) au (.+)$/, "From $1 to $2"],
 ];
 
 function lookup(s: string): string | null {

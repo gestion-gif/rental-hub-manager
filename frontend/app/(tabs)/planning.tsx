@@ -78,6 +78,14 @@ export default function Planning() {
   const [savingSpecial, setSavingSpecial] = useState(false);
   const [blockedByProp, setBlockedByProp] = useState<Record<string, string[]>>({});
   const [blockMode, setBlockMode] = useState(false);
+  const [blockConfirm, setBlockConfirm] = useState<
+    | { kind: "create"; propId: string; ci: string; co: string }
+    | { kind: "delete"; res: any }
+    | null
+  >(null);
+  const [blockNote, setBlockNote] = useState("");
+  const [savingBlock, setSavingBlock] = useState(false);
+  const [blockError, setBlockError] = useState("");
   const [dynOn, setDynOn] = useState(false);
   const [dynMap, setDynMap] = useState<Record<string, { suggested: number; delta: number }>>({});
   const [dynInfo, setDynInfo] = useState<{ occupancy_rate: number; comps_count: number } | null>(null);
@@ -107,13 +115,62 @@ export default function Planning() {
     }, [load]),
   );
 
-  useEffect(() => {
+  const loadBlocked = useCallback(() => {
     const s = anchor.startOf("month").format("YYYY-MM-DD");
     const e = anchor.endOf("month").format("YYYY-MM-DD");
     api.get(`/availability/blocked?start=${s}&end=${e}`)
       .then((r) => setBlockedByProp(r.blocks || {}))
       .catch(() => setBlockedByProp({}));
   }, [anchor]);
+
+  useEffect(() => { loadBlocked(); }, [loadBlocked]);
+
+  const openQuickBlock = (pid: string, ci: string, co: string) => {
+    setBlockNote("");
+    setBlockError("");
+    setBlockConfirm({ kind: "create", propId: pid, ci, co });
+  };
+
+  const confirmQuickBlock = async () => {
+    if (!blockConfirm || blockConfirm.kind !== "create" || savingBlock) return;
+    setSavingBlock(true);
+    setBlockError("");
+    try {
+      const note = blockNote.trim();
+      await api.post("/reservations", {
+        property_id: blockConfirm.propId,
+        guest_name: note || "Blocage",
+        platform: "Direct",
+        check_in: blockConfirm.ci,
+        check_out: blockConfirm.co,
+        status: "bloque",
+        notes: note,
+      });
+      setBlockConfirm(null);
+      load();
+      loadBlocked();
+    } catch (e: any) {
+      setBlockError(e?.message || "Impossible de bloquer ces dates.");
+    } finally {
+      setSavingBlock(false);
+    }
+  };
+
+  const confirmUnblock = async () => {
+    if (!blockConfirm || blockConfirm.kind !== "delete" || savingBlock) return;
+    setSavingBlock(true);
+    setBlockError("");
+    try {
+      await api.del(`/reservations/${blockConfirm.res.id}`);
+      setBlockConfirm(null);
+      load();
+      loadBlocked();
+    } catch (e: any) {
+      setBlockError(e?.message || "Impossible de débloquer ces dates.");
+    } finally {
+      setSavingBlock(false);
+    }
+  };
 
   const blockedSets = useMemo(() => {
     const m: Record<string, Set<string>> = {};
@@ -410,9 +467,16 @@ export default function Planning() {
           priceMode={priceMode && !!singleProp}
           onPriceRange={openSpecial}
           blockMode={blockMode}
-          onBlock={(pid: string, ci: string, co: string) =>
-            router.push(`/reservation-form?property=${pid}&check_in=${ci}&check_out=${co}&status=bloque`)}
-          onBar={(id: string) => router.push(`/reservation-form?id=${id}`)}
+          onBlock={openQuickBlock}
+          onBar={(id: string) => {
+            const r = reservations.find((x) => x.id === id);
+            if (blockMode && r && r.status === "bloque") {
+              setBlockError("");
+              setBlockConfirm({ kind: "delete", res: r });
+              return;
+            }
+            router.push(`/reservation-form?id=${id}`);
+          }}
           onIv={(id: string) => router.push(`/intervention-form?id=${id}`)}
           onCreate={(pid: string, ci: string, co: string) =>
             router.push(`/reservation-form?property=${pid}&check_in=${ci}&check_out=${co}`)}
@@ -525,6 +589,64 @@ export default function Planning() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal visible={!!blockConfirm} transparent animationType="fade" onRequestClose={() => setBlockConfirm(null)}>
+        <Pressable style={styles.priceBackdrop} onPress={() => setBlockConfirm(null)}>
+          <Pressable style={styles.priceSheet} onPress={(e) => e.stopPropagation()}>
+            {blockConfirm?.kind === "create" && (
+              <>
+                <Text style={styles.priceSheetTitle}>Bloquer ces dates ?</Text>
+                <Text style={styles.priceSheetSeason}>{propMap[blockConfirm.propId]?.name}</Text>
+                <Text style={styles.priceSheetRange}>
+                  {(() => {
+                    const n = dayjs(blockConfirm.co).diff(dayjs(blockConfirm.ci), "day");
+                    return `Du ${dayjs(blockConfirm.ci).format("DD MMM")} au ${dayjs(blockConfirm.co).format("DD MMM YYYY")} · ${n} nuit${n > 1 ? "s" : ""}`;
+                  })()}
+                </Text>
+                <Text style={styles.specialLabel}>Motif (optionnel)</Text>
+                <TextInput
+                  testID="quick-block-note"
+                  value={blockNote}
+                  onChangeText={setBlockNote}
+                  placeholder="Travaux, perso, entretien…"
+                  placeholderTextColor={colors.onSurfaceTertiary}
+                  style={styles.specialNameInput}
+                />
+                {!!blockError && <Text style={styles.blockErrorText}>{blockError}</Text>}
+                <Pressable testID="quick-block-save" onPress={confirmQuickBlock} disabled={savingBlock} style={[styles.blockSaveBtn, savingBlock && { opacity: 0.6 }]}>
+                  {savingBlock ? <ActivityIndicator color="#fff" /> : (
+                    <>
+                      <Ionicons name="lock-closed" size={15} color="#fff" />
+                      <Text style={styles.priceSaveText}>Bloquer immédiatement</Text>
+                    </>
+                  )}
+                </Pressable>
+              </>
+            )}
+            {blockConfirm?.kind === "delete" && (
+              <>
+                <Text style={styles.priceSheetTitle}>Débloquer ces dates ?</Text>
+                <Text style={styles.priceSheetSeason}>{propMap[blockConfirm.res.property_id]?.name}</Text>
+                <Text style={styles.priceSheetRange}>
+                  {`Du ${dayjs(blockConfirm.res.check_in).format("DD MMM")} au ${dayjs(blockConfirm.res.check_out).format("DD MMM YYYY")}`}
+                </Text>
+                {!!blockConfirm.res.guest_name && blockConfirm.res.guest_name !== "Blocage" && (
+                  <Text style={styles.priceSheetRange}>{`Motif : ${blockConfirm.res.guest_name}`}</Text>
+                )}
+                {!!blockError && <Text style={styles.blockErrorText}>{blockError}</Text>}
+                <Pressable testID="quick-unblock-confirm" onPress={confirmUnblock} disabled={savingBlock} style={[styles.unblockBtn, savingBlock && { opacity: 0.6 }]}>
+                  {savingBlock ? <ActivityIndicator color="#fff" /> : (
+                    <>
+                      <Ionicons name="lock-open" size={15} color="#fff" />
+                      <Text style={styles.priceSaveText}>Débloquer ces dates</Text>
+                    </>
+                  )}
+                </Pressable>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -589,7 +711,7 @@ function TimelineView({ rows, days, monthStart, daysInMonth, filtered, intervent
         <Ionicons name={blockMode ? "lock-closed" : priceMode ? "flash" : "hand-left-outline"} size={13} color={(priceMode || blockMode) ? colors.brandPrimary : colors.onSurfaceTertiary} />
         <Text style={[styles.dragHintText, (priceMode || blockMode) && { color: colors.brandPrimary, fontFamily: font.semibold }]}>
           {blockMode
-            ? "Mode blocage : touchez la date de début puis la date de fin pour bloquer la période (avec annotation)."
+            ? "Mode blocage : touchez la date de début puis la date de fin — le blocage est créé en un geste. Touchez un blocage existant pour le débloquer."
             : priceMode
             ? "Mode tarif spécial : touchez la date de début puis la date de fin de la promo."
             : "Touchez la date de début puis la date de fin pour créer une réservation (ou maintenez et glissez)"}
@@ -1089,5 +1211,8 @@ const styles = StyleSheet.create({
   priceInput: { flex: 1, fontFamily: font.bold, fontSize: fontSize.xxl, color: colors.onSurface, paddingVertical: 12 },
   priceInputUnit: { fontFamily: font.medium, fontSize: fontSize.base, color: colors.onSurfaceTertiary },
   priceSaveBtn: { marginTop: spacing.lg, backgroundColor: "#17B0A6", borderRadius: radius.pill, paddingVertical: 14, alignItems: "center" },
+  blockSaveBtn: { marginTop: spacing.lg, backgroundColor: "#6E6E73", borderRadius: radius.pill, paddingVertical: 14, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 },
+  unblockBtn: { marginTop: spacing.lg, backgroundColor: colors.error, borderRadius: radius.pill, paddingVertical: 14, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 },
+  blockErrorText: { fontFamily: font.medium, fontSize: fontSize.sm, color: colors.error, marginTop: spacing.md },
   priceSaveText: { fontFamily: font.semibold, fontSize: fontSize.lg, color: colors.onBrandPrimary },
 });

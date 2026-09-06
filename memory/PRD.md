@@ -869,3 +869,9 @@
   * /api/cleaning-schedule : départs, arrivées et note_map excluent "bloque".
   * /api/dashboard : arrivals_today / departures_today / current_stays excluent "bloque".
   * Nettoyage rétroactif exécuté : 12 ménages auto liés à des blocages supprimés (avec garde-fou si une vraie résa partage la même date).
+
+## Blocage rapide depuis le planning (2026-06)
+- (tabs)/planning.tsx : en mode blocage (toggle-block-mode), la sélection début+fin ouvre désormais une modale "Bloquer ces dates ?" (testID quick-block-note / quick-block-save) qui crée le blocage IMMÉDIATEMENT via POST /reservations {status:"bloque", guest_name: motif || "Blocage", notes: motif} — plus de passage par reservation-form. Rechargement résa + /availability/blocked après création.
+- Déblocage rapide : en mode blocage, toucher une barre de blocage existante ouvre une modale "Débloquer ces dates ?" (testID quick-unblock-confirm, bouton rouge) → DELETE /reservations/{id}. Hors mode blocage, la barre ouvre toujours le formulaire.
+- i18n : nouvelles entrées en.json (Bloquer ces dates ?, Motif (optionnel), Bloquer immédiatement, Débloquer…, hint mode blocage) + nouvelle règle regex "Du X au Y" → "From X to Y" dans src/i18n/index.ts. Les textes dynamiques de la modale sont des template literals uniques (un seul child Text) pour une traduction fiable.
+- Testé via screenshot (web, EN) : création blocage "Travaux piscine" 06→08 sept sur Mas des Oliviers + déblocage OK.
