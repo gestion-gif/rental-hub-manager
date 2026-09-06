@@ -91,7 +91,7 @@ async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_
     pmap = {p["id"]: p.get("name", "Logement") for p in props}
 
     deps = await db.reservations.find(
-        {"user_id": uid, "check_out": tstr, "status": {"$ne": "annulee"}, **scope}, {"_id": 0}).to_list(500)
+        {"user_id": uid, "check_out": tstr, "status": {"$nin": ["annulee", "bloque"]}, **scope}, {"_id": 0}).to_list(500)
     departures = [{
         "id": r["id"], "property_id": r["property_id"],
         "property_name": pmap.get(r["property_id"], "Logement"),
@@ -101,7 +101,7 @@ async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_
     } for r in deps if r["property_id"] in pmap]
 
     arr = await db.reservations.find(
-        {"user_id": uid, "check_in": tstr, "status": {"$ne": "annulee"}, **scope}, {"_id": 0}).to_list(500)
+        {"user_id": uid, "check_in": tstr, "status": {"$nin": ["annulee", "bloque"]}, **scope}, {"_id": 0}).to_list(500)
     arrivals = [{
         "id": r["id"], "property_id": r["property_id"],
         "property_name": pmap.get(r["property_id"], "Logement"),
@@ -122,7 +122,7 @@ async def cleaning_schedule(day: Optional[str] = None, user=Depends(get_current_
     since = (target - timedelta(days=14)).isoformat()
     past = await db.reservations.find(
         {"user_id": uid, "check_out": {"$gte": since, "$lte": tstr},
-         "status": {"$ne": "annulee"}, "internal_note": {"$nin": [None, ""]}, **scope},
+         "status": {"$nin": ["annulee", "bloque"]}, "internal_note": {"$nin": [None, ""]}, **scope},
         {"_id": 0, "property_id": 1, "check_out": 1, "internal_note": 1}).to_list(500)
     note_map = {}
     for r in sorted(past, key=lambda x: x.get("check_out") or ""):

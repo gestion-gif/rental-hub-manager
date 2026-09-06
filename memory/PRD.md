@@ -863,3 +863,9 @@
 - Piège connu : le rendu runtime traduit aussi les données dynamiques si elles matchent exactement une clé (ex. prénom "Compte") — rare, accepté.
 - **Détection langue voyageur (OTA)** : helper `_detect_guest_lang(cust, attrs)` (core.py) — champ language du client (fr* → fr, sinon en), repli pays (_FR_COUNTRIES = FR + DOM-TOM + MC → fr, autre pays → en), '' si inconnu. Appliqué dans process_channex_bookings (création + backfill si guest_lang absent, JAMAIS d'écrasement d'une valeur existante/manuelle) et dans la synchro Lodgify (b.language). Testé : création en/fr, resync ne réécrase pas un choix manuel, backfill.
 - **Badge langue voyageur** : drapeau 🇫🇷/🇬🇧 affiché à côté du nom du voyageur sur les cartes de la liste Réservations (calendar.tsx, champ guest_lang si défini) et sur les arrivées de "À faire aujourd'hui" (guest_lang ajouté aux arrivals de /api/cleaning-schedule).
+- **Jours tampons / blocages exclus des départs & ménages** (fix demandé par l'utilisateur) :
+  * ensure_cleaning (core.py) : statut "bloque" (et "annulee") → aucun ménage auto créé + suppression du ménage auto futur non fait si le statut change vers bloqué.
+  * Synchro iCal (run_ical_sync) : détection des blocages via _is_block_summary (helpers.py, mots-clés "not available/unavailable/blocked/busy/indisponible/blocage" ; "reserved" = vraie résa Airbnb) → statut "bloque", guest "Blocage {platform}", pas de ménage ; correction rétroactive du statut à la resynchro.
+  * /api/cleaning-schedule : départs, arrivées et note_map excluent "bloque".
+  * /api/dashboard : arrivals_today / departures_today / current_stays excluent "bloque".
+  * Nettoyage rétroactif exécuté : 12 ménages auto liés à des blocages supprimés (avec garde-fou si une vraie résa partage la même date).

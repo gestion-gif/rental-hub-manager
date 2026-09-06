@@ -43,13 +43,15 @@ async def dashboard(user=Depends(get_current_user)):
         co = parse(r.get("check_out"))
         pname = prop_map.get(r["property_id"], {}).get("name", "Logement")
         r_view = compute_display({**r, "property_name": pname}, cmap)
-        if r.get("check_in") == today_str:
-            arrivals_today.append(r_view)
-        if r.get("check_out") == today_str:
-            departures_today.append(r_view)
-        # current stay: today is within [check_in, check_out) (checkout day excluded)
-        if ci and co and ci <= today < co:
-            current_stays.append(r_view)
+        # Les blocages (jours tampons) ne sont ni des arrivées, ni des départs, ni des séjours
+        if r["status"] != "bloque":
+            if r.get("check_in") == today_str:
+                arrivals_today.append(r_view)
+            if r.get("check_out") == today_str:
+                departures_today.append(r_view)
+            # current stay: today is within [check_in, check_out) (checkout day excluded)
+            if ci and co and ci <= today < co:
+                current_stays.append(r_view)
         # revenue + occupancy for current month
         if ci and co and r["status"] in ("confirmee", "arrivee", "depart"):
             overlap_start = max(ci, month_start)

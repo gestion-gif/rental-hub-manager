@@ -189,6 +189,18 @@ _BLOCK_SUMMARIES = {
     "airbnb (not available)", "closed - not available", "busy",
 }
 
+# Mots-clés identifiant un blocage/jour tampon (PAS une vraie réservation).
+# NB : "reserved" (Airbnb) est une vraie réservation → volontairement absent.
+_BLOCK_KEYWORDS = ("not available", "unavailable", "blocked", "busy", "indisponible", "blocage")
+
+
+def _is_block_summary(summary: str) -> bool:
+    """Vrai si l'évènement iCal est un blocage (jours tampons) et non une réservation."""
+    s = (summary or "").strip().lower()
+    if not s:
+        return False
+    return any(k in s for k in _BLOCK_KEYWORDS)
+
 
 # ---------------------------------------------------------------------------
 # iCal export (public .ics feed)

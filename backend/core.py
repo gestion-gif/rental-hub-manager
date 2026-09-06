@@ -33,7 +33,7 @@ from helpers import (
     DEFAULT_COMMISSION_RATES, DEFAULT_PAYMENT_METHODS,
     _build_payment_methods, _build_commission_rates, _build_statuses,
     compute_display, recompute_payment, marker_color_for,
-    _unfold_ical, _parse_ical_date, parse_ical, _BLOCK_SUMMARIES,
+    _unfold_ical, _parse_ical_date, parse_ical, _BLOCK_SUMMARIES, _is_block_summary,
     _ics_date, _ics_escape, _build_ics,
 )
 from infra import (  # noqa: F401
@@ -198,8 +198,10 @@ async def status_color_map(uid: str):
         m.setdefault(k, v)
     return m
 async def ensure_cleaning(user_id: str, property_id: str, checkout_date: Optional[str], status: Optional[str]):
-    """Auto-create a ménage intervention on the guest departure day (+ configurable offset)."""
-    if not checkout_date or status == "annulee":
+    """Auto-create a ménage intervention on the guest departure day (+ configurable offset).
+    Aucun ménage pour les annulations ni les blocages (jours tampons) — et retrait
+    du ménage auto éventuellement créé avant le changement de statut."""
+    if not checkout_date:
         return
     # Décalage configurable (J, J+1, J+2…) défini par l'utilisateur
     pref = await db.preferences.find_one({"user_id": user_id}, {"_id": 0, "cleaning_offset_days": 1})
@@ -209,6 +211,15 @@ async def ensure_cleaning(user_id: str, property_id: str, checkout_date: Optiona
         clean_date = (date.fromisoformat(checkout_date) + timedelta(days=offset)).isoformat()
     except Exception:
         pass
+    if status in ("annulee", "bloque"):
+        try:
+            if date.fromisoformat(clean_date) >= date.today():
+                await db.interventions.delete_many({
+                    "user_id": user_id, "property_id": property_id, "date": clean_date,
+                    "kind": "menage", "auto": True, "done": {"$ne": True}})
+        except Exception:
+            pass
+        return
     # Do not create cleaning tasks for past dates
     try:
         if date.fromisoformat(clean_date) < date.today():
@@ -610,10 +621,15 @@ async def run_ical_sync(user_id: str, property_id: str):
                 for ev in valid_events:
                     uid = ev.get("uid") or f"{platform}-{ev['start']}-{ev['end']}"
                     feed_uids.append(uid)
-                    await ensure_cleaning(user_id, property_id, ev.get("end"), "confirmee")
                     summary = (ev.get("summary") or "").strip()
                     description = (ev.get("description") or "").strip()
-                    if summary and summary.lower() not in _BLOCK_SUMMARIES:
+                    is_block = _is_block_summary(summary)
+                    # Jours tampons / blocages : statut "bloque", jamais de ménage ni de départ
+                    ev_status = "bloque" if is_block else "confirmee"
+                    await ensure_cleaning(user_id, property_id, ev.get("end"), ev_status)
+                    if is_block:
+                        guest = f"Blocage {platform}"
+                    elif summary and summary.lower() not in _BLOCK_SUMMARIES:
                         guest = summary
                     else:
                         guest = f"Réservation {platform}"
@@ -623,17 +639,21 @@ async def run_ical_sync(user_id: str, property_id: str):
                     q = {"user_id": user_id, "property_id": property_id, "ical_uid": uid}
                     existing = await db.reservations.find_one(q)
                     if existing:
-                        await db.reservations.update_one(q, {"$set": {
+                        upd = {
                             "check_in": ev["start"], "check_out": ev["end"],
                             "guest_name": guest, "platform": platform, "notes": note,
-                        }})
+                        }
+                        # Corrige le statut des blocages importés autrefois comme réservations
+                        if is_block and existing.get("status") not in ("annulee", "bloque"):
+                            upd["status"] = "bloque"
+                        await db.reservations.update_one(q, {"$set": upd})
                         updated += 1; link_updated += 1
                     else:
                         await db.reservations.insert_one({
                             "id": str(uuid.uuid4()), "user_id": user_id, "property_id": property_id,
                             "guest_name": guest, "guest_email": "", "platform": platform,
                             "check_in": ev["start"], "check_out": ev["end"], "guests": 1,
-                            "total_price": 0, "status": "confirmee", "notes": note,
+                            "total_price": 0, "status": ev_status, "notes": note,
                             "source": "ical", "ical_uid": uid, "created_at": now_utc().isoformat(),
                         })
                         imported += 1; link_imported += 1
