@@ -48,7 +48,7 @@ export default function BookingSiteSettings() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const publicUrl = slug
-    ? `${Platform.OS === "web" ? window.location.origin : "https://votre-app"}/book/${slug}`
+    ? `${Platform.OS === "web" && typeof window !== "undefined" ? window.location.origin : (process.env.EXPO_PUBLIC_BACKEND_URL || "")}/book/${slug}`
     : "";
 
   async function save() {

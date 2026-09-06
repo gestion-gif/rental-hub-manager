@@ -176,17 +176,18 @@ class RescheduleIn(BaseModel):
 
 @api_router.patch("/interventions/{intervention_id}/reschedule")
 async def reschedule_cleaning(intervention_id: str, payload: RescheduleIn, user=Depends(get_current_user)):
-    """Décale la date d'un ménage non fait — uniquement si possible :
-    la nouvelle date doit rester avant (ou le jour de) la prochaine arrivée du logement."""
+    """Décale la date d'une tâche non faite (ménage, intervention, remise de clés) —
+    uniquement si possible : la nouvelle date doit rester avant (ou le jour de)
+    la prochaine arrivée du logement."""
     iv = await db.interventions.find_one(
         {"id": intervention_id, "user_id": user["user_id"]}, {"_id": 0})
     if not iv or (user.get("allowed_property_ids") is not None
                   and iv.get("property_id") not in user["allowed_property_ids"]):
-        raise HTTPException(status_code=404, detail="Ménage introuvable")
-    if iv.get("kind") != "menage":
-        raise HTTPException(status_code=400, detail="Seuls les ménages peuvent être décalés ici")
+        raise HTTPException(status_code=404, detail="Tâche introuvable")
+    if iv.get("kind") == "caution":
+        raise HTTPException(status_code=400, detail="Les cautions ne peuvent pas être décalées")
     if iv.get("done"):
-        raise HTTPException(status_code=400, detail="Ce ménage est déjà fait")
+        raise HTTPException(status_code=400, detail="Cette tâche est déjà faite")
     try:
         new_date = date.fromisoformat(payload.date)
     except ValueError:
@@ -203,7 +204,7 @@ async def reschedule_cleaning(intervention_id: str, payload: RescheduleIn, user=
         d = date.fromisoformat(nxt[0]["check_in"]).strftime("%d/%m")
         raise HTTPException(
             status_code=400,
-            detail=f"Impossible : une arrivée est prévue le {d}. Le ménage doit être fait au plus tard ce jour-là.")
+            detail=f"Impossible : une arrivée est prévue le {d}. La tâche doit être faite au plus tard ce jour-là.")
     await db.interventions.update_one(
         {"id": intervention_id, "user_id": user["user_id"]},
         {"$set": {"date": new_date.isoformat()}})

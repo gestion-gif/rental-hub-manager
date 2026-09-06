@@ -30,7 +30,7 @@ export default function CleaningSchedule() {
     setBusy(item.id);
     try {
       await api.patch(`/interventions/${item.id}/reschedule`, { date: dateStr });
-      Alert.alert("Ménage décalé", `${item.property_name} → ${dayjs(dateStr).format("dddd D MMMM")}`);
+      Alert.alert(item.kind === "cleaning" ? "Ménage décalé" : "Tâche décalée", `${item.property_name} → ${dayjs(dateStr).format("dddd D MMMM")}`);
       load();
     } catch (e: any) {
       Alert.alert("Impossible de décaler", String(e?.message || "Erreur"));
@@ -84,10 +84,10 @@ export default function CleaningSchedule() {
       <View style={styles.cardRow}>
         <Ionicons name={item.done ? "checkmark-circle" : "ellipse-outline"} size={22} color={item.done ? colors.success : colors.onSurfaceTertiary} />
         <Text style={[styles.prop, item.done && styles.propDone]} numberOfLines={1}>{item.property_name}</Text>
-        {kind === "cleaning" && !item.done && (
+        {!item.done && (
           <Pressable
             testID={`reschedule-${item.id}`}
-            onPress={(e: any) => { e?.stopPropagation?.(); setRescheduleItem(item); }}
+            onPress={(e: any) => { e?.stopPropagation?.(); setRescheduleItem({ ...item, kind }); }}
             hitSlop={8}
             style={styles.shiftBtn}
           >
@@ -260,8 +260,8 @@ export default function CleaningSchedule() {
       <Modal visible={!!rescheduleItem} transparent animationType="fade" onRequestClose={() => setRescheduleItem(null)}>
         <Pressable style={styles.modalBg} onPress={() => setRescheduleItem(null)}>
           <Pressable style={styles.modalCard} onPress={() => {}}>
-            <Text style={styles.modalTitle}>Décaler le ménage</Text>
-            <Text style={styles.modalSub}>{rescheduleItem?.property_name} — choisissez la nouvelle date. Le décalage n'est possible que si aucune arrivée n'est prévue avant.</Text>
+            <Text style={styles.modalTitle}>{rescheduleItem?.kind === "cleaning" ? "Décaler le ménage" : "Décaler la tâche"}</Text>
+            <Text style={styles.modalSub}>{rescheduleItem?.property_name} — choisissez la nouvelle date. Le décalage est possible jusqu'au jour de la prochaine arrivée du voyageur.</Text>
             {Array.from({ length: 7 }).map((_, i) => {
               const d = anchor.add(i + 1, "day");
               return (

@@ -875,3 +875,7 @@
 - Déblocage rapide : en mode blocage, toucher une barre de blocage existante ouvre une modale "Débloquer ces dates ?" (testID quick-unblock-confirm, bouton rouge) → DELETE /reservations/{id}. Hors mode blocage, la barre ouvre toujours le formulaire.
 - i18n : nouvelles entrées en.json (Bloquer ces dates ?, Motif (optionnel), Bloquer immédiatement, Débloquer…, hint mode blocage) + nouvelle règle regex "Du X au Y" → "From X to Y" dans src/i18n/index.ts. Les textes dynamiques de la modale sont des template literals uniques (un seul child Text) pour une traduction fiable.
 - Testé via screenshot (web, EN) : création blocage "Travaux piscine" 06→08 sept sur Mas des Oliviers + déblocage OK.
+
+## Report de tâches (ménage/intervention/remise de clés) — 2026-06
+- PATCH /api/interventions/{id}/reschedule étendu : accepte désormais tous les kinds SAUF caution (avant : uniquement menage). Règle inchangée : nouvelle date >= aujourd'hui et <= prochaine arrivée (check_in) du logement, erreur 400 explicite sinon. Testé via API (beyond→400, jour d'arrivée→200, caution→400).
+- cleaning.tsx : bouton « Décaler » affiché sur toutes les tâches non faites (ménages, interventions, remises de clés) ; modale titrée « Décaler le ménage » ou « Décaler la tâche » selon le kind ; sous-titre mis à jour (« jusqu'au jour de la prochaine arrivée du voyageur »). Entrées en.json ajoutées + "(demain)"→"(tomorrow)".
