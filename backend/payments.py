@@ -10,6 +10,13 @@ from emergentintegrations.payments.stripe.checkout import StripeCheckout
 from infra import db, logger, STRIPE_API_KEY, _sync_log, get_channex_adapter
 from helpers import now_utc, recompute_payment, marker_color_for
 from emailer import send_email
+from telegram_notify import tg_notify, tg_esc
+
+
+async def _tg_prop_name(uid: str, r: dict) -> str:
+    p = await db.properties.find_one(
+        {"id": r.get("property_id"), "user_id": uid}, {"_id": 0, "name": 1}) or {}
+    return p.get("name") or r.get("property_name") or ""
 
 
 def stripe_client() -> StripeCheckout:
@@ -49,6 +56,9 @@ async def _apply_stripe_payment(tx: dict):
         await db.payment_transactions.update_one(
             {"session_id": tx["session_id"]},
             {"$set": {"processed": True, "payment_status": "paid", "status": "complete"}})
+        await tg_notify(uid, "payment",
+                        f"💶 <b>Solde reçu</b> — {float(tx['amount']):.2f} €\n"
+                        f"🏠 {tg_esc(await _tg_prop_name(uid, r))}\n👤 {tg_esc(r.get('guest_name'))}")
         return
     if tx["kind"] == "public_booking":
         # Réservation issue du site public : confirmer + payer + bloquer le calendrier
@@ -78,6 +88,12 @@ async def _apply_stripe_payment(tx: dict):
             await _send_booking_confirmation(uid, r2, tx)
         except Exception as e:
             logger.warning("email confirmation client échoué: %s", e)
+        lbl = "acompte" if tx.get("is_deposit") else "payée en totalité"
+        await tg_notify(uid, "booking",
+                        f"🎉 <b>Réservation directe (site)</b>\n"
+                        f"🏠 {tg_esc(await _tg_prop_name(uid, r))}\n👤 {tg_esc(r.get('guest_name'))}\n"
+                        f"📅 {r.get('check_in')} → {r.get('check_out')}\n"
+                        f"💶 {float(tx['amount']):.2f} € ({lbl})")
         return
     if tx["kind"] == "deposit":
         fin = dict(r.get("finance") or {})
@@ -106,6 +122,12 @@ async def _apply_stripe_payment(tx: dict):
     await db.payment_transactions.update_one(
         {"session_id": tx["session_id"]},
         {"$set": {"processed": True, "payment_status": "paid", "status": "complete"}})
+    if tx["kind"] == "deposit":
+        msg = f"🛡 <b>Caution encaissée</b> — {float(tx['amount']):.2f} €"
+    else:
+        msg = f"💶 <b>Paiement reçu</b> — {float(tx['amount']):.2f} €"
+    await tg_notify(uid, "payment",
+                    f"{msg}\n🏠 {tg_esc(await _tg_prop_name(uid, r))}\n👤 {tg_esc(r.get('guest_name'))}")
 
 
 # ---------------------------------------------------------------------------

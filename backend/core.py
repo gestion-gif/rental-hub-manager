@@ -54,6 +54,7 @@ from payments import (  # noqa: F401
     stripe_client, _apply_stripe_payment, _record_auto_charge_error,
     auto_charge_reservation, run_auto_charge_for_user,
 )
+from telegram_notify import tg_notify, tg_esc  # noqa: F401
 class SessionRequest(BaseModel):
     session_id: str
 class Season(BaseModel):
@@ -657,6 +658,13 @@ async def run_ical_sync(user_id: str, property_id: str):
                             "source": "ical", "ical_uid": uid, "created_at": now_utc().isoformat(),
                         })
                         imported += 1; link_imported += 1
+                        if ev_status != "bloque" and ev["end"] >= date.today().isoformat():
+                            pdoc = await db.properties.find_one(
+                                {"id": property_id, "user_id": user_id}, {"_id": 0, "name": 1}) or {}
+                            await tg_notify(user_id, "booking",
+                                            f"🆕 <b>Nouvelle réservation</b> ({tg_esc(platform)})\n"
+                                            f"🏠 {tg_esc(pdoc.get('name', ''))}\n👤 {tg_esc(guest)}\n"
+                                            f"📅 {ev['start']} → {ev['end']}")
                 # Évènements disparus du flux → annulation (jamais de suppression :
                 # un flux vide/partiel transitoire ne doit pas effacer de données)
                 if feed_uids:
@@ -869,6 +877,7 @@ class PreferencesIn(BaseModel):
     public_site: Optional[dict] = None
     auto_charge: Optional[dict] = None
     arrival_email: Optional[dict] = None
+    telegram: Optional[dict] = None
 async def _ai_auto_draft_enabled(uid: str) -> bool:
     doc = await db.preferences.find_one({"user_id": uid}, {"_id": 0})
     return bool((doc or {}).get("ai_auto_draft", True))
@@ -1043,6 +1052,7 @@ async def process_channex_bookings(uid: str) -> dict:
             currency = a.get("currency") or "EUR"
             q = {"user_id": uid, "channex_booking_id": booking_id}
             existing = await db.reservations.find_one(q)
+            prev_status = (existing or {}).get("status")
             base_doc = {
                 "user_id": uid, "property_id": prop["id"], "property_name": prop.get("name", ""),
                 "guest_name": gname, "guest_email": gemail, "platform": ota, "source": "channex",
@@ -1066,6 +1076,17 @@ async def process_channex_bookings(uid: str) -> dict:
                 if detected:
                     base_doc["guest_lang"] = detected
                 await db.reservations.insert_one(base_doc)
+            # Notification Telegram (nouvelle résa / annulation) — jamais bloquante
+            if co and co >= date.today().isoformat():
+                if not existing and status not in ("annulee", "bloque"):
+                    await tg_notify(uid, "booking",
+                                    f"🆕 <b>Nouvelle réservation</b>\n🏠 {tg_esc(prop.get('name', ''))}\n"
+                                    f"👤 {tg_esc(gname)} · {tg_esc(ota)}\n📅 {ci} → {co}\n"
+                                    f"💶 {amount:.2f} {tg_esc(currency)}")
+                elif existing and status == "annulee" and prev_status != "annulee":
+                    await tg_notify(uid, "booking",
+                                    f"❌ <b>Réservation annulée</b>\n🏠 {tg_esc(prop.get('name', ''))}\n"
+                                    f"👤 {tg_esc(gname)} · {tg_esc(ota)}\n📅 {ci} → {co}")
             await _set_property_rooms_availability(uid, prop["id"], ci, co, status != "annulee")
             await ensure_cleaning(uid, prop["id"], co, status)
             # Journalise chaque révision reçue (via feed/webhook) pour audit & récupération d'IDs
@@ -2485,6 +2506,8 @@ def _get_object(path: str):
 
 
 __all__ = [
+    'tg_notify',
+    'tg_esc',
     'FastAPI',
     'APIRouter',
     'Depends',

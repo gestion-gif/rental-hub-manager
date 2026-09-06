@@ -24,6 +24,7 @@ async def get_preferences(user=Depends(get_current_user)):
         "auto_charge": _build_auto_charge(doc),
         "arrival_email": _build_arrival_email(doc),
         "public_site": _build_public_site(doc),
+        "telegram": (doc or {}).get("telegram") or {},
     }
 
 
@@ -174,6 +175,29 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
             "extra_message": str(c.get("extra_message") or "").strip()[:1500],
         }
 
+    if payload.telegram is not None:
+        c = payload.telegram or {}
+        prev_tg = ((await db.preferences.find_one(
+            {"user_id": uid}, {"_id": 0, "telegram": 1})) or {}).get("telegram") or {}
+        try:
+            hour = int(c.get("daily_hour", prev_tg.get("daily_hour", 7)))
+        except Exception:
+            hour = 7
+        set_doc["telegram"] = {
+            "enabled": bool(c.get("enabled", False)),
+            "bot_token": str(c.get("bot_token") or "").strip()[:120],
+            "chat_ops": str(c.get("chat_ops") or "").strip()[:32],
+            "chat_ops_label": str(c.get("chat_ops_label") or "").strip()[:80],
+            "chat_admin": str(c.get("chat_admin") or "").strip()[:32],
+            "chat_admin_label": str(c.get("chat_admin_label") or "").strip()[:80],
+            "notify_bookings": bool(c.get("notify_bookings", True)),
+            "notify_payments": bool(c.get("notify_payments", True)),
+            "notify_reschedule": bool(c.get("notify_reschedule", True)),
+            "notify_daily": bool(c.get("notify_daily", True)),
+            "daily_hour": max(0, min(23, hour)),
+            "last_daily_sent": prev_tg.get("last_daily_sent") or "",
+        }
+
     if payload.company is not None:
         set_doc["company"] = {k: str(payload.company.get(k) or "").strip() for k in _COMPANY_KEYS}
 
@@ -267,5 +291,6 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
         "payment_reminders": _build_payment_reminders(doc),
         "arrival_email": _build_arrival_email(doc),
         "public_site": _build_public_site(doc),
+        "telegram": (doc or {}).get("telegram") or {},
     }
 

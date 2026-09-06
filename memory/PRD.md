@@ -879,3 +879,12 @@
 ## Report de tâches (ménage/intervention/remise de clés) — 2026-06
 - PATCH /api/interventions/{id}/reschedule étendu : accepte désormais tous les kinds SAUF caution (avant : uniquement menage). Règle inchangée : nouvelle date >= aujourd'hui et <= prochaine arrivée (check_in) du logement, erreur 400 explicite sinon. Testé via API (beyond→400, jour d'arrivée→200, caution→400).
 - cleaning.tsx : bouton « Décaler » affiché sur toutes les tâches non faites (ménages, interventions, remises de clés) ; modale titrée « Décaler le ménage » ou « Décaler la tâche » selon le kind ; sous-titre mis à jour (« jusqu'au jour de la prochaine arrivée du voyageur »). Entrées en.json ajoutées + "(demain)"→"(tomorrow)".
+
+## Intégration Telegram (2026-06)
+- Nouveau module backend `telegram_notify.py` : tg_send_raw (sendMessage HTML), tg_notify(uid, event, text) jamais bloquant, tg_detect_chats (getUpdates), build_daily_digest + run_daily_digests (récap quotidien, heure Paris, idempotent via telegram.last_daily_sent).
+- Réglages par utilisateur dans preferences.telegram : enabled, bot_token, chat_ops (équipe), chat_admin (gestion), notify_bookings/payments/reschedule/daily, daily_hour. Validation dans PUT /preferences ; renvoyé par GET/PUT /preferences.
+- Routeur `routers/telegram.py` : GET /api/telegram/chats (détection), POST /api/telegram/test (target ops|admin), POST /api/telegram/send-digest.
+- Hooks événements : process_channex_bookings (nouvelle résa/annulation, seulement si check_out >= aujourd'hui → chat gestion) ; import iCal (nouvelle résa non bloquée) ; payments.py _apply_stripe_payment (solde/site/caution/paiement → gestion, résa directe site → gestion) ; interventions reschedule (tâche décalée → chat équipe).
+- Boucle `_telegram_daily_loop` dans server.py (toutes les 15 min, envoie le récap à partir de daily_hour, une fois/jour).
+- Frontend : app/settings/telegram.tsx (token BotFather, détection + assignation des chats Équipe/Gestion, 4 interrupteurs, heure du récap, boutons test) ; entrée dans settings/index.tsx section Communication ; i18n en.json complété.
+- Testé : PUT/GET réglages OK, erreurs Telegram (Unauthorized) proprement remontées, reschedule non bloquant avec token invalide, digest vide → {empty:true}. Livraison réelle non testée (nécessite le vrai token bot de l'utilisateur).

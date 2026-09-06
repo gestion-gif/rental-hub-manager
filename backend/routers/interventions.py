@@ -208,6 +208,14 @@ async def reschedule_cleaning(intervention_id: str, payload: RescheduleIn, user=
     await db.interventions.update_one(
         {"id": intervention_id, "user_id": user["user_id"]},
         {"$set": {"date": new_date.isoformat()}})
+    prop = await db.properties.find_one(
+        {"id": iv["property_id"], "user_id": user["user_id"]}, {"_id": 0, "name": 1}) or {}
+    kind_lbl = {"menage": "Ménage", "remise_cles": "Remise de clés"}.get(iv.get("kind"), "Intervention")
+    old_fr = date.fromisoformat(str(iv.get("date"))).strftime("%d/%m") if iv.get("date") else "?"
+    await tg_notify(user["user_id"], "task",
+                    f"📅 <b>{kind_lbl} décalé(e)</b>\n🏠 {tg_esc(prop.get('name', ''))}\n"
+                    f"{old_fr} → {new_date.strftime('%d/%m')}"
+                    + (f"\n📝 {tg_esc(iv.get('description'))}" if iv.get("description") else ""))
     return {"id": intervention_id, "date": new_date.isoformat(),
             "limit": (nxt[0]["check_in"] if nxt else None)}
 

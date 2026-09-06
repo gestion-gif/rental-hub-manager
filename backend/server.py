@@ -9,8 +9,9 @@ from routers import (  # noqa: F401
     auth, properties, reservations, public_site, interventions, ical, dashboard,
     analytics, ai, preferences, channex, policies, push, sync, inbox, team, owners,
     statements, reviews, promotions, templates, automations, files, messaging,
-    accounting, supplements, api_keys, billing, site,
+    accounting, supplements, api_keys, billing, site, telegram,
 )
+from telegram_notify import run_daily_digests
 
 # Route handlers referenced by the background loops below
 from routers.statements import owner_statement
@@ -202,6 +203,18 @@ async def startup():
     asyncio.create_task(_payment_reminder_loop())
     asyncio.create_task(_auto_charge_loop())
     asyncio.create_task(_arrival_email_loop())
+    asyncio.create_task(_telegram_daily_loop())
+
+
+async def _telegram_daily_loop():
+    """Récap quotidien Telegram pour l'équipe terrain (heure locale Paris)."""
+    await asyncio.sleep(90)
+    while True:
+        try:
+            await run_daily_digests()
+        except Exception:
+            logger.exception("telegram daily loop error")
+        await asyncio.sleep(900)
 
 
 async def _arrival_email_loop():
