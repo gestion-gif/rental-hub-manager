@@ -14,6 +14,7 @@ import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/context/AuthContext";
 import { PreferencesProvider } from "@/src/context/PreferencesContext";
 import PushRegistrar from "@/src/PushRegistrar";
+import CanonicalLink from "@/src/components/CanonicalLink";
 import { initTheme } from "@/src/theme";
 import { initI18n } from "@/src/i18n";
 import { installI18nPatch } from "@/src/i18n/patch";
@@ -171,6 +172,7 @@ export default function RootLayout() {
           <AuthProvider>
             <PreferencesProvider>
               <PushRegistrar />
+              <CanonicalLink />
               <Stack screenOptions={{ headerShown: false }}>
                 <Stack.Screen name="index" />
                 <Stack.Screen name="login" />

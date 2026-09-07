@@ -1,6 +1,34 @@
 # ruff: noqa: F403, F405
 from core import *  # noqa: F401
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
+
+
+@api_router.get("/public/sitemap.xml")
+async def public_sitemap(request: Request):
+    """Sitemap XML des pages publiques (accueil vitrine + sites de réservation)."""
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
+    if host.endswith("casaneo.pro"):
+        host = "www.casaneo.pro"
+    base = f"https://{host}" if host else ""
+    urls = [f"{base}/"]
+    prefs_all = await db.preferences.find(
+        {"public_site.enabled": True}, {"_id": 0, "user_id": 1, "public_site": 1}).to_list(200)
+    for pf in prefs_all:
+        slug = ((pf.get("public_site") or {}).get("slug") or "").strip()
+        if not slug:
+            continue
+        urls.append(f"{base}/book/{slug}")
+        props = await db.properties.find(
+            {"user_id": pf["user_id"]}, {"_id": 0, "id": 1, "published": 1}).to_list(500)
+        for p in props:
+            if p.get("published") is not False:
+                urls.append(f"{base}/book/{slug}/{p['id']}")
+    today = date.today().isoformat()
+    body = "\n".join(f"  <url><loc>{u}</loc><lastmod>{today}</lastmod></url>" for u in urls)
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+           f"{body}\n</urlset>")
+    return Response(content=xml, media_type="application/xml")
 
 
 @api_router.get("/public/site/{slug}")

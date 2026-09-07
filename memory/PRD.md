@@ -888,3 +888,10 @@
 - Boucle `_telegram_daily_loop` dans server.py (toutes les 15 min, envoie le récap à partir de daily_hour, une fois/jour).
 - Frontend : app/settings/telegram.tsx (token BotFather, détection + assignation des chats Équipe/Gestion, 4 interrupteurs, heure du récap, boutons test) ; entrée dans settings/index.tsx section Communication ; i18n en.json complété.
 - Testé : PUT/GET réglages OK, erreurs Telegram (Unauthorized) proprement remontées, reschedule non bloquant avec token invalide, digest vide → {empty:true}. Livraison réelle non testée (nécessite le vrai token bot de l'utilisateur).
+
+## SEO site public (2026-06)
+- GET /api/public/sitemap.xml (routers/public_site.py) : sitemap dynamique basé sur l'hôte de la requête (normalise *.casaneo.pro → www.casaneo.pro) ; inclut / , /book/{slug} et /book/{slug}/{property_id} des sites publics activés.
+- /app/frontend/public/robots.txt : Allow /, Disallow /login /settings /accept-invite, directive Sitemap → https://www.casaneo.pro/api/public/sitemap.xml (servi à la racine par Expo, copié dans dist à l'export).
+- src/components/CanonicalLink.tsx monté dans _layout.tsx : balise <link rel="canonical"> auto-référente par page (web only), origin forcé à https://www.casaneo.pro sur le domaine casaneo.pro.
+- Testé : sitemap OK (accueil + 24 logements mhpimmo), robots.txt servi, canonical injectée sur /book/mhpimmo.
+- NOTE GSC : le message "Page avec redirection" (http/apex/www) est NORMAL, aucune action.

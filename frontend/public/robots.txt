@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /login
+Disallow: /settings
+Disallow: /accept-invite
+
+Sitemap: https://www.casaneo.pro/api/public/sitemap.xml
