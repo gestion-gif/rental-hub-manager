@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator,
   Switch, TextInput, KeyboardAvoidingView, Platform,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@react-native-vector-icons/ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 

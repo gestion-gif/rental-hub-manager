@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator,
   Modal, TextInput, Share, Platform, Alert,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@react-native-vector-icons/ionicons";
 import { Image } from "expo-image";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";

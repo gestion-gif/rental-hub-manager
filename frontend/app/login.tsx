@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Pressable, Alert, Platform, Linking } from "rea
 import { Image } from "expo-image";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { LinearGradient } from "expo-linear-gradient";
-import { AntDesign } from "@expo/vector-icons";
+import AntDesign from "@react-native-vector-icons/ant-design";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";

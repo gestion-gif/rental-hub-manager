@@ -1,7 +1,8 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { Image } from "expo-image";
-import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
+import MaterialCommunityIcons from "@react-native-vector-icons/material-design-icons";
+import Ionicons from "@react-native-vector-icons/ionicons";
 
 const AIRBNB_LOGO = require("../../assets/images/airbnb.png");
 

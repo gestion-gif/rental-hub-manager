@@ -1,8 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@react-native-vector-icons/ionicons";
 import { useNavigation } from "expo-router";
-import { DrawerActions } from "@react-navigation/native";
 import { colors } from "@/src/theme";
 
 export function MenuButton() {
@@ -10,7 +9,7 @@ export function MenuButton() {
   return (
     <Pressable
       testID="menu-button"
-      onPress={() => nav.dispatch(DrawerActions.openDrawer())}
+      onPress={() => nav.dispatch({ type: "OPEN_DRAWER" })}
       style={styles.btn}
       hitSlop={8}
     >

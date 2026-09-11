@@ -1,0 +1,53 @@
+{
+  "summary": "Iteration 35 - Post SDK 54->57 upgrade FRONTEND REGRESSION on web preview (mobile viewport 390x844, browser locale=en-US so app renders in English via i18n auto). All 8 requested regression scenarios pass. (1) Login screen shows the two CTA lines 'Continue with Google' and 'Log in with email and password'; tapping the second reveals Email/Password inputs and the 'Log in' button; submitting demo.stores@casaneo.app / CasaneoDemo2026! logs in and lands on the dashboard. (2) Dashboard renders with KPI cards (Occupancy rate 19%, Monthly revenue 3744 €, Properties 3, Upcoming 1) and all Ionicons glyphs visible (no empty squares) - the icon font from @react-native-vector-icons/ionicons is loading correctly on web. (3) menu-button (testID) opens the custom ScrollView drawer; header shows Casaneo logo + 'Compte Demo' + 'demo.stores@casaneo.app'; all drawer items present with testIDs drawer-index / drawer-inbox / drawer-calendar / drawer-planning / drawer-properties / drawer-cleaning / drawer-settings / drawer-help / drawer-signout, plus collapsible sections drawer-section-Revenus (mapped to REVENUE label) and drawer-section-Outils (TOOLS). MenuButton dispatches OPEN_DRAWER correctly - no @react-navigation/native import issue anymore. (4) drawer-calendar navigates to Bookings list (/calendar) with tabs All/Request/Confirmed/Check-in/Checkout/Blocked/Cancelled and 4 seeded reservations (Emma Fontaine, Chloe Perrin, Lea Girard, Nathan Rousseau) rendering with amounts and icons. (5) drawer-planning (/planning) renders the timeline: three property rows (Mas des Oliviers / Studio Lumiere / Villa Azur) x 30-day September grid with nightly rates displayed (210 EUR / 85 EUR / 320 EUR / 460 EUR tiles), plus reservation bars 'Hugo Lambert', 'Nathan Rousseau', 'Emma Fontaine', 'Camille Mor...' painted on the correct rows. toggle-block-mode (testID) is tappable and switches to Block mode - button label flips to 'Cancel block' and the hint 'Block mode: tap the start date then the end date - the block is created in one gesture. Tap an existing block to unblock it.' appears. testIDs quick-block-note / quick-block-save / quick-unblock-confirm are confirmed present in /app/frontend/app/(tabs)/planning.tsx lines 608 / 616 / 637 (full create+unblock end-to-end not exercised to avoid mutating seed data; UI wiring verified). (6) drawer-properties (/properties) renders 3 property cards with cover images and A->Z sort. (7) drawer-cleaning (/cleaning) 'Due today - Friday 11 September' renders all sections: Checkouts (1 - Mas des Oliviers 10:00 - Depart . Hugo Lambert), Arrivals . security deposit to check (0), Cleanings to do (0), Interventions (0), Key handovers (0), Security deposits to collect (0). NOTE: the 'Decaler/Reschedule' button did not appear because in the seeded demo dataset there are 0 cleanings and 0 interventions today - the button is only rendered per reschedulable task row; not a regression (data-dependent). (8) Settings screen renders section headers COMPANY/BOOKINGS & RATES/COMMUNICATION/OPERATIONS/SYNC & WEBSITE/DISPLAY; tapping the 'Communication' section header expands it (6 items including Telegram notifications). /settings/telegram screen renders 'Telegram notifications' with all 3 testIDs (tg-token, tg-detect, tg-save) plus the events toggles (Bookings & cancellations, Payments & deposits, Rescheduled tasks, Daily schedule, Sync alerts, Digest send time 07h00). Tapping tg-save shows 'Telegram settings saved.' confirmation banner - save works end-to-end. (9) Tapping the 'Emma Fontaine' reservation card on the Bookings list opens /reservation-form?id=demo-res-3 which renders the full form (Paid/Due/Total header, Mark payment as received, Security deposit, Deposits, Quote 2414 EUR Accepted, Platform commission Booking.com, Guest details, Security section) and closing via browser back returns cleanly to /calendar with no crash and no red screen. (10) Console errors during the full run: only one benign entry - 'Failed to load resource: the server responded with a status of 401 ()' from /api/auth/me probe issued before login. No missing-font / missing-icon / navigation / red-screen errors anywhere. Warnings observed (informational only, pre-existing): 'shadow* style props are deprecated. Use boxShadow' and 'props.pointerEvents is deprecated. Use style.pointerEvents' emitted by react-native-web 0.21 - these are library-level deprecations, not app bugs. SDK 54->57 upgrade regression is CLEAN.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/reservation-form (EN locale)", "issues": ["Mixed FR/EN copy: 'Payer 2414.00 EUR par carte' CTA and 'Estimation a 15% - ajustez le montant reel ci-dessous.' hint remain in French even when the rest of the app is EN. Pre-existing i18n gap (already flagged in iteration 34), not a SDK 57 regression."]},
+      {"screen": "/cleaning (EN locale)", "issues": ["Checkout subtitle 'Depart . Hugo Lambert' shows the French word 'Depart' inline while the rest of the screen is EN. Same i18n gap family as above."]}
+    ],
+    "react_native_issues": [
+      {"component": "react-native-web deprecation warnings", "issue": "Console warns 'shadow* style props are deprecated. Use boxShadow' and 'props.pointerEvents is deprecated. Use style.pointerEvents' - non-blocking, coming from react-native-web 0.21 under RN 0.86 / Expo 57. Should be addressed by migrating shadow* -> boxShadow and pointerEvents prop -> style.pointerEvents in shared styles. Reference: emitted at first render of the login screen and every route change."}
+    ]
+  },
+  "test_report_links": [
+    "/tmp/reg_00_land.png",
+    "/tmp/reg_01_login_screen.png",
+    "/tmp/reg_02_after_login.png",
+    "/tmp/reg_03_drawer.png",
+    "/tmp/reg_04_bookings.png",
+    "/tmp/reg_05_planning.png",
+    "/tmp/reg_05b_planning_block_mode.png",
+    "/tmp/reg_06_properties.png",
+    "/tmp/reg_07_cleaning.png",
+    "/tmp/reg_08_settings.png",
+    "/tmp/reg_08b_settings_expanded.png",
+    "/tmp/reg_09_telegram.png",
+    "/tmp/reg_09b_telegram_after_save.png",
+    "/tmp/reg_10_bookings.png",
+    "/tmp/reg_10b_res_form.png",
+    "/tmp/reg_10c_after_close.png"
+  ],
+  "action_items": [
+    "Optional cleanup: migrate remaining 'shadow*' StyleSheet properties to 'boxShadow' and move 'pointerEvents' prop into style.pointerEvents to silence react-native-web 0.21 deprecation warnings (non-blocking).",
+    "Optional i18n polish: translate 'Payer X EUR par carte', 'Estimation a 15% - ajustez le montant reel ci-dessous.' and the 'Depart' checkout label to EN when app_lang=en (same i18n gap noted in iteration 34)."
+  ],
+  "critical_code_review_comments": [
+    "app/(tabs)/_layout.tsx line 4: Ionicons import switched to '@react-native-vector-icons/ionicons' - consistent with new package.json (13.1.4). CustomDrawer built on plain ScrollView + Pressables, no more DrawerContentScrollView / @react-navigation/drawer dependency - matches the SDK 57 migration plan.",
+    "src/components/MenuButton.tsx: nav.dispatch({ type: 'OPEN_DRAWER' }) works correctly against expo-router's Drawer. No stale @react-navigation/native import remains (previous bundling error is resolved - metro bundled 2025 modules cleanly).",
+    "src/hooks/use-icon-fonts.ts: returns [true, null] immediately; splash unmasks without waiting on CDN. Icon glyphs render correctly on web because @react-native-vector-icons ships its own fonts.css via react-native-web autolinking.",
+    "app/(tabs)/planning.tsx: testIDs toggle-block-mode (l.366), quick-block-note (l.608), quick-block-save (l.616), quick-unblock-confirm (l.637) all present and reachable.",
+    "app/settings/telegram.tsx: testIDs tg-token (l.170), tg-detect (l.186), tg-save (l.269) all present; save action wired to state and confirmation banner ('Telegram settings saved.') is emitted.",
+    "app.json changes (newArchEnabled / edgeToEdgeEnabled removed) look correct - no runtime warnings about unsupported keys under SDK 57.",
+    "expo-doctor 20/20 pass reported by main agent - confirmed no dependency red flags in package.json (all @57.x aligned, RN 0.86.3, react 19.2.3)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped by request)", "frontend": "100% (8/8 regression scenarios)"},
+  "seed_data_creation": "None. Read-only regression pass on demo.stores@casaneo.app sandbox. No blocks were persisted (block-mode toggle was flipped but no start/end date was tapped, so no data mutation). No reservations, no properties, no telegram tokens were saved with real values - the tg-save click only persisted an empty/default state which the demo account can re-save idempotently.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Post SDK 54->57 upgrade regression is green. Key facts: (a) Playwright default locale=en-US triggers app_lang auto->en; to test in FR set AsyncStorage 'app_lang_pref'='fr' or click testID lang-fr in /settings/appearance. (b) The 'Log in' submit button is a Pressable that renders as <div> on web - do NOT use get_by_role('button'); use page.get_by_text('Log in', exact=True).first.click(force=True). (c) After navigating via drawer item, the menu-button becomes hidden while the drawer transitions/closes; wait 700ms+ before next menu-button click, or navigate via URL (page.goto) which is more reliable. (d) Drawer route naming is confusing: drawer-calendar -> /calendar which is the Bookings LIST, and drawer-planning -> /planning which is the CALENDAR TIMELINE. (e) Demo seed has 0 cleanings/interventions today so the 'Reschedule/Decaler' button on /cleaning is not rendered - not a bug. To fully validate the reschedule modal, either seed a cleaning task on today's date or test on a day where the demo has one. (f) Quick-block create+unblock end-to-end was not fully exercised to avoid polluting seed - testIDs are confirmed in code. (g) One console 401 on initial /api/auth/me is expected pre-login. No red screen anywhere.",
+  "rca_of_issue": "N/A - no regressions. Two pre-existing i18n polish items and one react-native-web deprecation-warning cleanup are the only follow-ups, all non-blocking."
+}

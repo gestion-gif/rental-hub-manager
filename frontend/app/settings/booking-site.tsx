@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView, Switch, ActivityIndicator, TextInput, Platform, Linking, Alert } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@react-native-vector-icons/ionicons";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { ensurePhotoAccess } from "@/src/utils/photoAccess";

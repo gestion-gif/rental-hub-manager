@@ -908,3 +908,12 @@
 - telegram_notify.tg_sync_alert : envoie au chat_admin (fallback ops), toggle notify_sync (défaut True), anti-spam 1 alerte / 6 h via telegram.last_sync_alert (UTC ISO). Jamais bloquant.
 - preferences.py : notify_sync + préservation last_sync_alert. settings/telegram.tsx : toggle "Alertes de synchronisation" (testID tg-notif-sync). i18n complété.
 - Testé : erreur → tentative d'envoi Telegram + last_sync_alert posé ; 2e erreur immédiate → cooldown ; success → aucun envoi.
+
+## Migration Expo SDK 54 → 57 (2026-06)
+- package.json : expo ^57.0.0, react-native 0.86.3, react 19.2.3 (yarn expo install expo@^57 + --fix). expo-doctor 20/20.
+- @expo/vector-icons SUPPRIMÉ → @react-native-vector-icons/{ionicons, ant-design, material-design-icons} 13.1.4 ; imports réécrits dans 82 fichiers (default imports).
+- app.json : newArchEnabled & edgeToEdgeEnabled retirés (obsolètes SDK 55+).
+- expo-router SDK 56+ interdit @react-navigation/* : (tabs)/_layout.tsx utilise ScrollView natif à la place de DrawerContentScrollView ; MenuButton.tsx : nav.dispatch({type:"OPEN_DRAWER"}) au lieu de DrawerActions ; @react-navigation/drawer désinstallé.
+- src/hooks/use-icon-fonts.ts simplifié : retourne [true, null] (plus de chargement CDN — polices autolinkées/fournies par @react-native-vector-icons).
+- Régression frontend complète (iteration_35.json) : 8/8 PASS (login, dashboard, drawer, planning, blocage rapide, cleaning, réglages Telegram, formulaire résa). Avertissements bénins react-native-web 0.21 (shadow*/pointerEvents deprecations) — non bloquants.
+- IMPORTANT : les prochains builds natifs (iOS/Android) seront générés sous SDK 57.

@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable, Platform } from "react-native";
+import { View, Text, StyleSheet, Pressable, Platform, ScrollView } from "react-native";
 import { Drawer } from "expo-router/drawer";
-import { DrawerContentScrollView } from "@react-navigation/drawer";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@react-native-vector-icons/ionicons";
 import { Image } from "expo-image";
 import { useRouter, Redirect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -65,7 +64,7 @@ function CustomDrawer(props: any) {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
-      <DrawerContentScrollView {...props} contentContainerStyle={{ paddingTop: insets.top + spacing.lg }}>
+      <ScrollView contentContainerStyle={{ paddingTop: insets.top + spacing.lg }}>
         <View style={styles.brand}>
           <Image source={require("@/assets/images/casaneo-logo.png")} style={styles.brandLogo} contentFit="contain" />
         </View>
@@ -132,7 +131,7 @@ function CustomDrawer(props: any) {
             </View>
           );
         })}
-      </DrawerContentScrollView>
+      </ScrollView>
 
       <Pressable
         testID="drawer-signout"

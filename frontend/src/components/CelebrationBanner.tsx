@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from "react";
 import { View, Text, StyleSheet, Pressable, Dimensions } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "@react-native-vector-icons/ionicons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import Animated, {
