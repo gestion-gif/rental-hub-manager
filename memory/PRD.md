@@ -895,3 +895,10 @@
 - src/components/CanonicalLink.tsx monté dans _layout.tsx : balise <link rel="canonical"> auto-référente par page (web only), origin forcé à https://www.casaneo.pro sur le domaine casaneo.pro.
 - Testé : sitemap OK (accueil + 24 logements mhpimmo), robots.txt servi, canonical injectée sur /book/mhpimmo.
 - NOTE GSC : le message "Page avec redirection" (http/apex/www) est NORMAL, aucune action.
+
+## Liaison partenaire casaneo.pro (2026-06)
+- backend/.env : PARTNER_SIGNUP_URL (https://www.casaneo.pro/api/public/partner/signup) + PARTNER_SIGNUP_SECRET.
+- routers/auth.py : RegisterIn étendu (agency_name, phone optionnels) ; après création du compte dans POST /auth/register, tâche asynchrone _notify_partner_signup → POST vers la version web avec X-Partner-Secret {email, name, agency_name, phone, source:"app_mobile", app_user_id}. Jamais bloquant.
+- login.tsx : bouton testID go-agency-signup « Créer un compte agence sur casaneo.pro » → Linking.openURL(https://www.casaneo.pro/inscription-app). MASQUÉ sur iOS (Platform.OS !== "ios") pour éviter un rejet Apple 3.1.1 (lien externe de création de compte lié à un abonnement payant) — visible sur Android et web. i18n en.json complété.
+- Testé E2E : register 200 + webhook accepté (endpoint partenaire répond 200 avec le secret). 2 leads de test envoyés à casaneo.pro (Test Partenaire Emergent / Vérification liaison) — à supprimer côté web.
+- NOTE : lors d'un test, toutes les sessions de la base PREVIEW ont été purgées par erreur (reconnexion nécessaire en preview uniquement, aucune donnée perdue, prod non affectée).

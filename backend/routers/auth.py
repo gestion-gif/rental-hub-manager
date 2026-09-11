@@ -199,6 +199,29 @@ class RegisterIn(BaseModel):
     name: str = ""
     email: str
     password: str
+    agency_name: str = ""
+    phone: str = ""
+
+
+async def _notify_partner_signup(doc: dict, payload: "RegisterIn"):
+    """Signale l'inscription à la version web casaneo.pro (partenaire).
+    Jamais bloquant : toute erreur est ignorée."""
+    url = _os.environ.get("PARTNER_SIGNUP_URL", "")
+    secret = _os.environ.get("PARTNER_SIGNUP_SECRET", "")
+    if not url or not secret:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=8) as http:
+            await http.post(url, headers={"X-Partner-Secret": secret}, json={
+                "email": doc.get("email", ""),
+                "name": doc.get("name", ""),
+                "agency_name": (payload.agency_name or "").strip(),
+                "phone": (payload.phone or "").strip(),
+                "source": "app_mobile",
+                "app_user_id": doc.get("user_id", ""),
+            })
+    except Exception:
+        logger.warning("partner signup notify failed for %s", doc.get("user_id"))
 
 
 @api_router.delete("/auth/account")
@@ -277,6 +300,7 @@ async def register(payload: RegisterIn):
         await db.users.insert_one(doc)
     except Exception:
         raise HTTPException(status_code=409, detail="Impossible de créer un compte avec ces identifiants")
+    asyncio.create_task(_notify_partner_signup(doc, payload))
     return await _create_owner_session(doc)
 
 
