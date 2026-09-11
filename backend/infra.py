@@ -33,6 +33,12 @@ async def _sync_log(user_id: str, kind: str, status: str, message: str = "", pro
         "type": kind, "status": status, "message": message[:1000],
         "date": now_utc().isoformat(),
     })
+    if status == "error":
+        try:
+            from telegram_notify import tg_sync_alert
+            await tg_sync_alert(user_id, provider, kind, message)
+        except Exception:
+            pass
 
 
 async def get_channel_adapter(user_id: str):

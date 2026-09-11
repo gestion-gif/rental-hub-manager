@@ -27,6 +27,7 @@ export default function TelegramSettings() {
   const [notifPayments, setNotifPayments] = useState(true);
   const [notifReschedule, setNotifReschedule] = useState(true);
   const [notifDaily, setNotifDaily] = useState(true);
+  const [notifSync, setNotifSync] = useState(true);
   const [dailyHour, setDailyHour] = useState(7);
   const [detecting, setDetecting] = useState(false);
   const [detected, setDetected] = useState<any[] | null>(null);
@@ -47,6 +48,7 @@ export default function TelegramSettings() {
       setNotifPayments(c.notify_payments ?? true);
       setNotifReschedule(c.notify_reschedule ?? true);
       setNotifDaily(c.notify_daily ?? true);
+      setNotifSync(c.notify_sync ?? true);
       setDailyHour(c.daily_hour ?? 7);
     } catch {}
     setLoading(false);
@@ -60,6 +62,7 @@ export default function TelegramSettings() {
       chat_admin: chatAdmin.trim(), chat_admin_label: chatAdminLabel,
       notify_bookings: notifBookings, notify_payments: notifPayments,
       notify_reschedule: notifReschedule, notify_daily: notifDaily,
+      notify_sync: notifSync,
       daily_hour: dailyHour,
       ...overrides,
     };
@@ -239,6 +242,8 @@ export default function TelegramSettings() {
             value={notifReschedule} onChange={(v: boolean) => { setNotifReschedule(v); }} />
           <Row testID="tg-notif-daily" title="Programme du jour" sub="Récap quotidien : départs, arrivées, ménages → chat équipe"
             value={notifDaily} onChange={(v: boolean) => { setNotifDaily(v); }} />
+          <Row testID="tg-notif-sync" title="Alertes de synchronisation" sub="Échec de synchro Channex → chat gestion (1 alerte max / 6 h)"
+            value={notifSync} onChange={(v: boolean) => { setNotifSync(v); }} />
           <View style={styles.hourRow}>
             <Text style={styles.fieldLabel}>Heure d'envoi du récap</Text>
             <View style={styles.hourControls}>

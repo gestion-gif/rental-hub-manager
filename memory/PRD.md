@@ -902,3 +902,9 @@
 - login.tsx : bouton testID go-agency-signup « Créer un compte agence sur casaneo.pro » → Linking.openURL(https://www.casaneo.pro/inscription-app). MASQUÉ sur iOS (Platform.OS !== "ios") pour éviter un rejet Apple 3.1.1 (lien externe de création de compte lié à un abonnement payant) — visible sur Android et web. i18n en.json complété.
 - Testé E2E : register 200 + webhook accepté (endpoint partenaire répond 200 avec le secret). 2 leads de test envoyés à casaneo.pro (Test Partenaire Emergent / Vérification liaison) — à supprimer côté web.
 - NOTE : lors d'un test, toutes les sessions de la base PREVIEW ont été purgées par erreur (reconnexion nécessaire en preview uniquement, aucune donnée perdue, prod non affectée).
+
+## Alertes de synchro Telegram (2026-06)
+- infra._sync_log : si status=="error" → tg_sync_alert(uid, provider, kind, message) (import paresseux pour éviter le cycle).
+- telegram_notify.tg_sync_alert : envoie au chat_admin (fallback ops), toggle notify_sync (défaut True), anti-spam 1 alerte / 6 h via telegram.last_sync_alert (UTC ISO). Jamais bloquant.
+- preferences.py : notify_sync + préservation last_sync_alert. settings/telegram.tsx : toggle "Alertes de synchronisation" (testID tg-notif-sync). i18n complété.
+- Testé : erreur → tentative d'envoi Telegram + last_sync_alert posé ; 2e erreur immédiate → cooldown ; success → aucun envoi.

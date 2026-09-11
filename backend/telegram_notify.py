@@ -4,7 +4,7 @@ Réglages par utilisateur dans preferences.telegram :
   notify_bookings, notify_payments, notify_reschedule, notify_daily, daily_hour.
 """
 import html
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -57,6 +57,34 @@ async def tg_notify(uid: str, event: str, text: str) -> bool:
     except Exception as e:
         logger.warning("telegram notify failed (%s): %s", event, e)
         return False
+
+
+async def tg_sync_alert(uid: str, provider: str, kind: str, message: str):
+    """Alerte d'échec de synchronisation (chat gestion). Anti-spam : 1 alerte / 6 h max."""
+    try:
+        tg = await tg_settings(uid)
+        if not tg or not tg.get("notify_sync", True):
+            return
+        chat = tg.get("chat_admin") or tg.get("chat_ops")
+        if not chat:
+            return
+        now = datetime.now(timezone.utc)
+        last = tg.get("last_sync_alert") or ""
+        try:
+            if last and (now - datetime.fromisoformat(last)).total_seconds() < 6 * 3600:
+                return
+        except Exception:
+            pass
+        await db.preferences.update_one(
+            {"user_id": uid}, {"$set": {"telegram.last_sync_alert": now.isoformat()}})
+        await tg_send_raw(
+            tg["bot_token"], chat,
+            f"⚠️ <b>Échec de synchronisation ({tg_esc(provider)})</b>\n"
+            f"{tg_esc(kind)} — {tg_esc((message or '')[:300])}\n\n"
+            "Vérifiez Réglages → Channex dans Casanéo. "
+            "(Anti-spam : 1 alerte max toutes les 6 h)")
+    except Exception as e:
+        logger.warning("telegram sync alert failed for %s: %s", uid, e)
 
 
 async def tg_detect_chats(token: str) -> list:
