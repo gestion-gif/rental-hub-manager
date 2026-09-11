@@ -917,3 +917,8 @@
 - src/hooks/use-icon-fonts.ts simplifié : retourne [true, null] (plus de chargement CDN — polices autolinkées/fournies par @react-native-vector-icons).
 - Régression frontend complète (iteration_35.json) : 8/8 PASS (login, dashboard, drawer, planning, blocage rapide, cleaning, réglages Telegram, formulaire résa). Avertissements bénins react-native-web 0.21 (shadow*/pointerEvents deprecations) — non bloquants.
 - IMPORTANT : les prochains builds natifs (iOS/Android) seront générés sous SDK 57.
+
+## Derniers correctifs i18n (2026-06)
+- reservation-form.tsx : « Payer X par carte » et « Estimation à N% — ajustez… » convertis en template literals uniques + règles regex i18n (/^Payer (.+) par carte$/ → "Pay $1 by card", /^Estimation à (\d+)%$/ → "Estimated at $1%") + entrée dict "ajustez le montant réel ci-dessous.".
+- cleaning.tsx : « Départ · nom » et « Arrivée · nom » en template literals (segments traduits via dict Départ/Arrivée existants).
+- Vérifié en EN sur la fiche Emma Fontaine : "Pay … by card" et "Estimated at …" affichés, plus aucun résidu FR.

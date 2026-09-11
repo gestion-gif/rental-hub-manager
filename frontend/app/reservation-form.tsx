@@ -1084,7 +1084,7 @@ function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayme
           ) : (
             <>
               <Ionicons name="card" size={18} color="#fff" />
-              <Text style={styles.stripeBtnText}>Payer {money(f.due)} par carte</Text>
+              <Text style={styles.stripeBtnText}>{`Payer ${money(f.due)} par carte`}</Text>
             </>
           )}
         </Pressable>
@@ -1195,7 +1195,7 @@ function FinanceCard({ detail, isPaid, onTogglePaid, onAddPayment, onDeletePayme
           </View>
         </View>
         {!hasCommission && rate > 0 && (
-          <Text style={styles.commHint}>Estimation à {Math.round(rate * 100)}% — ajustez le montant réel ci-dessous.</Text>
+          <Text style={styles.commHint}>{`Estimation à ${Math.round(rate * 100)}% — ajustez le montant réel ci-dessous.`}</Text>
         )}
         <View style={styles.acompteAdd}>
           <View style={styles.acompteInputWrap}>

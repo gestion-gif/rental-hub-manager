@@ -62,6 +62,8 @@ const RULES: [RegExp, string | ((...m: string[]) => string)][] = [
   [/^(\d+) hébergements? disponibles?$/, (_a, n) => `${n} accommodation${Number(n) > 1 ? "s" : ""} available`],
   [/^J-(\d+)$/, "D-$1"],
   [/^Du (.+) au (.+)$/, "From $1 to $2"],
+  [/^Payer (.+) par carte$/, "Pay $1 by card"],
+  [/^Estimation à (\d+)%$/, "Estimated at $1%"],
 ];
 
 function lookup(s: string): string | null {
