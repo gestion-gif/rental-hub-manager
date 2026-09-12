@@ -922,3 +922,10 @@
 - reservation-form.tsx : « Payer X par carte » et « Estimation à N% — ajustez… » convertis en template literals uniques + règles regex i18n (/^Payer (.+) par carte$/ → "Pay $1 by card", /^Estimation à (\d+)%$/ → "Estimated at $1%") + entrée dict "ajustez le montant réel ci-dessous.".
 - cleaning.tsx : « Départ · nom » et « Arrivée · nom » en template literals (segments traduits via dict Départ/Arrivée existants).
 - Vérifié en EN sur la fiche Emma Fontaine : "Pay … by card" et "Estimated at …" affichés, plus aucun résidu FR.
+
+## Mot de passe oublié (2026-06) — suite incident connexion prod
+- Incident : après nouveau build Apple, utilisateurs "Email ou mot de passe incorrect" ; démo OK en prod → backend/DB sains. Compte owner gestion@mhpimmo.fr = compte Google SANS password_hash ; connexion email passait par un doc members. Aucun flux de récupération n'existait.
+- Backend routers/auth.py : POST /auth/forgot-password (code 6 chiffres, sha256 hashé en db.password_resets, expire 15 min, anti-spam 60 s, réponse toujours {ok:true} anti-énumération) + POST /auth/reset-password (5 tentatives max, code usage unique, met à jour password_hash dans db.users ET db.members (email_normalized), invite_status→active). emailer.build_reset_email (template conforme guardrails).
+- Frontend : app/forgot-password.tsx (2 étapes : email → code + nouveau mdp), lien "Mot de passe oublié ?" sous le bouton Se connecter (login.tsx, testID go-forgot-password). Écran public (pas de garde auth). i18n complet + règle regex "Un code a été envoyé à X.".
+- Testé E2E : mauvais code 400, bon code 200, login nouveau mdp 200, code réutilisé 400, email template envoyé (202). NOTE : envoi vers demo.stores@casaneo.app rejeté 422 par le proxy (domaine), sans impact réel.
+- RAPPEL PROD : rental-hub-manager.emergent.host ne sert PAS le frontend web (/ → {"detail":"Not Found"}) → pages /accept-invite et web cassées en prod. Redéploiement requis ; si persiste → support@emergent.sh.

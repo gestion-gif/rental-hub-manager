@@ -150,6 +150,9 @@ export default function Login() {
               secureTextEntry
             />
             <PrimaryButton testID="email-signin-button" label="Se connecter" onPress={onEmailLogin} loading={loggingIn} />
+            <Pressable testID="go-forgot-password" onPress={() => router.push("/forgot-password")} style={styles.linkBtn}>
+              <Text style={styles.linkText}>Mot de passe oublié ?</Text>
+            </Pressable>
           </View>
         )}
 

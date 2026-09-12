@@ -118,6 +118,30 @@ async def send_email(*, to: str, subject: str, html: str, reply_to: str | None =
     return resp.json().get("id")
 
 
+def build_reset_email(*, code: str) -> tuple[str, str]:
+    """Template serveur pour le code de réinitialisation de mot de passe."""
+    subject = f"Votre code de réinitialisation {EMAIL_FROM_NAME}"
+    html = (
+        '<table role="presentation" width="100%" style="background:#f5f5f7;padding:24px 0">'
+        '<tr><td align="center">'
+        '<table role="presentation" width="480" style="background:#ffffff;border-radius:16px;'
+        'font-family:Arial,Helvetica,sans-serif;overflow:hidden">'
+        '<tr><td style="padding:28px 32px 8px">'
+        f'<p style="font-size:20px;font-weight:bold;color:#1c1c1e;margin:0">{escape(EMAIL_FROM_NAME)}</p>'
+        '</td></tr>'
+        '<tr><td style="padding:8px 32px 24px">'
+        '<p style="font-size:15px;color:#3a3a3c;line-height:1.5">Voici votre code pour définir '
+        'un nouveau mot de passe dans l\'application :</p>'
+        f'<p style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#1c1c1e;'
+        f'text-align:center;margin:16px 0">{escape(code)}</p>'
+        '<p style="font-size:13px;color:#8e8e93;line-height:1.5">Ce code expire dans 15 minutes. '
+        'Si vous n\'êtes pas à l\'origine de cette demande, ignorez cet email — votre mot de passe reste inchangé.</p>'
+        f'<p style="font-size:12px;color:#8e8e93;margin-top:16px">Envoyé par {escape(EMAIL_FROM_NAME)} — '
+        'nous ne vous demanderons jamais ce code par téléphone ou par email.</p>'
+        '</td></tr></table></td></tr></table>')
+    return subject, html
+
+
 def build_invite_email(*, member_name: str, invite_link: str) -> tuple[str, str]:
     """Server-side template for the team-member invitation. Returns (subject, html)."""
     subject = f"Invitation à rejoindre {EMAIL_FROM_NAME}"

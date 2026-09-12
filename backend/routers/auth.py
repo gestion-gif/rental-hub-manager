@@ -1,5 +1,6 @@
 # ruff: noqa: F403, F405
 from core import *  # noqa: F401
+from emailer import build_reset_email
 import os as _os
 import base64 as _b64
 import time as _time
@@ -165,6 +166,90 @@ async def logout(authorization: Optional[str] = Header(None)):
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1]
         await db.user_sessions.delete_one({"session_token": token})
+    return {"ok": True}
+
+
+class ForgotPasswordIn(BaseModel):
+    email: str
+
+
+class ResetPasswordIn(BaseModel):
+    email: str
+    code: str
+    password: str
+
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(payload: ForgotPasswordIn):
+    """Envoie un code à 6 chiffres (15 min) si un compte existe.
+    Réponse identique dans tous les cas (pas d'énumération d'emails)."""
+    email = norm_email(payload.email)
+    if not email or "@" not in email:
+        return {"ok": True}
+    owner = await db.users.find_one({"email": email}, {"_id": 0, "user_id": 1})
+    member = await db.members.find_one({"email_normalized": email}, {"_id": 0, "id": 1})
+    if not owner and not member:
+        return {"ok": True}
+    existing = await db.password_resets.find_one({"email": email}, {"_id": 0})
+    if existing:
+        try:
+            created = datetime.fromisoformat(existing.get("created_at", ""))
+            if (now_utc() - created).total_seconds() < 60:
+                return {"ok": True}  # anti-spam : 1 envoi / minute
+        except ValueError:
+            pass
+    code = f"{secrets.randbelow(1000000):06d}"
+    await db.password_resets.update_one(
+        {"email": email},
+        {"$set": {
+            "email": email,
+            "code_hash": hash_token(code),
+            "expires_at": (now_utc() + timedelta(minutes=15)).isoformat(),
+            "attempts": 0,
+            "created_at": now_utc().isoformat(),
+        }}, upsert=True)
+    subject, html = build_reset_email(code=code)
+    try:
+        await send_email(to=email, subject=subject, html=html)
+    except Exception as e:
+        logger.error("reset email failed for %s: %s", email, e)
+    return {"ok": True}
+
+
+@api_router.post("/auth/reset-password")
+async def reset_password(payload: ResetPasswordIn):
+    """Vérifie le code et définit le nouveau mot de passe (compte propriétaire ET membre)."""
+    if len(payload.password or "") < 8:
+        raise HTTPException(status_code=422, detail="Le mot de passe doit contenir au moins 8 caractères")
+    email = norm_email(payload.email)
+    doc = await db.password_resets.find_one({"email": email}, {"_id": 0})
+    generic = HTTPException(status_code=400, detail="Code invalide ou expiré")
+    if not doc:
+        raise generic
+    try:
+        if datetime.fromisoformat(doc["expires_at"]) < now_utc():
+            await db.password_resets.delete_one({"email": email})
+            raise generic
+    except ValueError:
+        raise generic
+    if int(doc.get("attempts", 0)) >= 5:
+        await db.password_resets.delete_one({"email": email})
+        raise generic
+    if hash_token((payload.code or "").strip()) != doc.get("code_hash"):
+        await db.password_resets.update_one({"email": email}, {"$inc": {"attempts": 1}})
+        raise generic
+    new_hash = hash_password(payload.password)
+    now_iso = now_utc().isoformat()
+    r1 = await db.users.update_one(
+        {"email": email},
+        {"$set": {"password_hash": new_hash, "password_set_at": now_iso}})
+    r2 = await db.members.update_many(
+        {"email_normalized": email},
+        {"$set": {"password_hash": new_hash, "password_set_at": now_iso,
+                  "invite_status": "active"}})
+    await db.password_resets.delete_one({"email": email})
+    logger.info("password reset for %s (owner=%s, members=%s)",
+                email, r1.modified_count, r2.modified_count)
     return {"ok": True}
 
 

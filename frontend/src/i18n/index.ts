@@ -64,6 +64,7 @@ const RULES: [RegExp, string | ((...m: string[]) => string)][] = [
   [/^Du (.+) au (.+)$/, "From $1 to $2"],
   [/^Payer (.+) par carte$/, "Pay $1 by card"],
   [/^Estimation à (\d+)%$/, "Estimated at $1%"],
+  [/^Un code a été envoyé à (.+)\.$/, "A code has been sent to $1."],
 ];
 
 function lookup(s: string): string | null {
