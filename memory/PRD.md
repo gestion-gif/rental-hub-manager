@@ -936,3 +936,7 @@
 - EMERGENT_AUTH_URL hardcodé (infra.py) : conservé volontairement — constante exigée par le playbook Emergent Auth (survit au déploiement).
 - Re-check deployment_agent : status warn (plus aucun blocker). Warn restant : GoogleService-Info.plist iOS absent → push iOS non configuré (info utilisateur, non bloquant).
 - PROD toujours : frontend web non servi sur rental-hub-manager.emergent.host (tout → backend). Hypothèse : le blocker destructif faisait échouer la bascule frontend du pipeline. Action : NOUVEAU Publish requis ; si le / reste en 404 après → escalade support@emergent.sh.
+
+## Déblocage comptes membres en PROD (2026-06)
+- Lucas (lucas.adam.palma@gmail.com) et Thierry (thierryharnois21@gmail.com) réinitialisés à distance via les endpoints prod forgot/reset-password (codes relayés par le propriétaire). Mot de passe provisoire commun : Casaneo2026! — connexions VÉRIFIÉES (200) sur prod. Fiche Thierry créée par le propriétaire au préalable.
+- Rappel : le propriétaire (gestion@mhpimmo.fr) se connecte via Google (pas de mdp). Prochain Publish attendu pour vérifier la partie web + rendre visible le lien "Mot de passe oublié" dans les apps.
