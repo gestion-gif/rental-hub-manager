@@ -139,6 +139,12 @@ async def _channex_msg_review_loop():
 app.include_router(api_router)
 
 
+@app.get("/health")
+async def health():
+    """Sonde de santé pour la plateforme de déploiement."""
+    return {"status": "ok"}
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

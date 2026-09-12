@@ -149,11 +149,8 @@ async def ensure_demo_account():
             "phone": "", "created_at": now_utc().isoformat(),
         }}, upsert=True)
 
-    # Réinitialise les données du tenant démo UNIQUEMENT
-    for coll in (db.reservations, db.properties, db.reviews, db.conversations,
-                 db.interventions, db.guest_messages, db.expenses):
-        await coll.delete_many({"user_id": DEMO_UID})
-
+    # Rafraîchit les données du tenant démo par UPSERTS idempotents (ids fixes) —
+    # aucune suppression au démarrage (exigence de déploiement).
     now = now_utc().isoformat()
     props = []
     for p in _PROPERTIES:
@@ -169,17 +166,18 @@ async def ensure_demo_account():
             "management_fee_pct": 0, "amenities": p["amenities"],
             "channex_id": None, "lodgify_id": None, "ical_export_token": str(uuid.uuid4()),
         })
-    await db.properties.insert_many(props)
-    await db.reservations.insert_many(_demo_reservations())
-    reviews = []
+    for doc in props:
+        await db.properties.update_one({"id": doc["id"]}, {"$set": doc}, upsert=True)
+    for doc in _demo_reservations():
+        await db.reservations.update_one({"id": doc["id"]}, {"$set": doc}, upsert=True)
     for i, (pid, guest, rating, comment) in enumerate(_REVIEWS):
-        reviews.append({
+        doc = {
             "id": f"demo-review-{i + 1}", "user_id": DEMO_UID,
             "property_id": pid,
             "property_name": next(p["name"] for p in _PROPERTIES if p["id"] == pid),
             "guest_name": guest, "rating": rating, "comment": comment,
             "date": (date.today() - timedelta(days=10 + i * 7)).isoformat(),
             "source": "demo", "created_at": now,
-        })
-    await db.reviews.insert_many(reviews)
+        }
+        await db.reviews.update_one({"id": doc["id"]}, {"$set": doc}, upsert=True)
     return True

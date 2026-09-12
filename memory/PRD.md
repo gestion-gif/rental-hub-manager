@@ -929,3 +929,10 @@
 - Frontend : app/forgot-password.tsx (2 étapes : email → code + nouveau mdp), lien "Mot de passe oublié ?" sous le bouton Se connecter (login.tsx, testID go-forgot-password). Écran public (pas de garde auth). i18n complet + règle regex "Un code a été envoyé à X.".
 - Testé E2E : mauvais code 400, bon code 200, login nouveau mdp 200, code réutilisé 400, email template envoyé (202). NOTE : envoi vers demo.stores@casaneo.app rejeté 422 par le proxy (domaine), sans impact réel.
 - RAPPEL PROD : rental-hub-manager.emergent.host ne sert PAS le frontend web (/ → {"detail":"Not Found"}) → pages /accept-invite et web cassées en prod. Redéploiement requis ; si persiste → support@emergent.sh.
+
+## Correctifs de déploiement (2026-06)
+- deployment_agent avait signalé BLOCKER "DESTRUCTIVE_DB_STARTUP" : demo_seed.ensure_demo_account faisait delete_many({user_id: DEMO_UID}) au démarrage. CORRIGÉ : upserts idempotents par id fixe (properties/reservations/reviews), plus aucune suppression au démarrage.
+- Ajout GET /health (hors /api) dans server.py → {"status":"ok"} pour les sondes de la plateforme.
+- EMERGENT_AUTH_URL hardcodé (infra.py) : conservé volontairement — constante exigée par le playbook Emergent Auth (survit au déploiement).
+- Re-check deployment_agent : status warn (plus aucun blocker). Warn restant : GoogleService-Info.plist iOS absent → push iOS non configuré (info utilisateur, non bloquant).
+- PROD toujours : frontend web non servi sur rental-hub-manager.emergent.host (tout → backend). Hypothèse : le blocker destructif faisait échouer la bascule frontend du pipeline. Action : NOUVEAU Publish requis ; si le / reste en 404 après → escalade support@emergent.sh.
