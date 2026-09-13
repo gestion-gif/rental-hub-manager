@@ -940,3 +940,4 @@
 ## Déblocage comptes membres en PROD (2026-06)
 - Lucas (lucas.adam.palma@gmail.com) et Thierry (thierryharnois21@gmail.com) réinitialisés à distance via les endpoints prod forgot/reset-password (codes relayés par le propriétaire). Mot de passe provisoire commun : Casaneo2026! — connexions VÉRIFIÉES (200) sur prod. Fiche Thierry créée par le propriétaire au préalable.
 - Rappel : le propriétaire (gestion@mhpimmo.fr) se connecte via Google (pas de mdp). Prochain Publish attendu pour vérifier la partie web + rendre visible le lien "Mot de passe oublié" dans les apps.
+- Martine (martine.babulle@gmail.com, compte propriétaire créé via Google) : reset à distance idem, mdp provisoire Casaneo2026!, connexion vérifiée (200) en prod.
