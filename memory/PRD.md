@@ -941,3 +941,9 @@
 - Lucas (lucas.adam.palma@gmail.com) et Thierry (thierryharnois21@gmail.com) réinitialisés à distance via les endpoints prod forgot/reset-password (codes relayés par le propriétaire). Mot de passe provisoire commun : Casaneo2026! — connexions VÉRIFIÉES (200) sur prod. Fiche Thierry créée par le propriétaire au préalable.
 - Rappel : le propriétaire (gestion@mhpimmo.fr) se connecte via Google (pas de mdp). Prochain Publish attendu pour vérifier la partie web + rendre visible le lien "Mot de passe oublié" dans les apps.
 - Martine (martine.babulle@gmail.com, compte propriétaire créé via Google) : reset à distance idem, mdp provisoire Casaneo2026!, connexion vérifiée (200) en prod.
+
+## Fix comptes doubles (owner Google vide + membre) — 2026-06
+- Symptôme : Martine (intervenante MHP) se connectait sur SON tenant propriétaire vide (créé par « Continuer avec Google ») au lieu de son compte membre → ne voyait pas le logement attribué (Lou Cabanou).
+- Règle ajoutée dans routers/auth.py sur les 3 chemins (login email, /auth/session Google, /auth/apple) : si un membre ACTIF existe avec le même email normalisé ET que le tenant propriétaire correspondant est VIDE (0 logement, ou inexistant) → session MEMBRE. Un vrai propriétaire avec logements n'est jamais impacté.
+- Testé : compte double simulé → session membre sur le bon tenant ✓ ; non-régression démo ✓.
+- ⚠️ Nécessite un Publish pour être actif en production (Martine doit se reconnecter après).

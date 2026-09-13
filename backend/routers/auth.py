@@ -80,6 +80,17 @@ async def create_session(payload: SessionRequest):
     session_token = data.get("session_token")
 
     existing = await db.users.find_one({"email": email})
+    # Cas ambigu : même email propriétaire ET membre d'équipe → si le tenant
+    # propriétaire est vide (ou inexistant) et qu'un membre actif existe,
+    # on connecte le compte membre (intervenant) plutôt que de créer/ouvrir
+    # un espace propriétaire vide.
+    member_alt = await db.members.find_one(
+        {"email_normalized": norm_email(email or ""), "active": {"$ne": False}}, {"_id": 0})
+    if member_alt:
+        owner_props = (await db.properties.count_documents({"user_id": existing["user_id"]})
+                       if existing else 0)
+        if owner_props == 0:
+            return await _create_member_session(member_alt)
     if existing:
         user_id = existing["user_id"]
         await db.users.update_one({"user_id": user_id}, {"$set": {"name": name, "picture": picture}})
@@ -125,6 +136,15 @@ async def auth_apple(payload: AppleAuthIn):
     existing = await db.users.find_one({"apple_sub": sub})
     if not existing and email:
         existing = await db.users.find_one({"email": email})
+    # Même règle que Google/login : membre actif + tenant propriétaire vide → session membre
+    if email:
+        member_alt = await db.members.find_one(
+            {"email_normalized": norm_email(email), "active": {"$ne": False}}, {"_id": 0})
+        if member_alt:
+            owner_props = (await db.properties.count_documents({"user_id": existing["user_id"]})
+                           if existing else 0)
+            if owner_props == 0:
+                return await _create_member_session(member_alt)
     if existing:
         user_id = existing["user_id"]
         upd = {"apple_sub": sub}
@@ -395,6 +415,15 @@ async def member_login(payload: LoginIn):
     # 1) Compte propriétaire avec mot de passe (inscription autonome)
     owner = await db.users.find_one({"email": email, "password_hash": {"$nin": [None, ""]}}, {"_id": 0})
     if owner and verify_password(payload.password, owner["password_hash"]):
+        # Cas ambigu : même email en propriétaire ET membre d'équipe.
+        # Si le tenant propriétaire est vide (aucun logement) et qu'un compte
+        # membre actif existe, on privilégie le compte membre (intervenant).
+        member_alt = await db.members.find_one(
+            {"email_normalized": email, "active": {"$ne": False}}, {"_id": 0})
+        if member_alt:
+            owner_props = await db.properties.count_documents({"user_id": owner["user_id"]})
+            if owner_props == 0:
+                return await _create_member_session(member_alt)
         return await _create_owner_session(owner)
     # 2) Membre d'équipe (invitation)
     email = norm_email(payload.email)
