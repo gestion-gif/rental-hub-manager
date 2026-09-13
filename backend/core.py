@@ -668,11 +668,27 @@ async def run_ical_sync(user_id: str, property_id: str):
                 # Évènements disparus du flux → annulation (jamais de suppression :
                 # un flux vide/partiel transitoire ne doit pas effacer de données)
                 if feed_uids:
-                    await db.reservations.update_many(
-                        {"user_id": user_id, "property_id": property_id, "source": "ical",
-                         "platform": platform, "ical_uid": {"$nin": feed_uids},
-                         "status": {"$ne": "annulee"}},
-                        {"$set": {"status": "annulee"}})
+                    gone_q = {"user_id": user_id, "property_id": property_id, "source": "ical",
+                              "platform": platform, "ical_uid": {"$nin": feed_uids},
+                              "status": {"$ne": "annulee"}}
+                    gone = await db.reservations.find(
+                        gone_q, {"_id": 0, "guest_name": 1, "check_in": 1, "check_out": 1}).to_list(50)
+                    await db.reservations.update_many(gone_q, {"$set": {"status": "annulee"}})
+                    if gone:
+                        pdoc = await db.properties.find_one(
+                            {"id": property_id, "user_id": user_id}, {"_id": 0, "name": 1}) or {}
+                        today_iso = date.today().isoformat()
+                        for g in gone:
+                            await ensure_cleaning(user_id, property_id, g.get("check_out"), "annulee")
+                            if (g.get("check_out") or "") >= today_iso:
+                                await tg_notify(user_id, "booking",
+                                                f"❌ <b>Réservation annulée</b> ({tg_esc(platform)})\n"
+                                                f"🏠 {tg_esc(pdoc.get('name', ''))}\n👤 {tg_esc(g.get('guest_name'))}\n"
+                                                f"📅 {g.get('check_in')} → {g.get('check_out')}")
+                                await tg_notify(user_id, "cancel_ops",
+                                                f"❌ <b>Réservation annulée</b>\n🏠 {tg_esc(pdoc.get('name', ''))}\n"
+                                                f"📅 {g.get('check_in')} → {g.get('check_out')}\n"
+                                                "🧹 Ménage retiré du planning — calendrier libéré")
                 meta["last_imported"] = link_imported
                 meta["last_updated"] = link_updated
                 meta["last_count"] = len(valid_events)
@@ -1087,6 +1103,9 @@ async def process_channex_bookings(uid: str) -> dict:
                     await tg_notify(uid, "booking",
                                     f"❌ <b>Réservation annulée</b>\n🏠 {tg_esc(prop.get('name', ''))}\n"
                                     f"👤 {tg_esc(gname)} · {tg_esc(ota)}\n📅 {ci} → {co}")
+                    await tg_notify(uid, "cancel_ops",
+                                    f"❌ <b>Réservation annulée</b>\n🏠 {tg_esc(prop.get('name', ''))}\n"
+                                    f"📅 {ci} → {co}\n🧹 Ménage retiré du planning — calendrier libéré")
             await _set_property_rooms_availability(uid, prop["id"], ci, co, status != "annulee")
             await ensure_cleaning(uid, prop["id"], co, status)
             # Journalise chaque révision reçue (via feed/webhook) pour audit & récupération d'IDs

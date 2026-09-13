@@ -28,6 +28,7 @@ export default function TelegramSettings() {
   const [notifReschedule, setNotifReschedule] = useState(true);
   const [notifDaily, setNotifDaily] = useState(true);
   const [notifSync, setNotifSync] = useState(true);
+  const [notifCancelOps, setNotifCancelOps] = useState(true);
   const [dailyHour, setDailyHour] = useState(7);
   const [detecting, setDetecting] = useState(false);
   const [detected, setDetected] = useState<any[] | null>(null);
@@ -49,6 +50,7 @@ export default function TelegramSettings() {
       setNotifReschedule(c.notify_reschedule ?? true);
       setNotifDaily(c.notify_daily ?? true);
       setNotifSync(c.notify_sync ?? true);
+      setNotifCancelOps(c.notify_cancel_ops ?? true);
       setDailyHour(c.daily_hour ?? 7);
     } catch {}
     setLoading(false);
@@ -63,6 +65,7 @@ export default function TelegramSettings() {
       notify_bookings: notifBookings, notify_payments: notifPayments,
       notify_reschedule: notifReschedule, notify_daily: notifDaily,
       notify_sync: notifSync,
+      notify_cancel_ops: notifCancelOps,
       daily_hour: dailyHour,
       ...overrides,
     };
@@ -240,6 +243,8 @@ export default function TelegramSettings() {
             value={notifPayments} onChange={(v: boolean) => { setNotifPayments(v); }} />
           <Row testID="tg-notif-reschedule" title="Tâches décalées" sub="Ménage ou intervention déplacé(e) → chat équipe"
             value={notifReschedule} onChange={(v: boolean) => { setNotifReschedule(v); }} />
+          <Row testID="tg-notif-cancel-ops" title="Annulations → équipe" sub="Réservation annulée : ménage retiré, calendrier libéré → chat équipe"
+            value={notifCancelOps} onChange={(v: boolean) => { setNotifCancelOps(v); }} />
           <Row testID="tg-notif-daily" title="Programme du jour" sub="Récap quotidien : départs, arrivées, ménages → chat équipe"
             value={notifDaily} onChange={(v: boolean) => { setNotifDaily(v); }} />
           <Row testID="tg-notif-sync" title="Alertes de synchronisation" sub="Échec de synchro Channex → chat gestion (1 alerte max / 6 h)"

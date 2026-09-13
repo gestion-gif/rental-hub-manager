@@ -195,6 +195,7 @@ async def update_preferences(payload: PreferencesIn, user=Depends(get_current_us
             "notify_reschedule": bool(c.get("notify_reschedule", True)),
             "notify_daily": bool(c.get("notify_daily", True)),
             "notify_sync": bool(c.get("notify_sync", True)),
+            "notify_cancel_ops": bool(c.get("notify_cancel_ops", True)),
             "daily_hour": max(0, min(23, hour)),
             "last_daily_sent": prev_tg.get("last_daily_sent") or "",
             "last_sync_alert": prev_tg.get("last_sync_alert") or "",

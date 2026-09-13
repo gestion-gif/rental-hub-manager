@@ -54,7 +54,7 @@ async def update_reservation(reservation_id: str, payload: ReservationIn, user=D
     uid = user["user_id"]
     old = await db.reservations.find_one(
         {"id": reservation_id, "user_id": uid},
-        {"_id": 0, "check_in": 1, "check_out": 1, "property_id": 1})
+        {"_id": 0, "check_in": 1, "check_out": 1, "property_id": 1, "status": 1, "guest_name": 1})
     data = payload.dict()
     name = f"{data.get('guest_first_name', '')} {data.get('guest_last_name', '')}".strip()
     if name:
@@ -86,6 +86,19 @@ async def update_reservation(reservation_id: str, payload: ReservationIn, user=D
             {"$set": {"finance": item["finance"]}})
         item = await db.reservations.find_one({"id": reservation_id}, {"_id": 0})
     await ensure_cleaning(user["user_id"], item["property_id"], item.get("check_out"), item.get("status"))
+    # Annulation manuelle : prévenir les chats Telegram (gestion + équipe terrain)
+    if (old and old.get("status") != "annulee" and item.get("status") == "annulee"
+            and (item.get("check_out") or "") >= date.today().isoformat()):
+        pdoc = await db.properties.find_one(
+            {"id": item["property_id"], "user_id": uid}, {"_id": 0, "name": 1}) or {}
+        await tg_notify(uid, "booking",
+                        f"❌ <b>Réservation annulée</b>\n🏠 {tg_esc(pdoc.get('name', ''))}\n"
+                        f"👤 {tg_esc(item.get('guest_name'))}\n"
+                        f"📅 {item.get('check_in')} → {item.get('check_out')}")
+        await tg_notify(uid, "cancel_ops",
+                        f"❌ <b>Réservation annulée</b>\n🏠 {tg_esc(pdoc.get('name', ''))}\n"
+                        f"📅 {item.get('check_in')} → {item.get('check_out')}\n"
+                        "🧹 Ménage retiré du planning — calendrier libéré")
     # Dates ou logement modifiés : libérer l'ancienne plage (localement + côté Channex)
     if old and (old.get("check_in") != item.get("check_in")
                 or old.get("check_out") != item.get("check_out")

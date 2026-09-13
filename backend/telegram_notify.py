@@ -14,9 +14,11 @@ from infra import db, logger
 TG_API = "https://api.telegram.org/bot{token}/{method}"
 
 # Événement → chat cible + interrupteur de réglage
-_EVENT_CHAT = {"booking": "chat_admin", "payment": "chat_admin", "task": "chat_ops", "daily": "chat_ops"}
+_EVENT_CHAT = {"booking": "chat_admin", "payment": "chat_admin", "task": "chat_ops",
+               "daily": "chat_ops", "cancel_ops": "chat_ops"}
 _EVENT_FLAG = {"booking": "notify_bookings", "payment": "notify_payments",
-               "task": "notify_reschedule", "daily": "notify_daily"}
+               "task": "notify_reschedule", "daily": "notify_daily",
+               "cancel_ops": "notify_cancel_ops"}
 
 
 def tg_esc(s) -> str:

@@ -1,8 +1,10 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, RefreshControl } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, RefreshControl, Platform, Alert } from "react-native";
 import Ionicons from "@react-native-vector-icons/ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import dayjs from "dayjs";
 import "dayjs/locale/fr";
 
@@ -18,6 +20,7 @@ export default function CleaningHistory() {
   const [filter, setFilter] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -52,6 +55,66 @@ export default function CleaningHistory() {
 
   const doneCount = filtered.filter((i) => i.done).length;
 
+  const exportPdf = async () => {
+    if (exporting || !filtered.length) return;
+    setExporting(true);
+    try {
+      const propName = filter ? props.find((p) => p.id === filter)?.name || "" : "Tous les logements";
+      const esc = (s: any) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const monthBlocks = groups
+        .map(
+          (g) => `
+      <h3>${esc(g.label)}</h3>
+      <table>
+        <tr><th>Date</th><th>Logement</th><th>Intervenant</th><th>Statut</th><th>Raison</th></tr>
+        ${g.rows
+          .map(
+            (c: any) => `<tr>
+          <td>${dayjs(c.date).format("DD/MM/YYYY")}</td>
+          <td>${esc(c.property_name)}</td>
+          <td>${esc(c.intervenant || "Non assigné")}</td>
+          <td style="color:${c.done ? "#2FB350" : "#FF9500"};font-weight:600">${c.done ? "Fait" : "Non fait"}</td>
+          <td>${esc(c.not_done_reason || "")}</td>
+        </tr>`
+          )
+          .join("")}
+      </table>`
+        )
+        .join("");
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      body{font-family:-apple-system,Helvetica,Arial,sans-serif;padding:24px;color:#1C1C1E}
+      h1{font-size:20px;margin:0 0 4px} .sub{color:#6E6E73;font-size:12px;margin-bottom:16px}
+      .stats{display:flex;gap:12px;margin-bottom:8px}
+      .stat{border:1px solid #E5E5EA;border-radius:8px;padding:8px 14px;font-size:12px;color:#6E6E73}
+      .stat b{display:block;font-size:18px;color:#1C1C1E}
+      h3{font-size:14px;margin:18px 0 6px;text-transform:capitalize}
+      table{width:100%;border-collapse:collapse;font-size:11px}
+      th{text-align:left;background:#F2F2F7;padding:6px 8px;border-bottom:1px solid #E5E5EA}
+      td{padding:6px 8px;border-bottom:1px solid #F2F2F7}
+    </style></head><body>
+      <h1>Historique des ménages</h1>
+      <div class="sub">${esc(propName)} — exporté le ${dayjs().format("DD/MM/YYYY")}</div>
+      <div class="stats">
+        <div class="stat"><b>${filtered.length}</b>Ménages</div>
+        <div class="stat"><b style="color:#2FB350">${doneCount}</b>Effectués</div>
+        <div class="stat"><b style="color:#FF9500">${filtered.length - doneCount}</b>Non faits</div>
+      </div>
+      ${monthBlocks}
+    </body></html>`;
+      if (Platform.OS === "web") {
+        await Print.printAsync({ html });
+      } else {
+        const { uri } = await Print.printToFileAsync({ html });
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: "Historique des ménages" });
+        }
+      }
+    } catch {
+      Alert.alert("Erreur", "Export PDF impossible.");
+    }
+    setExporting(false);
+  };
+
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
@@ -59,7 +122,18 @@ export default function CleaningHistory() {
           <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
         </Pressable>
         <Text style={styles.title}>Historique des ménages</Text>
-        <View style={{ width: 34 }} />
+        <Pressable
+          testID="history-export-pdf"
+          onPress={exportPdf}
+          disabled={exporting || !filtered.length}
+          style={[styles.backBtn, (exporting || !filtered.length) && { opacity: 0.4 }]}
+        >
+          {exporting ? (
+            <ActivityIndicator size="small" color={colors.brandPrimary} />
+          ) : (
+            <Ionicons name="share-outline" size={19} color={colors.brandPrimary} />
+          )}
+        </Pressable>
       </View>
 
       {/* Filtre par logement */}

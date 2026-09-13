@@ -947,3 +947,15 @@
 - Règle ajoutée dans routers/auth.py sur les 3 chemins (login email, /auth/session Google, /auth/apple) : si un membre ACTIF existe avec le même email normalisé ET que le tenant propriétaire correspondant est VIDE (0 logement, ou inexistant) → session MEMBRE. Un vrai propriétaire avec logements n'est jamais impacté.
 - Testé : compte double simulé → session membre sur le bon tenant ✓ ; non-régression démo ✓.
 - ⚠️ Nécessite un Publish pour être actif en production (Martine doit se reconnecter après).
+
+## Annulations → chat équipe Telegram (2026-06)
+- Nouvel événement "cancel_ops" (chat_ops, flag notify_cancel_ops défaut True, toggle "Annulations → équipe" testID tg-notif-cancel-ops dans settings/telegram.tsx).
+- Annulations notifiées sur les 3 chemins : Channex (core.py), iCal (évènements disparus du flux : docs collectés AVANT update_many, ensure_cleaning("annulee") appelé par doc + notifs si check_out >= aujourd'hui), annulation manuelle (PUT /reservations : transition status→annulee détectée via old.status).
+- Message équipe : "❌ Réservation annulée + 🧹 Ménage retiré du planning — calendrier libéré". Le retrait du ménage auto était déjà géré par ensure_cleaning (vérifié E2E : ménage créé → annulation → ménage retiré ✓, notifs booking + cancel_ops déclenchées ✓).
+
+## Export PDF historique ménages + Tableau d'occupation (2026-06)
+- cleaning-history.tsx : bouton export (testID history-export-pdf, icône share) dans le header. Génère un HTML (stats + tableaux par mois : Date/Logement/Intervenant/Statut/Raison), respecte le filtre logement actif. Web : Print.printAsync ; natif : printToFileAsync + Sharing (même pattern qu'accounting.tsx). Désactivé si historique vide.
+- Nouvel écran app/occupancy.tsx ("Taux d'occupation") : sélecteur d'année, carte globale (occupation moyenne + delta pts vs année précédente + 12 mini-barres mensuelles, mois courant surligné), cartes par logement triées par occupation décroissante (badge coloré ≥70% vert / ≥40% orange, barres mensuelles, total nuits). Utilise l'endpoint existant GET /analytics/revenue?year= (aucun changement backend).
+- Entrée drawer "Taux d'occupation" (icône pie-chart-outline, section Revenus, gate revenue) dans (tabs)/_layout.tsx.
+- i18n : clés ajoutées dans en.json (Occupation moyenne, Tous logements confondus, vs année préc., Mois en cours :, nuits réservées sur l'année…).
+- Vérifié par screenshots avec compte démo : écran occupation OK (données réelles, barres, badges), bouton export visible et actif sur l'historique.

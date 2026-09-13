@@ -29,6 +29,7 @@ const SECTIONS: { title: string | null; items: NavItem[] }[] = [
     { key: "accounting", label: "Comptabilité", icon: "calculator-outline", kind: "stack", path: "/accounting", gate: "revenue" },
     { key: "kpi", label: "Tableau de bord", icon: "speedometer-outline", kind: "stack", path: "/kpi", gate: "revenue" },
     { key: "analytics", label: "Statistiques", icon: "stats-chart-outline", kind: "stack", path: "/analytics", gate: "revenue" },
+    { key: "occupancy", label: "Taux d'occupation", icon: "pie-chart-outline", kind: "stack", path: "/occupancy", gate: "revenue" },
     { key: "reviews", label: "Avis voyageurs", icon: "star-outline", kind: "stack", path: "/reviews", gate: "revenue" },
   ] },
   { title: "Outils", items: [
